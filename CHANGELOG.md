@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The factory's pull request names the cell that licensed it**
+  ([PR search](https://github.com/Jita81/commit-replay-bench/pulls?q=head%3Afeat%2Ffactory-pr-evidence-block)).
+  The body of a pull request the factory opens on a customer's repository now carries a block
+  for the licensing cell: its route, the clean rate with its n and Wilson interval, the mode,
+  the builder and model the rate was measured on, the builder, model, provider and arm the
+  licence was read on, the apparatus, the ledger head and the task. A datum the delivery step
+  does not hold reads `unavailable` (the ledger head always does today). The block says that
+  `clean` and `deliver` are mechanical results under human review, in the MCP server's words.
+  PR text only: no routing, licensing or ledger change.
+
 - **The Wave 4 registration**
   ([#117](https://github.com/Jita81/commit-replay-bench/pull/117)). A new record,
   `docs/reviews/2026-11-10-wave-4-registration.md`, registers Wave 4 before any run: the blind
