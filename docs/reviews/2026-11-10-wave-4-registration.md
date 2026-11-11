@@ -778,9 +778,10 @@ patterns. Across the 27 settings
 - with 20 points added it rejected in 62% to 94% of waves, and with 25 points in 82% to 100%.
 
 The added chance is what `S1` adds to a commit's chance before the chance is clipped to
-[0, 1]; it labels the figures and is not the true effect. Where chances run near 1 (a high
-mean with a within-commit correlation above 0, or the larger shocks), clipping makes the
-realised mean difference between the arms smaller than its label: 9.4 to 15.0 points for 15
+[0, 1]; it labels the figures and is not the true effect. Wherever a chance plus its shock
+reaches 0 or 1 (at every mean when the within-commit correlation is above 0, and at mean 0.7
+with shocks), clipping makes the realised mean difference between the arms smaller than its
+label: 9.4 to 15.0 points for 15
 points added, 11.8 to 20.0 for 20 and 14.0 to 25.0 for 25, over the 27 settings
 **[hypothesis — `docs/reviews/2026-11-10-wave-4-registration/power_sim.py` and its output `power_sim.out.txt` beside it, seed 20261112, 2,000 waves a setting; a simulation, not a measurement of the product]**. Each share
 above therefore belongs to a realised effect at or below its label; the script prints the

@@ -20,8 +20,8 @@ from a beta distribution with mean ``mean`` and intra-class correlation ``rho`` 
 to ``mean`` when ``rho`` is 0). Each batch has four runs (two per arm); each run shifts
 every commit's chance by one normal draw with standard deviation ``sd``; ``S1`` adds
 ``eff`` (the added chance); chances are clipped to [0, 1]. A commit's difference is its S1
-rate minus its A0 rate over the two attempts per arm. The grid of means, correlations and shocks is the one
-decision R-1's revised simulation used.
+rate minus its A0 rate over the two attempts per arm. The grid of means, correlations and
+shocks is the one decision R-1's revised simulation used.
 
 Navigation
 ----------
