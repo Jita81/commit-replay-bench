@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **CI installs the browser without apt when it already starts**
+  ([#127](https://github.com/Jita81/commit-replay-bench/pull/127)).
+  The CI browser install downloads Chromium alone and starts it once. Only when that start
+  fails does it install system libraries with apt. On 2026-11-11 the runners could not resolve
+  the Ubuntu mirrors, and 12 browser jobs spent their whole install budget waiting on font
+  packages while every library Chromium needs was already on the image (P-816). CI only; no
+  product change.
+
 - **A Baseline summary line and a login notice in the run dialog**
   ([#121](https://github.com/Jita81/commit-replay-bench/pull/121)).
   The Baseline screen opens with one plain line per apparatus the map reads: how many measured
