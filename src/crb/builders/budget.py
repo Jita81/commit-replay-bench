@@ -5,7 +5,11 @@
   ``cost_known=False`` with a warning rather than inventing a number: a ledger
   row that says ``$0.00`` for an unpriced model is a lie, so it is flagged.
 * :class:`CostMeter` — accumulates tokens and cost; prefers a provider-reported
-  cost when one exists (Claude Code's ``total_cost_usd``).
+  cost when one exists.
+* :func:`table_cost` — the product's own price of a build's tokens, with the
+  provider's figure only as the fallback for an unpriced model, and which of the
+  two it used (``cost_source``). Claude Code prices from it: the CLI's
+  ``total_cost_usd`` uses the CLI's price list, not ours.
 * :class:`BudgetTracker` — the one place the loop asks "may I continue?". It
   returns the *reason* it may not (:data:`crb.builders.base.STOP_REASONS`) so
   the outcome records which cap fired.
@@ -30,7 +34,8 @@ Works with:   src/crb/builders/base.py (``Budget``, ``Rung``, the stop reasons),
               that ask the tracker), src/crb/builders/adapter.py (``budget_for_rung`` per
               attempt), src/crb/server/worker.py (object rungs with a ``budget`` override)
 Tested by:    tests/test_builders_base.py, tests/test_worker_budget_ladder.py
-Touch when:   a model is added or re-priced — prefer ``CRB_PRICING_JSON`` (docs/OPERATOR.md)
+Touch when:   never for a new repository (prices are per model, not per repository); a
+              model is added or re-priced — prefer ``CRB_PRICING_JSON`` (docs/OPERATOR.md)
               over editing ``DEFAULT_PRICING``; a new cap needs a stop reason in
               src/crb/builders/base.py and a place in ``exceeded``'s order.
 Claims:       ``cost_usd`` with ``cost_known=False`` is metered tokens at price zero — it
@@ -40,6 +45,7 @@ Claims:       ``cost_usd`` with ``cost_known=False`` is metered tokens at price 
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 import warnings
@@ -72,14 +78,38 @@ class Pricing:
     output_per_m: float
     known: bool = True
     cached_input_per_m: float | None = None
+    #: cache WRITES (Anthropic: 1.25x input at the default 5-minute TTL); ``None`` bills
+    #: them at the input rate
+    cache_write_per_m: float | None = None
 
-    def cost(self, tokens_in: int, tokens_out: int, *, cached_in: int = 0) -> float:
-        """USD for one call; cached input is billed at its own rate when the table has
-        one, else at the input rate; an unknown price is always ``0.0``."""
+    def cost(
+        self,
+        tokens_in: int,
+        tokens_out: int,
+        *,
+        cached_in: int = 0,
+        cache_write_in: int = 0,
+        cache_write_1h_in: int = 0,
+    ) -> float:
+        """USD for one call; cached input (cache reads, a subset of ``tokens_in``) is
+        billed at its own rate when the table has one, else at the input rate; cache writes
+        (a subset of the uncached input) are billed only when the table has a
+        ``cache_write_per_m``, else at the input rate: ``cache_write_in`` (5-minute, or a
+        TTL not reported) at that rate, ``cache_write_1h_in`` at
+        :data:`CACHE_WRITE_1H_INPUT_MULTIPLE` x input; an unknown price is always ``0.0``."""
         if not self.known:
             return 0.0
         uncached = max(0, tokens_in - cached_in)
-        c = uncached * self.input_per_m / 1e6 + tokens_out * self.output_per_m / 1e6
+        hour = five = 0
+        if self.cache_write_per_m is not None:
+            hour = min(max(0, cache_write_1h_in), uncached)
+            five = min(max(0, cache_write_in), uncached - hour)
+        c = (uncached - hour - five) * self.input_per_m / 1e6
+        c += tokens_out * self.output_per_m / 1e6
+        if five and self.cache_write_per_m is not None:
+            c += five * self.cache_write_per_m / 1e6
+        if hour:
+            c += hour * self.input_per_m * CACHE_WRITE_1H_INPUT_MULTIPLE / 1e6
         if cached_in and self.cached_input_per_m is not None:
             c += cached_in * self.cached_input_per_m / 1e6
         elif cached_in:
@@ -87,13 +117,17 @@ class Pricing:
         return c
 
     def to_dict(self) -> dict[str, Any]:
-        """The shape ``CRB_PRICING_JSON`` uses per model."""
-        return {
+        """The shape ``CRB_PRICING_JSON`` uses per model (``cache_write_per_m`` only when
+        set, so an entry without one keeps the shape it always had)."""
+        d: dict[str, Any] = {
             "input_per_m": self.input_per_m,
             "output_per_m": self.output_per_m,
             "known": self.known,
             "cached_input_per_m": self.cached_input_per_m,
         }
+        if self.cache_write_per_m is not None:
+            d["cache_write_per_m"] = self.cache_write_per_m
+        return d
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> Pricing:
@@ -105,30 +139,65 @@ class Pricing:
             cached_input_per_m=(
                 None if d.get("cached_input_per_m") is None else float(d["cached_input_per_m"])
             ),
+            cache_write_per_m=(
+                None if d.get("cache_write_per_m") is None else float(d["cache_write_per_m"])
+            ),
         )
+
+
+#: A 1-hour cache write is billed at twice the input rate (Anthropic); a 5-minute one at
+#: the entry's ``cache_write_per_m`` (1.25x input for the Anthropic defaults).
+CACHE_WRITE_1H_INPUT_MULTIPLE = 2.0
+
+#: The rates :func:`load_pricing` checks are finite and non-negative.
+_REQUIRED_RATES = ("input_per_m", "output_per_m")
+_RATE_FIELDS = (*_REQUIRED_RATES, "cached_input_per_m", "cache_write_per_m")
 
 
 #: Default entries. Cerebras rates from the upstream ``model_pricing.py`` (verified
 #: 2026-06-05 against published per-token rates); Anthropic rates from the
-#: ``claude-api`` skill's model table (cached 2026-06-24). ``azure`` is a placeholder:
-#: Azure OpenAI pricing depends on the deployment — configure it, or cost is unknown.
+#: ``claude-api`` skill's model table (cached 2026-06-24); Anthropic cache writes at
+#: 1.25x input (the 5-minute TTL; a write the CLI reports as 1-hour is billed at
+#: :data:`CACHE_WRITE_1H_INPUT_MULTIPLE` x input, one with no TTL split as 5-minute).
+#: ``azure`` is a placeholder: Azure OpenAI pricing depends on the deployment — configure
+#: it, or cost is unknown.
 DEFAULT_PRICING: dict[str, Pricing] = {
     "gpt-oss-120b": Pricing(0.25, 0.69),
     "zai-glm-4.7": Pricing(2.25, 2.75),
-    "claude-opus-5": Pricing(5.0, 25.0, cached_input_per_m=0.5),
-    "claude-opus-4-8": Pricing(5.0, 25.0, cached_input_per_m=0.5),
-    "claude-sonnet-5": Pricing(2.0, 10.0, cached_input_per_m=0.2),
-    "claude-haiku-4-5": Pricing(1.0, 5.0, cached_input_per_m=0.1),
+    "claude-opus-5": Pricing(5.0, 25.0, cached_input_per_m=0.5, cache_write_per_m=6.25),
+    "claude-opus-4-8": Pricing(5.0, 25.0, cached_input_per_m=0.5, cache_write_per_m=6.25),
+    "claude-sonnet-5": Pricing(2.0, 10.0, cached_input_per_m=0.2, cache_write_per_m=2.5),
+    "claude-haiku-4-5": Pricing(1.0, 5.0, cached_input_per_m=0.1, cache_write_per_m=1.25),
     "azure": Pricing(0.0, 0.0, known=False),
 }
 
 PRICING_ENV = "CRB_PRICING_JSON"
 
 
+def _check_rate(model: str, field: str, entry: Mapping[str, Any]) -> None:
+    """Raise ``ValueError`` unless ``entry[field]`` is a finite, non-negative rate. An
+    absent rate passes (input/output read as 0.0, the optional rates as none); an explicit
+    ``null`` passes only for an optional rate."""
+    if field not in entry or (entry[field] is None and field not in _REQUIRED_RATES):
+        return
+    try:
+        rate = float(entry[field])
+    except (TypeError, ValueError, OverflowError):
+        rate = math.nan
+    if not math.isfinite(rate) or rate < 0:
+        raise ValueError(
+            f"pricing entry for {model!r}: {field} must be a finite, non-negative number, "
+            f"not {entry[field]!r}"
+        )
+
+
 def load_pricing(path: str | Path | None = None) -> dict[str, Pricing]:
     """Defaults, overlaid with a JSON file ``{model: {input_per_m, output_per_m, …}}``
-    from ``path`` or ``$CRB_PRICING_JSON``. A malformed file is an error, not a silent
-    fallback — mispriced evidence is worse than no evidence."""
+    from ``path`` or ``$CRB_PRICING_JSON``. An entry for a model the defaults price
+    inherits every field it omits from the default entry (an explicit ``null`` clears an
+    optional rate). A malformed file — or a rate that is not a finite, non-negative number:
+    a NaN cost never trips a spend cap — is an error, not a silent fallback; mispriced
+    evidence is worse than no evidence."""
     table = dict(DEFAULT_PRICING)
     src = path or os.environ.get(PRICING_ENV, "")
     if not src:
@@ -140,7 +209,14 @@ def load_pricing(path: str | Path | None = None) -> dict[str, Pricing]:
     for model, entry in data.items():
         if not isinstance(entry, Mapping):
             raise ValueError(f"pricing entry for {model!r} must be an object")
-        table[str(model)] = Pricing.from_dict(entry)
+        default = DEFAULT_PRICING.get(str(model))
+        # an omitted rate is inherited from a PRICED default only: an entry that configures
+        # an unpriced placeholder (``azure``) is the operator pricing it, so it is known
+        inherit = default is not None and default.known
+        merged = {**default.to_dict(), **entry} if inherit and default else dict(entry)
+        for field in _RATE_FIELDS:
+            _check_rate(str(model), field, merged)
+        table[str(model)] = Pricing.from_dict(merged)
     return table
 
 
@@ -168,6 +244,105 @@ def price_for(model: str, table: Mapping[str, Pricing] | None = None) -> Pricing
         stacklevel=2,
     )
     return Pricing(0.0, 0.0, known=False)
+
+
+#: ``cost_source`` values: which figure a build's ``cost_usd`` is.
+COST_SOURCE_TABLE = "price_table"  # the product's own table priced the tokens
+COST_SOURCE_CLI = "cli_reported"  # unpriced model: the CLI's own figure
+COST_SOURCE_UNKNOWN = "unknown"  # neither: ``cost_known=False``
+COST_SOURCE_MIXED = "mixed"  # a merged attempt whose calls were priced differently
+#: ``BuildOutcome.extra`` (and pack ``notes``) keys for a build's cost provenance.
+EXTRA_COST_SOURCE = "cost_source"
+EXTRA_CLI_COST = "cli_cost_usd"
+#: a merged attempt's CLI figure when only some of its calls reported one: the sum of
+#: those, never recorded as ``cli_cost_usd`` (it would pass for the whole attempt's)
+EXTRA_CLI_COST_PARTIAL = "cli_cost_usd_partial"
+#: why the deployment's price table could not be read (the cost is then unknown)
+EXTRA_PRICING_ERROR = "pricing_error"
+#: every key :func:`merge_cost_provenance` owns in a merged ``extra``
+COST_PROVENANCE_KEYS = (EXTRA_COST_SOURCE, EXTRA_CLI_COST, EXTRA_CLI_COST_PARTIAL)
+
+
+def _usable_cost(reported_cost: float | None) -> float | None:
+    """The CLI's figure when it is a finite, non-negative number, else ``None``: JSON
+    admits ``NaN``, ``Infinity`` and negatives, and none of them is a cost (a NaN never
+    trips a spend cap; a negative hands budget back)."""
+    if reported_cost is None:
+        return None
+    try:
+        cost = float(reported_cost)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return cost if math.isfinite(cost) and cost >= 0 else None
+
+
+def table_cost(
+    pricing: Pricing,
+    tokens_in: int,
+    tokens_out: int,
+    *,
+    cached_in: int = 0,
+    cache_write_in: int = 0,
+    cache_write_1h_in: int = 0,
+    reported_cost: float | None = None,
+) -> tuple[float, bool, str]:
+    """``(cost_usd, cost_known, cost_source)`` for one build: the table price of its tokens
+    when the model is priced (whatever the CLI reported — its figure is its own price
+    list, not ours), else the CLI's figure when it is a finite, non-negative number, else
+    ``0.0`` and unknown."""
+    if pricing.known:
+        cost = pricing.cost(
+            tokens_in,
+            tokens_out,
+            cached_in=cached_in,
+            cache_write_in=cache_write_in,
+            cache_write_1h_in=cache_write_1h_in,
+        )
+        return cost, True, COST_SOURCE_TABLE
+    usable = _usable_cost(reported_cost)
+    if usable is not None:
+        return usable, True, COST_SOURCE_CLI
+    return 0.0, False, COST_SOURCE_UNKNOWN
+
+
+def cost_provenance(source: str, reported_cost: float | None) -> dict[str, Any]:
+    """The ``extra`` / pack-notes entry recording where ``cost_usd`` came from, with the
+    CLI's own figure beside it (``cli_cost_usd``) when it gave one."""
+    out: dict[str, Any] = {EXTRA_COST_SOURCE: source}
+    usable = _usable_cost(reported_cost)
+    if usable is not None:
+        out[EXTRA_CLI_COST] = round(usable, 6)
+    return out
+
+
+def _cli_figure(x: Mapping[str, Any]) -> tuple[float | None, bool]:
+    """One call's (or merged attempt's) CLI figure and whether it is whole."""
+    if x.get(EXTRA_CLI_COST) is not None:
+        return float(x[EXTRA_CLI_COST]), True
+    if x.get(EXTRA_CLI_COST_PARTIAL) is not None:
+        return float(x[EXTRA_CLI_COST_PARTIAL]), False
+    return None, False
+
+
+def merge_cost_provenance(a: Mapping[str, Any], b: Mapping[str, Any]) -> dict[str, Any]:
+    """Two calls' provenance as one attempt's: the source kept when the calls agree, else
+    ``mixed``; the CLI figures summed as ``cli_cost_usd`` only when both are whole, else the
+    sum of those given as ``cli_cost_usd_partial`` (a partial sum never passes for the
+    whole). A side with no provenance at all is not a call to merge: the other side's is
+    returned as it is. Empty when neither recorded any."""
+    sa, sb = a.get(EXTRA_COST_SOURCE), b.get(EXTRA_COST_SOURCE)
+    if sa is None and sb is None:
+        return {}
+    if sa is None or sb is None:
+        one = a if sa is not None else b
+        return {k: one[k] for k in COST_PROVENANCE_KEYS if one.get(k) is not None}
+    (pa, wa), (pb, wb) = _cli_figure(a), _cli_figure(b)
+    out = cost_provenance(str(sa) if sa == sb else COST_SOURCE_MIXED, None)
+    if pa is None and pb is None:
+        return out
+    total = round((pa or 0.0) + (pb or 0.0), 6)
+    out[EXTRA_CLI_COST if wa and wb else EXTRA_CLI_COST_PARTIAL] = total
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -352,15 +527,28 @@ def budget_for_rung(rung: Rung, base: Budget) -> Budget:
 
 
 __all__ = [
+    "CACHE_WRITE_1H_INPUT_MULTIPLE",
+    "COST_PROVENANCE_KEYS",
+    "COST_SOURCE_CLI",
+    "COST_SOURCE_MIXED",
+    "COST_SOURCE_TABLE",
+    "COST_SOURCE_UNKNOWN",
     "DEFAULT_PRICING",
+    "EXTRA_CLI_COST",
+    "EXTRA_CLI_COST_PARTIAL",
+    "EXTRA_COST_SOURCE",
+    "EXTRA_PRICING_ERROR",
     "PRICING_ENV",
     "BudgetTracker",
     "CostMeter",
     "Pricing",
     "budget_for_rung",
+    "cost_provenance",
     "default_ladder",
     "load_pricing",
+    "merge_cost_provenance",
     "parse_ladder",
     "parse_rung",
     "price_for",
+    "table_cost",
 ]

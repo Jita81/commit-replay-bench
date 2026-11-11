@@ -41,6 +41,7 @@ import json
 import os
 import shutil
 import sys
+import warnings
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,7 @@ from typing import Any
 import pytest
 
 from crb.builders import base
+from crb.builders import budget as bud
 from crb.builders import claude_code as cc
 from crb.core.execution import LocalExecutor
 from crb.core.runners import get_runner
@@ -83,7 +85,12 @@ def ev_init(model: str = "claude-opus-5") -> str:
 
 
 def ev_assistant(
-    *blocks: dict[str, Any], tin: int = 100, tout: int = 30, cached: int = 0, msg_id: str = ""
+    *blocks: dict[str, Any],
+    tin: int = 100,
+    tout: int = 30,
+    cached: int = 0,
+    msg_id: str = "",
+    model: str = "",
 ) -> str:
     """One ``assistant`` line carrying ``blocks`` and a usage record (input / output / cached
     tokens); ``msg_id`` sets ``message.id``, which the real CLI repeats on each content-block
@@ -100,6 +107,8 @@ def ev_assistant(
     }
     if msg_id:
         message["id"] = msg_id
+    if model:
+        message["model"] = model
     return json.dumps({"type": "assistant", "message": message, "session_id": "s1"})
 
 
@@ -764,7 +773,9 @@ def test_good_run_parses_stream_and_grades_clean(tmp_path: Path) -> None:
     assert out.done and out.stop_reason == base.STOP_DONE and out.errors == ()
     assert out.summary == "Fixed add()." and out.turns == 4 and out.tool_calls == 4
     assert out.tokens_in == 500 and out.tokens_out == 120  # result totals win over per-message sums
-    assert out.cost_usd == pytest.approx(0.0123) and out.cost_known  # provider-reported cost
+    # priced from the product's table (opus 5: $5/$25), not the CLI's own 0.0123
+    assert out.cost_usd == pytest.approx(500 * 5e-6 + 120 * 25e-6) and out.cost_known
+    assert out.extra["cost_source"] == "price_table" and out.extra["cli_cost_usd"] == 0.0123
     assert out.extra["tool_names"] == ["Bash", "Read", "Edit", "Bash"]
     assert out.extra["session"]["model"] == "claude-opus-5"
     assert out.transcript and out.transcript[0]["kind"] == "system"
@@ -773,7 +784,7 @@ def test_good_run_parses_stream_and_grades_clean(tmp_path: Path) -> None:
     assert (
         ref.provider == "anthropic"
         and ref.model == "claude-opus-5"
-        and ref.cost_usd == pytest.approx(0.0123)
+        and ref.cost_usd == pytest.approx(0.0055)
     )
     res = grade(
         ws, fx.task, config=fx.config, runner=get_runner(fx.config), executor=LocalExecutor()
@@ -878,9 +889,257 @@ def test_a_run_with_a_result_still_reports_the_clis_cost_and_totals(tmp_path: Pa
         ev_result(num_turns=1, cost=0.0456, tin=700, tout=90, structured={"done": False}),
     ]
     _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-opus-5")
-    assert out.cost_usd == pytest.approx(0.0456) and out.cost_known
+    assert out.cost_usd == pytest.approx(700 * 5e-6 + 90 * 25e-6) and out.cost_known
+    assert out.extra["cli_cost_usd"] == pytest.approx(0.0456)
     assert out.tokens_in == 700 and out.tokens_out == 90 and out.turns == 1
     ws.remove()
+
+
+def _priced_result(
+    *, cost: float | None, tin: int, tout: int, read: int = 0, write: int = 0
+) -> str:
+    """A ``result`` line with cache reads and cache writes in its usage, as the CLI reports a
+    real session (``input_tokens`` excludes both)."""
+    ev: dict[str, Any] = {
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "num_turns": 1,
+        "result": "",
+        "session_id": "s1",
+        "structured_output": {"done": True, "summary": "ok"},
+        "usage": {
+            "input_tokens": tin,
+            "output_tokens": tout,
+            "cache_read_input_tokens": read,
+            "cache_creation_input_tokens": write,
+        },
+        "permission_denials": [],
+    }
+    if cost is not None:
+        ev["total_cost_usd"] = cost
+    return json.dumps(ev)
+
+
+def test_cost_is_the_tables_price_of_the_tokens_not_the_clis_figure(tmp_path: Path) -> None:
+    """The Wave 3 overcount: CLI 2.1.132 priced claude-sonnet-5 at $5/$25 while the table
+    (and the bill) says $2/$10, and its ``total_cost_usd`` was taken verbatim."""
+    tin, tout, read, write = 2_000, 3_000, 400_000, 60_000
+    cli = tin * 5e-6 + tout * 25e-6 + read * 0.5e-6 + write * 6.25e-6  # the CLI's price list
+    lines = [ev_init(), _priced_result(cost=cli, tin=tin, tout=tout, read=read, write=write)]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    # sonnet 5: $2 in, $10 out, $0.20 cache read, $2.50 cache write (1.25x input)
+    expected = tin * 2e-6 + tout * 10e-6 + read * 0.2e-6 + write * 2.5e-6
+    assert out.tokens_in == tin + write + read and out.tokens_cached == read
+    assert out.cost_usd == pytest.approx(expected) and out.cost_known
+    assert out.cost_usd == pytest.approx(cli * 0.4)  # 2.5x less than the CLI said
+    assert out.extra["cost_source"] == "price_table"
+    assert out.extra["cli_cost_usd"] == pytest.approx(cli)
+    assert out.builder_ref().cost_usd == pytest.approx(expected)  # what the ledger row keeps
+    ws.remove()
+
+
+def test_the_pricing_overlay_reprices_a_claude_code_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    table = tmp_path / "pricing.json"
+    table.write_text(json.dumps({"claude-sonnet-5": {"input_per_m": 1.0, "output_per_m": 4.0}}))
+    monkeypatch.setenv(bud.PRICING_ENV, str(table))
+    lines = [ev_init(), _priced_result(cost=9.99, tin=1_000, tout=500, read=2_000, write=300)]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    # the overlay omits the cached and cache-write rates: the default entry's stand
+    assert out.cost_usd == pytest.approx(1_000 * 1e-6 + 300 * 2.5e-6 + 2_000 * 0.2e-6 + 500 * 4e-6)
+    assert out.extra["cost_source"] == "price_table" and out.extra["cli_cost_usd"] == 9.99
+    ws.remove()
+
+
+def test_an_unpriced_model_falls_back_to_the_clis_figure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    table = tmp_path / "pricing.json"
+    table.write_text(json.dumps({"claude-sonnet-5": {"known": False}}))
+    monkeypatch.setenv(bud.PRICING_ENV, str(table))
+    lines = [ev_init(), _priced_result(cost=0.0456, tin=700, tout=90)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == pytest.approx(0.0456) and out.cost_known
+    assert out.extra["cost_source"] == "cli_reported" and out.extra["cli_cost_usd"] == 0.0456
+    ws.remove()
+
+
+def test_an_unpriced_model_without_a_cli_figure_is_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    table = tmp_path / "pricing.json"
+    table.write_text(json.dumps({"claude-sonnet-5": {"known": False}}))
+    monkeypatch.setenv(bud.PRICING_ENV, str(table))
+    lines = [ev_init(), _priced_result(cost=None, tin=700, tout=90)]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == 0.0 and not out.cost_known
+    assert out.extra["cost_source"] == "unknown" and "cli_cost_usd" not in out.extra
+    ws.remove()
+
+
+def test_a_message_another_model_answered_is_priced_at_that_models_rate(tmp_path: Path) -> None:
+    """A sub-agent or a fallback: the session's totals do not say which model spent what,
+    so pricing all of them at the builder's rate would under-count an opus message in a
+    sonnet build. Each message is priced at the rate of the model that answered it."""
+    lines = [
+        ev_init("claude-sonnet-5"),
+        ev_assistant(text("a"), tin=1_000, tout=100, msg_id="m1", model="claude-sonnet-5"),
+        ev_assistant(text("b"), tin=2_000, tout=200, msg_id="m2", model="claude-opus-5"),
+        _priced_result(cost=9.99, tin=3_000, tout=300),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    expected = 1_000 * 2e-6 + 100 * 10e-6 + 2_000 * 5e-6 + 200 * 25e-6
+    assert out.cost_usd == pytest.approx(expected) and out.cost_known
+    assert out.cost_usd > 3_000 * 2e-6 + 300 * 10e-6  # more than the builder's rate gives
+    assert out.extra["cost_source"] == "price_table"
+    assert out.extra["other_models"] == ["claude-opus-5"]
+    ws.remove()
+
+
+def test_a_message_from_a_model_the_table_lacks_makes_the_cost_unknown(tmp_path: Path) -> None:
+    lines = [
+        ev_init("claude-sonnet-5"),
+        ev_assistant(text("a"), tin=1_000, tout=100, msg_id="m1", model="claude-sonnet-5"),
+        ev_assistant(text("b"), tin=2_000, tout=200, msg_id="m2", model="mystery-model-9"),
+        _priced_result(cost=9.99, tin=3_000, tout=300),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == 0.0 and not out.cost_known  # a capped run stops
+    assert out.extra["cost_source"] == "unknown"
+    assert out.extra["other_models"] == ["mystery-model-9"]
+    assert out.tokens_in == 3_000 and out.tokens_out == 300  # the tokens are still metered
+    ws.remove()
+
+
+def test_result_tokens_no_message_accounts_for_make_a_mixed_cost_unknown(tmp_path: Path) -> None:
+    """The result reports more than the messages add up to (a call whose message never
+    reached the stream): in a session with a second model those tokens have no rate, so
+    the cost is unknown instead of a lower figure recorded as measured."""
+    lines = [
+        ev_init("claude-sonnet-5"),
+        ev_assistant(text("a"), tin=1_000, tout=100, msg_id="m1", model="claude-sonnet-5"),
+        ev_assistant(text("b"), tin=2_000, tout=200, msg_id="m2", model="claude-opus-5"),
+        _priced_result(cost=9.99, tin=3_000, tout=900),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == 0.0 and not out.cost_known  # a capped run stops
+    assert out.extra["cost_source"] == "unknown"
+    assert out.tokens_in == 3_000 and out.tokens_out == 900  # the tokens are still metered
+    ws.remove()
+
+
+def test_cache_writes_no_message_accounts_for_make_a_mixed_cost_unknown(tmp_path: Path) -> None:
+    """The token totals agree but the result reports cache writes no message carried:
+    their premium has no model to be priced at, so the cost is unknown."""
+    lines = [
+        ev_init("claude-sonnet-5"),
+        ev_assistant(text("a"), tin=1_000, tout=100, msg_id="m1", model="claude-sonnet-5"),
+        ev_assistant(text("b"), tin=2_000, tout=200, msg_id="m2", model="claude-opus-5"),
+        _priced_result(cost=9.99, tin=2_500, tout=300, write=500),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == 0.0 and not out.cost_known
+    assert out.extra["cost_source"] == "unknown"
+    ws.remove()
+
+
+def test_the_builders_own_model_under_another_spelling_is_not_another_model(
+    tmp_path: Path,
+) -> None:
+    """A dated id of the builder's model, the id the init event resolved it to, the CLI's
+    own ``<synthetic>`` error message and a message with nothing spent are not a second
+    model: the session's totals are priced at the builder's rate as before."""
+    lines = [
+        ev_init("claude-sonnet-5-20261001"),
+        ev_assistant(text("a"), tin=1_000, tout=100, msg_id="m1", model="claude-sonnet-5"),
+        ev_assistant(text("b"), tin=500, tout=50, msg_id="m2", model="claude-sonnet-5-20261001"),
+        ev_assistant(text("c"), tin=0, tout=0, msg_id="m3", model="<synthetic>"),
+        ev_assistant(text("d"), tin=0, tout=0, msg_id="m4", model="claude-opus-5"),
+        _priced_result(cost=9.99, tin=1_500, tout=150),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == pytest.approx(1_500 * 2e-6 + 150 * 10e-6) and out.cost_known
+    assert out.extra["cost_source"] == "price_table" and "other_models" not in out.extra
+    ws.remove()
+
+
+@pytest.mark.parametrize(
+    "table_text",
+    ["{not json", "[1, 2]", '{"claude-sonnet-5": {"input_per_m": NaN, "output_per_m": 1}}', None],
+)
+def test_an_unreadable_price_table_makes_the_cost_unknown_not_the_clis(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, table_text: str | None
+) -> None:
+    """``load_pricing``: a malformed table is an error, not a silent fallback. Falling back
+    to the CLI's figure recorded the CLI's own price list as a known cost in a capped run;
+    falling back to the defaults would ignore the deployment's prices. The cost is unknown,
+    which stops a capped run at once, and the error is kept beside the CLI's figure."""
+    table = tmp_path / "pricing.json"
+    if table_text is not None:
+        table.write_text(table_text)
+    monkeypatch.setenv(bud.PRICING_ENV, str(table))  # None: a path that does not exist
+    lines = [ev_init(), _priced_result(cost=0.0456, tin=700, tout=90)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == 0.0 and not out.cost_known
+    assert out.extra["cost_source"] == "unknown" and out.extra["cli_cost_usd"] == 0.0456
+    assert out.extra["pricing_error"]
+    assert out.tokens_in == 700 and out.tokens_out == 90  # the tokens are still metered
+    ws.remove()
+
+
+def test_one_hour_cache_writes_in_the_result_are_priced_at_twice_input(tmp_path: Path) -> None:
+    """The CLI reports its cache writes' TTL split under ``usage.cache_creation`` (field
+    names as in real CLI session transcripts); 1-hour writes are 2x input, 5-minute 1.25x."""
+    ev = json.loads(_priced_result(cost=1.0, tin=1_000, tout=100, read=5_000, write=4_000))
+    ev["usage"]["cache_creation"] = {
+        "ephemeral_1h_input_tokens": 3_000,
+        "ephemeral_5m_input_tokens": 1_000,
+    }
+    _fx, ws, out = _setup(tmp_path, FakeSpawn([ev_init(), json.dumps(ev)]), model="claude-sonnet-5")
+    expected = 1_000 * 2e-6 + 100 * 10e-6 + 5_000 * 0.2e-6 + 1_000 * 2.5e-6 + 3_000 * 4e-6
+    assert out.cost_usd == pytest.approx(expected)
+    assert out.tokens_in == 1_000 + 4_000 + 5_000
+    ws.remove()
+
+
+def test_one_hour_cache_writes_are_counted_per_message_without_a_result() -> None:
+    st = cc.StreamStats(base.GitArchaeologyGuard())
+    for msg_id, write, hour in (("m1", 300, 300), ("m2", 200, 50), ("m3", 100, None)):
+        ev = json.loads(ev_assistant(text("x"), msg_id=msg_id, tin=10, tout=5))
+        ev["message"]["usage"]["cache_creation_input_tokens"] = write
+        if hour is not None:
+            ev["message"]["usage"]["cache_creation"] = {
+                "ephemeral_1h_input_tokens": hour,
+                "ephemeral_5m_input_tokens": write - hour,
+            }
+        st.feed(json.dumps(ev), keep=False)
+    assert st.cache_write_tokens() == 600 and st.cache_write_1h_tokens() == 350
+    # a malformed split never exceeds the message's writes
+    bad = json.loads(ev_assistant(text("x"), msg_id="m4", tin=10, tout=5))
+    bad["message"]["usage"]["cache_creation_input_tokens"] = 10
+    bad["message"]["usage"]["cache_creation"] = {"ephemeral_1h_input_tokens": 99}
+    st.feed(json.dumps(bad), keep=False)
+    assert st.cache_write_1h_tokens() == 360
+    # the result's usage is authoritative, and without a split every write is 5-minute
+    st.feed(_priced_result(cost=None, tin=50, tout=5, write=40), keep=False)
+    assert st.cache_write_tokens() == 40 and st.cache_write_1h_tokens() == 0
+
+
+def test_cache_writes_are_counted_per_message_without_a_result() -> None:
+    st = cc.StreamStats(base.GitArchaeologyGuard())
+    for msg_id, write in (("m1", 300), ("m2", 200)):
+        ev = json.loads(ev_assistant(text("x"), msg_id=msg_id, tin=10, tout=5))
+        ev["message"]["usage"]["cache_creation_input_tokens"] = write
+        st.feed(json.dumps(ev), keep=False)
+    assert st.totals() == (520, 10, 0) and st.cache_write_tokens() == 500
+    st.feed(_priced_result(cost=None, tin=50, tout=5, write=40), keep=False)
+    assert st.cache_write_tokens() == 40  # the result's usage is authoritative
 
 
 def test_tamper_is_detected_post_hoc_and_grader_disqualifies(tmp_path: Path) -> None:
