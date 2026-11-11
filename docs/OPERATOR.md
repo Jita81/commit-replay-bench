@@ -941,6 +941,13 @@ writes both heads to its log. A chain cannot show that rows were cut from its en
 the whole store was replaced; a head you recorded earlier can — it must still be in the
 chain ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)).
 
+`crb ledger anchor --out <dir>` (add `--store` for the database) writes those heads to an
+anchor file; `crb ledger verify --anchor <dir>` checks the ledger still extends every anchor
+there and names the first that no longer holds. The command refuses a directory inside the
+ledger's data directory. Keep the directory in a git repository hosted off the machine and
+held by someone who cannot write the database:
+[LEDGER-ANCHORS.md](LEDGER-ANCHORS.md#3-custody-where-anchors-live-and-who-holds-them).
+
 ### 6.1 What operating costs in time, money and storage
 
 **Time — the routine.** `crb doctor` ([§1.1](#11-check-the-installation-crb-doctor)) is the

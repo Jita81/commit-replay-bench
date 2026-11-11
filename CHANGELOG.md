@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The ledger's heads can be anchored to a file kept off the machine**
+  ([#129](https://github.com/Jita81/commit-replay-bench/pull/129)).
+  `crb ledger anchor --out <dir>` writes a deterministic, never-overwritten JSON file holding
+  each chain's row count and head, chained to the directory's previous anchor. It refuses a
+  directory inside the ledger's data directory and warns when the directory shares its
+  filesystem. `crb ledger verify --anchor <file-or-dir>` fails, naming the first anchor that no
+  longer holds, when the ledger was cut at its end or rebuilt. docs/LEDGER-ANCHORS.md says who
+  should hold anchors and what an unsigned anchor cannot prove.
+
 - **A Baseline summary line and a login notice in the run dialog**
   ([#121](https://github.com/Jita81/commit-replay-bench/pull/121)).
   The Baseline screen opens with one plain line per apparatus the map reads: how many measured

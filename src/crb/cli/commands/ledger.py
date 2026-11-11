@@ -7,15 +7,16 @@ are listed so a reader can see when a cell mixes instruments.
 
 Navigation
 ----------
-What it is:   ``crb ledger import-census | import-aggregates | verify | stats | export`` —
-              the JSONL ledger's import, integrity and roll-up verbs.
+What it is:   ``crb ledger import-census | import-aggregates | verify | anchor | stats |
+              export`` — the JSONL ledger's import, integrity and roll-up verbs.
 What it does: Imports the June-2026 census with honest classification (needs the task
               files and repo configs; packs are stored and rows re-chained); imports
               aggregate rows for reference only; walks the chain and re-derives false-Q1 =
               0 (exit 1 on any break or violation) — with ``--store``, the database's
               grade ledger and its audit trail (``events``), printing both heads; prints
               per-cell n / point / Wilson interval / false-Q1 with the apparatus versions
-              present; exports rows.
+              present; exports rows; ``anchor`` writes the chain heads to a file meant to
+              leave the machine, and ``verify --anchor`` checks the ledger still extends it.
 How:          ``JsonlLedger`` reads; ``crb.core.legacy`` importers; ``group_by_cell`` +
               ``cell_stats`` for ``stats``; every command prints JSON or a plain table.
 Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
@@ -23,11 +24,12 @@ ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0007-abstract-cell-export-only.md,
               docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/core/ledger.py (``JsonlLedger``, ``cell_stats``, ``false_q1_total``),
+              src/crb/core/anchor.py (the anchor file, its checks and its no-overwrite write),
               src/crb/core/legacy.py (the census importers and their provenance stamp),
               src/crb/server/routes/ledger.py (the HTTP twin over the database),
               docs/REPRODUCING-THE-CENSUS.md (the procedure these verbs implement),
               docs/EVIDENCE-AND-CLAIMS.md#5-the-legacy-belt-caveat-on-the-census-ledger
-Tested by:    tests/test_cli.py, tests/test_cli_ledger_store.py
+Tested by:    tests/test_cli.py, tests/test_cli_ledger_store.py, tests/test_cli_ledger_anchor.py
 Touch when:   never for a new repository; when a ``stats`` grouping field is added
               (``GROUP_ALIASES`` here and ``BY_ALIASES`` in
               src/crb/server/routes/capability.py); ``export --abstract`` is the same export the API serves —
@@ -41,9 +43,14 @@ Claims:       ``verify`` exit 0 = chain intact and false-Q1 = 0 over the rows on
 from __future__ import annotations
 
 import argparse
+import contextlib
+import datetime as _dt
 import json
+import os
 import sys
 from collections import Counter
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +64,19 @@ from crb.cli.commands import (
     print_lines,
     table,
     workdir_of,
+)
+from crb.core.anchor import (
+    AnchorError,
+    ChainHead,
+    HashAt,
+    LoadedAnchor,
+    build_anchor,
+    check_anchor,
+    check_anchor_links,
+    is_inside,
+    load_anchor,
+    load_anchor_dir,
+    write_anchor,
 )
 from crb.core.checks import ARMS
 from crb.core.federated import export_abstract
@@ -79,6 +99,7 @@ from crb.core.legacy import (
     import_repo_configs,
 )
 from crb.core.spec import TaskSpec
+from crb.core.version import APPARATUS_VERSION, __version__
 
 _CENSUS_HOME = Path("~/.expansion-bench").expanduser()
 
@@ -104,7 +125,7 @@ GROUP_ALIASES: dict[str, str] = {
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    """Add ``crb ledger import-census | import-aggregates | verify | stats | export``."""
+    """Add ``crb ledger import-census | import-aggregates | verify | anchor | stats | export``."""
     p = sub.add_parser("ledger", help="import, verify, summarise and export the grade ledger")
     ls = p.add_subparsers(dest="ledger_cmd", metavar="<subcommand>")
 
@@ -137,8 +158,39 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         "and print both heads to record outside the store",
     )
     v.add_argument("--database-url", default=None, help="with --store: overrides CRB_DATABASE_URL")
+    v.add_argument(
+        "--anchor",
+        default="",
+        help="also check an anchor file, or every anchor in a directory, written by "
+        "`crb ledger anchor`: the ledger must still extend each one (exit 1 if not)",
+    )
     add_common(v)
     v.set_defaults(func=cmd_verify)
+
+    an = ls.add_parser(
+        "anchor",
+        help="write the chain heads to an anchor file, to be kept off this machine",
+    )
+    an.add_argument(
+        "--out",
+        required=True,
+        help="anchor directory: not inside the ledger's data directory; copy it off the "
+        "machine (docs/LEDGER-ANCHORS.md)",
+    )
+    an.add_argument("--path", default="", help="ledger path (default <workdir>/ledger.jsonl)")
+    an.add_argument(
+        "--store",
+        action="store_true",
+        help="anchor the database instead: the grade ledger and the audit trail (events)",
+    )
+    an.add_argument("--database-url", default=None, help="with --store: overrides CRB_DATABASE_URL")
+    an.add_argument(
+        "--created-at",
+        default="",
+        help="the time to record, ISO 8601 with a zone (default: now, UTC)",
+    )
+    add_common(an)
+    an.set_defaults(func=cmd_anchor)
 
     st = ls.add_parser("stats", help="cell statistics (n, point, Wilson CI, false-Q1)")
     st.add_argument("--path", default="", help="ledger path (default <workdir>/ledger.jsonl)")
@@ -344,18 +396,23 @@ def cmd_verify(args: argparse.Namespace) -> int:
         )
     except LedgerIntegrityError as e:
         out.update({"chain_ok": False, "ok": False, "error": str(e)})
+    if getattr(args, "anchor", ""):
+        out["anchors"] = _anchor_report(args.anchor, "jsonl", _jsonl_hash_at(ledger.path))
+        out["ok"] = bool(out.get("ok")) and out["anchors"]["ok"]
     if args.json:
         print_json(out)
-    elif out.get("chain_ok"):
-        print_lines(
-            [
-                f"{ledger.path}: {out['rows']} rows, chain OK, false-Q1 {out['false_q1']}, "
-                f"clean-without-pack {out['clean_without_pack']}, "
-                f"apparatus {out['apparatus_versions']}"
-            ]
-        )
+        return EXIT_OK if out.get("ok") else EXIT_NEGATIVE
+    if out.get("chain_ok"):
+        lines = [
+            f"{ledger.path}: {out['rows']} rows, chain OK, false-Q1 {out['false_q1']}, "
+            f"clean-without-pack {out['clean_without_pack']}, "
+            f"apparatus {out['apparatus_versions']}"
+        ]
     else:
-        print_lines([f"{ledger.path}: CHAIN BROKEN — {out['error']}"])
+        lines = [f"{ledger.path}: CHAIN BROKEN — {out['error']}"]
+    if "anchors" in out:
+        lines.extend(_anchor_lines(out["anchors"]))
+    print_lines(lines)
     return EXIT_OK if out.get("ok") else EXIT_NEGATIVE
 
 
@@ -408,6 +465,11 @@ def _verify_store(args: argparse.Namespace) -> int:
             and out.get("clean_without_pack") == 0
             and events.ok
         )
+        if getattr(args, "anchor", ""):
+            out["anchors"] = _anchor_report(
+                args.anchor, engine.dialect.name, _store_hash_at(factory)
+            )
+            out["ok"] = out["ok"] and out["anchors"]["ok"]
     finally:
         engine.dispose()
     if args.json:
@@ -425,15 +487,317 @@ def _verify_store(args: argparse.Namespace) -> int:
             if ev["chain_ok"]
             else f"events chain BROKEN — {ev['detail']}"
         )
-        print_lines(
-            [
-                f"{out['store']} store: {grades}",
-                f"audit trail: {trail}",
-                f"heads to record outside the store: grades {out['head_row_hash'] or '-'} · "
-                f"events {ev['head_row_hash'] or '-'}",
-            ]
-        )
+        lines = [
+            f"{out['store']} store: {grades}",
+            f"audit trail: {trail}",
+            f"heads to record outside the store: grades {out['head_row_hash'] or '-'} · "
+            f"events {ev['head_row_hash'] or '-'}",
+        ]
+        if "anchors" in out:
+            lines.extend(_anchor_lines(out["anchors"]))
+        print_lines(lines)
     return EXIT_OK if out["ok"] else EXIT_NEGATIVE
+
+
+# ---------------------------------------------------------------------------
+# Anchors (docs/LEDGER-ANCHORS.md): read the ledger, never write it
+# ---------------------------------------------------------------------------
+
+
+def _jsonl_hash_at(path: Path) -> HashAt:
+    """``hash_at`` over a JSONL ledger: the ``row_hash`` of its n-th non-blank line, the file
+    read once on first use."""
+    hashes: list[str] | None = None
+
+    def at(chain: str, n: int) -> str | None:
+        nonlocal hashes
+        if chain != "grades":
+            return None
+        if hashes is None:
+            hashes = []
+            if path.exists():
+                with path.open("r", encoding="utf-8") as f:
+                    hashes = [str(json.loads(ln).get("row_hash", "")) for ln in f if ln.strip()]
+        return hashes[n - 1] if 0 < n <= len(hashes) else None
+
+    return at
+
+
+def _store_hash_at(factory: Any) -> HashAt:
+    """``hash_at`` over the database: the n-th row of ``grades`` by ``seq`` or of ``events``
+    by ``id`` — one indexed read each, no write."""
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from crb.store.models import Event, Grade  # noqa: PLC0415
+
+    def at(chain: str, n: int) -> str | None:
+        if n <= 0:
+            return None
+        if chain == "grades":
+            q = select(Grade.row_hash).order_by(Grade.seq)
+        elif chain == "events":
+            q = select(Event.row_hash).order_by(Event.id)
+        else:
+            return None
+        with factory() as s:
+            found = s.execute(q.offset(n - 1).limit(1)).scalar_one_or_none()
+        return None if found is None else str(found)
+
+    return at
+
+
+def _anchor_report(target_arg: str, source: str, hash_at: HashAt) -> dict[str, Any]:
+    """Check one anchor file, or every anchor in a directory (and that directory's anchor
+    chain), against today's ledger. ``first_broken`` names the oldest anchor that no longer
+    holds."""
+    target = Path(target_arg).expanduser()
+    try:
+        if target.is_dir():
+            anchors: list[LoadedAnchor] = load_anchor_dir(target)
+            links = check_anchor_links(anchors)
+        elif target.is_file():
+            anchors, links = [load_anchor(target)], []
+        else:
+            raise CliError(f"--anchor {target} is neither an anchor file nor a directory")
+    except AnchorError as e:
+        raise CliError(str(e)) from e
+    results = []
+    for la in anchors:
+        faults = check_anchor(la.anchor, source=source, hash_at=hash_at)
+        results.append(
+            {
+                "file": la.path.name,
+                "created_at": la.anchor.get("created_at", ""),
+                "chains": la.anchor["chains"],
+                "holds": not faults,
+                "faults": faults,
+            }
+        )
+    first = next((r["file"] for r in results if not r["holds"]), None)
+    empty = ["no anchor files (anchor-*.json) in the directory"] if not anchors else []
+    return {
+        "target": str(target),
+        "checked": len(results),
+        "ok": first is None and not links and not empty,
+        "first_broken": first,
+        "anchor_chain_faults": links + empty,
+        "results": results,
+    }
+
+
+def _anchor_lines(rep: dict[str, Any]) -> list[str]:
+    """The text form of :func:`_anchor_report`: one line when every anchor holds, a loud
+    line per fault otherwise."""
+    if rep["ok"]:
+        return [f"anchors: {rep['checked']} checked in {rep['target']}, every one still holds"]
+    lines: list[str] = []
+    for r in rep["results"]:
+        lines.extend(f"ANCHOR BROKEN — {r['file']}: {f}" for f in r["faults"])
+    lines.extend(f"ANCHOR CHAIN BROKEN — {f}" for f in rep["anchor_chain_faults"])
+    if rep["first_broken"]:
+        lines.append(f"the first anchor that no longer holds: {rep['first_broken']}")
+    return lines
+
+
+@dataclass
+class _Anchored:
+    """A ledger opened for anchoring: its kind, where its data lives (``None`` when it is not
+    a local file), each chain's head, the faults of its own verification and its reader."""
+
+    source: str
+    data_dir: Path | None
+    heads: dict[str, ChainHead]
+    hash_at: HashAt
+    faults: list[str] = field(default_factory=list)
+
+
+@contextlib.contextmanager
+def _open_for_anchor(args: argparse.Namespace) -> Iterator[_Anchored]:
+    """Verify the ledger (the JSONL file, or with ``--store`` the database's two chains) and
+    read its heads. Nothing is written; a missing SQLite file is refused rather than
+    created."""
+    if not args.store:
+        ledger = _ledger(args)
+        hash_at = _jsonl_hash_at(ledger.path)
+        faults: list[str] = []
+        try:
+            n = ledger.verify()
+        except LedgerIntegrityError as e:
+            n, faults = 0, [f"grades: CHAIN BROKEN — {e}"]
+        head = (hash_at("grades", n) or "") if n else ""
+        yield _Anchored(
+            "jsonl", ledger.path.resolve().parent, {"grades": ChainHead(n, head)}, hash_at, faults
+        )
+        return
+    from sqlalchemy.engine import make_url  # noqa: PLC0415
+
+    from crb.store.db import database_url, make_engine, make_session_factory  # noqa: PLC0415
+    from crb.store.events import verify_events  # noqa: PLC0415
+    from crb.store.ledger import DbLedger  # noqa: PLC0415
+
+    url = database_url(getattr(args, "database_url", None))
+    parsed = make_url(url)
+    data_dir: Path | None = None
+    if parsed.get_backend_name() == "sqlite":
+        db = parsed.database or ""
+        if not db or db == ":memory:" or not Path(db).is_file():
+            raise CliError(f"no SQLite database at {db or '(memory)'}; nothing to anchor")
+        data_dir = Path(db).resolve().parent
+    engine = make_engine(url)
+    try:
+        factory = make_session_factory(engine)
+        store_hash_at = _store_hash_at(factory)
+        faults = []
+        try:
+            grades_n = DbLedger(factory).verify()
+        except (
+            LedgerIntegrityError,
+            FalseQ1Violation,
+            MisattributionViolation,
+            ValueError,
+            TypeError,
+        ) as e:
+            grades_n, faults = 0, [f"grades: CHAIN BROKEN — {type(e).__name__}: {e}"]
+        events = verify_events(factory)
+        if not events.ok:
+            faults.append(f"events: CHAIN BROKEN — {events.detail}")
+        grades_head = (store_hash_at("grades", grades_n) or "") if grades_n else ""
+        heads = {
+            "grades": ChainHead(grades_n, grades_head),
+            "events": ChainHead(events.rows, events.head if events.rows else ""),
+        }
+        yield _Anchored(engine.dialect.name, data_dir, heads, store_hash_at, faults)
+    finally:
+        engine.dispose()
+
+
+def _created_at(value: str) -> str:
+    """``--created-at`` as ``YYYY-MM-DDTHH:MM:SSZ``; the current UTC time when not given — the
+    one clock read, here at the edge."""
+    if not value:
+        return _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        t = _dt.datetime.fromisoformat(value)
+    except ValueError as e:
+        raise CliError(f"--created-at {value!r} is not an ISO 8601 time") from e
+    if t.tzinfo is None:
+        raise CliError(f"--created-at {value!r} has no time zone; add Z or +00:00")
+    return t.astimezone(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _same_device(a: Path, b: Path) -> bool:
+    try:
+        return os.stat(a).st_dev == os.stat(b).st_dev
+    except OSError:
+        return False
+
+
+def cmd_anchor(args: argparse.Namespace) -> int:
+    """Write an anchor of the ledger's heads into ``--out``, chained to the directory's last
+    anchor. Refused: an ``--out`` inside the ledger's data directory, a broken chain, a ledger
+    that no longer extends the directory's last anchor, a broken anchor chain in the
+    directory. Never overwrites. Exit 1 on a finding, 2 on a refusal of the request."""
+    out_dir = Path(args.out).expanduser()
+    created_at = _created_at(args.created_at)
+    with _open_for_anchor(args) as led:
+        if led.data_dir is not None and is_inside(out_dir, led.data_dir):
+            raise CliError(
+                f"--out {out_dir} is inside the ledger's data directory {led.data_dir}: an "
+                "anchor kept beside the data it anchors proves nothing. Name a directory "
+                "elsewhere, ideally a clone of a repository held off this machine "
+                "(docs/LEDGER-ANCHORS.md)."
+            )
+        if all(h.rows == 0 for h in led.heads.values()) and not led.faults:
+            raise CliError("the ledger is empty; there is nothing to anchor")
+        result: dict[str, Any] = {
+            "source": led.source,
+            "chains": {k: v.to_dict() for k, v in sorted(led.heads.items())},
+            "out": str(out_dir),
+            "written": False,
+            "anchor": "",
+            "warnings": [],
+            "faults": list(led.faults),
+        }
+        previous: tuple[str, str] | None = None
+        if not led.faults:
+            try:
+                existing = load_anchor_dir(out_dir)
+            except AnchorError as e:
+                raise CliError(str(e)) from e
+            result["faults"].extend(
+                f"the anchor chain in {out_dir} is broken — {f}"
+                for f in check_anchor_links(existing)
+            )
+            if existing and not result["faults"]:
+                last = existing[-1]
+                if last.anchor.get("source") != led.source:
+                    raise CliError(
+                        f"{out_dir} holds anchors of a {last.anchor.get('source')} ledger; "
+                        f"keep one anchor directory per ledger"
+                    )
+                result["faults"].extend(
+                    f"the ledger no longer extends {last.path.name} — {f}"
+                    for f in check_anchor(last.anchor, source=led.source, hash_at=led.hash_at)
+                )
+                previous = (last.path.name, last.sha256)
+        if result["faults"]:
+            result["ok"] = False
+            _print_anchor(args, result)
+            return EXIT_NEGATIVE
+        anchor = build_anchor(
+            source=led.source,
+            chains=led.heads,
+            apparatus=APPARATUS_VERSION,
+            crb_version=__version__,
+            created_at=created_at,
+            previous=previous,
+        )
+        try:
+            path, written = write_anchor(out_dir, anchor)
+        except AnchorError as e:
+            raise CliError(str(e)) from e
+        result.update({"anchor": str(path), "written": written, "ok": True})
+        if written:
+            result["previous_anchor"] = anchor["previous_anchor"]
+        if led.data_dir is None:
+            result["warnings"].append(
+                "the database is not a local file, so this command cannot tell whether the "
+                "anchor directory shares a machine with it; copy the anchor off this machine"
+            )
+        elif _same_device(out_dir, led.data_dir):
+            result["warnings"].append(
+                f"{out_dir} is on the same filesystem as the ledger ({led.data_dir}); the "
+                "anchor proves nothing until it is copied off this machine "
+                "(docs/LEDGER-ANCHORS.md)"
+            )
+    _print_anchor(args, result)
+    return EXIT_OK
+
+
+def _print_anchor(args: argparse.Namespace, result: dict[str, Any]) -> None:
+    if args.json:
+        print_json(result)
+        return
+    for w in result["warnings"]:
+        print(f"warning: {w}", file=sys.stderr)
+    if result["faults"]:
+        print_lines(
+            [*(f"NOT ANCHORED — {f}" for f in result["faults"]), "no anchor file was written"]
+        )
+        return
+    chains = " · ".join(
+        f"{name} {c['rows']} rows, head {c['head_row_hash'] or '-'}"
+        for name, c in result["chains"].items()
+    )
+    verb = "anchor written" if result["written"] else "already anchored, nothing written"
+    print_lines(
+        [
+            f"{verb} -> {result['anchor']}",
+            f"  {result['source']}: {chains}",
+            "  keep it off this machine, held by someone who cannot write the ledger "
+            "(docs/LEDGER-ANCHORS.md)",
+        ]
+    )
 
 
 def _group_fields(by: str) -> tuple[str, ...]:
