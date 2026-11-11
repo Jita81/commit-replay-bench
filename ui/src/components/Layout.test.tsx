@@ -482,7 +482,11 @@ describe('Layout: the set-up progress in the header', () => {
     expect(go).toHaveAttribute('data-hint', 'button.shell.continue')
   })
 
-  it("counts the page's ?repo= and links Home to that repository, so the two show the same count", async () => {
+  it.each([
+    ['?repo=', '/results?repo=beta', '/results'],
+    ['path (a repository-scoped page)', '/connect/beta/measure', '/connect/:name/measure'],
+    ['path (the task page)', '/tasks/beta/abc123', '/tasks/:repo/:taskId'],
+  ])("counts the page's %s repository and links Home to it, so the two show the same count", async (_how, route, path) => {
     const repo = (name: string, updated: string) => ({ name, language: 'python', runner: 'pytest', url: `https://github.com/acme/${name}`, clone_path: '', probe: { status: 'ok', run_id: 'r1', checked: 'x', detail: 'pytest 8' }, task_counts: { total: 0, standard: 0, hard: 0, gold_clean: 0, gold_failed: 0, unchecked: 0 }, last_run: null, created: updated, updated, config: {} })
     const { calls } = mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
@@ -499,7 +503,7 @@ describe('Layout: the set-up progress in the header', () => {
       'GET /github/app': { configured: false, installations: [] },
       'GET /two-person-readiness': { ready: false, reason_code: 'single_person', reason: 'only one person', approvers_active: 0, approvers_signed_in: 0, other_active_accounts: 0, accounts_signed_in: 1, invitations_pending: 0 },
     })
-    renderShell('/results?repo=beta', '/results', <h1>Baseline</h1>)
+    renderShell(route, path, <h1>Baseline</h1>)
     const progress = await screen.findByTestId('shell-get-started')
     const count = within(progress).getByRole('link', { name: /^beta: \d of 8$/ })
     expect(count).toHaveAttribute('href', '/home?repo=beta')

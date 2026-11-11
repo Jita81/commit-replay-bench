@@ -26,7 +26,7 @@
  */
 
 import { useMemo } from 'react'
-import { useSearchParams } from 'react-router'
+import { matchPath, useLocation, useSearchParams } from 'react-router'
 import { useActiveRun, useAllRepos, useCapabilityMap, useFactoryBacklog, useFactoryTasks, useGitHubApp, useHealth, useIntake, useOracle, useOracleControls, useRepo, useSignoffs, useTwoPersonReadiness } from '../../api/hooks'
 import { isApiError } from '../../api/client'
 import type { TagTone, TaskItem } from '../../components/govuk'
@@ -115,22 +115,34 @@ export function factoryStatusFor(input: { measured: boolean; deliverCells: boole
   return input.deliverCells ? 'ready' : 'no_deliver_cell'
 }
 
+/** The repository a repository-scoped page names in its path, if the page is one. */
+export function routeRepo(pathname: string): string | null {
+  for (const pattern of ['/connect/:repo/*', '/repos/:repo/*', '/library/:repo/*', '/tasks/:repo/*']) {
+    const hit = matchPath(pattern, pathname)
+    if (hit?.params.repo) return hit.params.repo
+  }
+  return null
+}
+
 /**
- * Home's eight tasks for the chosen repository (`?repo=` or the most recently updated): each
+ * Home's eight tasks for the chosen repository (the page's path, `?repo=`, or the most recently updated): each
  * status, the number Completed, the task Continue stops at, and every read that failed.
  */
 export function useGetStarted() {
   const { me, can } = useAuth()
   const [params] = useSearchParams()
+  const { pathname } = useLocation()
   const gh = useGitHubApp()
   const repos = useAllRepos()
   const health = useHealth()
   const chosen = useMemo(() => {
     const items = repos.data?.items ?? []
-    const wanted = params.get('repo')
-    if (wanted && items.some((r) => r.name === wanted)) return wanted
+    // the page's own repository first: its path (/connect/beta/measure), then its ?repo=
+    for (const wanted of [routeRepo(pathname), params.get('repo')]) {
+      if (wanted && items.some((r) => r.name === wanted)) return wanted
+    }
     return items.slice().sort((a, b) => (b.updated > a.updated ? 1 : -1))[0]?.name ?? ''
-  }, [repos.data, params])
+  }, [repos.data, params, pathname])
   const repo = useRepo(chosen)
   const oracle = useOracle(chosen)
   const controls = useOracleControls(chosen)
