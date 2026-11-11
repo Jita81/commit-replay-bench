@@ -43,6 +43,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _load() -> ModuleType:
+    """Import the script as a module, by path, since `scripts/` is not a package."""
     spec = importlib.util.spec_from_file_location(
         "check_ui_types_drift", ROOT / "scripts" / "check_ui_types_drift.py"
     )
@@ -83,6 +84,7 @@ export interface Page<T> {
 
 
 def _schema(props: list[str], required: list[str] | None = None) -> dict[str, Any]:
+    """A minimal OpenAPI component with the given property names and required list."""
     return {"properties": {p: {} for p in props}, "required": required or []}
 
 
@@ -164,6 +166,7 @@ def test_an_inherited_field_the_component_dropped_is_an_unknown_field() -> None:
 
 
 def _run(allowlist: str, schemas: dict[str, Any], mapped: str = "Literal Literal\n") -> int:
+    """Run the check against in-memory inputs and return its exit status."""
     return int(
         m.main(
             ["--check"],

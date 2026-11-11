@@ -123,6 +123,7 @@ class Finding:
 
     @property
     def line(self) -> str:
+        """The finding as an allowlist line: its key and its kind."""
         return f"{self.key} {self.kind}"
 
 
@@ -349,6 +350,7 @@ def main(
     allowlist_text: str | None = None,
     mapped_text: str | None = None,
 ) -> int:
+    """Compare the UI's types with the OpenAPI document; return the exit status (0 is clean)."""
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="fail on new drift or a stale entry")
