@@ -13,7 +13,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **The factory's pull request names the cell that licensed it**
-  ([PR search](https://github.com/Jita81/commit-replay-bench/pulls?q=head%3Afeat%2Ffactory-pr-evidence-block)).
+  ([#123](https://github.com/Jita81/commit-replay-bench/pull/123)).
   The body of a pull request the factory opens on a customer's repository now carries a block
   for the licensing cell: its route, the clean rate with its n and Wilson interval, the mode,
   the builder and model the rate was measured on, the builder, model, provider and arm the
@@ -21,6 +21,13 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   does not hold reads `unavailable` (the ledger head always does today). The block says that
   `clean` and `deliver` are mechanical results under human review, in the MCP server's words.
   PR text only: no routing, licensing or ledger change.
+
+- **Wave 4 amendment 1: the four ordered lists**
+  ([#120](https://github.com/Jita81/commit-replay-bench/pull/120)). The registration's first
+  amendment, appended before the pilot. It records the two qualify runs at apparatus 2.5 and
+  their postures, each cell's key string, pool size, full seeded order and sha256, and strikes
+  the pilot's six click commits. The orders were checked against
+  `crb.core.reading.seeded_order`. Docs only; nothing is spent.
 
 - **The Wave 4 registration**
   ([#117](https://github.com/Jita81/commit-replay-bench/pull/117)). A new record,
