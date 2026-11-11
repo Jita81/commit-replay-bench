@@ -233,6 +233,28 @@ def test_two_anchors_chain_and_a_directory_is_checked_whole(
     assert code == 1 and p1.name in v["anchors"]["anchor_chain_faults"][0]
 
 
+def test_a_damaged_predecessor_link_is_reported_as_an_anchor_chain_fault(
+    ledger: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A first anchor whose ``previous_anchor`` is not an object is a damaged anchor-chain
+    link: ``verify --anchor`` names it (exit 1, not a CLI error) and ``anchor`` refuses to
+    extend the directory."""
+    out = tmp_path / "anchors"
+    _, d = _anchor(ledger, out, capsys)
+    path = Path(d["anchor"])
+    damaged = json.loads(path.read_text())
+    damaged["previous_anchor"] = "damaged"
+    path.write_text(json.dumps(damaged))
+    code, v = _verify(ledger, out, capsys)
+    [fault] = v["anchors"]["anchor_chain_faults"]
+    assert code == 1 and v["anchors"]["ok"] is False and path.name in fault
+    code, text = _run(["ledger", "verify", "--path", str(ledger), "--anchor", str(out)], capsys)
+    assert code == 1 and "ANCHOR CHAIN BROKEN" in text and path.name in text
+    _jsonl(ledger, 1, start=3)
+    code, a = _anchor(ledger, out, capsys, at=T2)
+    assert code == 1 and a["written"] is False and "anchor chain" in a["faults"][0]
+
+
 def test_a_new_anchor_is_refused_when_the_ledger_no_longer_extends_the_last(
     ledger: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

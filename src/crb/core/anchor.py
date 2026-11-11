@@ -40,7 +40,8 @@ Navigation
 ----------
 What it is:   The anchor format and its checks — ``build_anchor``, ``anchor_name``,
               ``check_anchor`` (does today's ledger still extend this anchor?),
-              ``check_anchor_links`` (is the directory's anchor chain whole?), the loaders
+              ``check_anchor_links`` (is the directory's anchor chain whole?),
+              ``previous_link`` (the one validated read of a predecessor link), the loaders
               and the no-overwrite ``write_anchor``.
 What it does: Builds a self-describing, deterministic JSON anchor from chain heads; names it
               from its row counts and heads; refuses to overwrite one; finds the row at an
@@ -253,25 +254,45 @@ def load_anchor_dir(directory: Path) -> list[LoadedAnchor]:
     return sorted((load_anchor(p) for p in paths), key=LoadedAnchor.order_key)
 
 
+def previous_link(anchor: Mapping[str, Any]) -> tuple[str, str] | None:
+    """The ``(file, sha256)`` this anchor names as its predecessor, or ``None`` when it names
+    none. :class:`AnchorError` when ``previous_anchor`` is neither null nor
+    ``{"file": str, "sha256": str}``: the one place the link is read, so no malformed value
+    reaches attribute access."""
+    prev = anchor.get("previous_anchor")
+    if prev is None:
+        return None
+    if (
+        not isinstance(prev, dict)
+        or not isinstance(prev.get("file"), str)
+        or not isinstance(prev.get("sha256"), str)
+    ):
+        raise AnchorError(f"previous_anchor is not {{file, sha256}} or null: {prev!r}")
+    return prev["file"], prev["sha256"]
+
+
 def check_anchor_links(anchors: Sequence[LoadedAnchor]) -> list[str]:
     """Faults in a directory's anchor chain (``anchors`` oldest first): each anchor after the
-    first must name the one before it and that file's sha256; the first must name none."""
+    first must name the one before it and that file's sha256; the first must name none. A
+    malformed ``previous_anchor`` is a damaged link, reported like any other."""
     faults: list[str] = []
     for i, la in enumerate(anchors):
-        prev = la.anchor.get("previous_anchor")
+        try:
+            link = previous_link(la.anchor)
+        except AnchorError as e:
+            faults.append(f"{la.path.name}: {e}")
+            continue
         if i == 0:
-            if prev is not None:
-                faults.append(
-                    f"{la.path.name} follows {prev.get('file')}, which is not in the directory"
-                )
+            if link is not None:
+                faults.append(f"{la.path.name} follows {link[0]}, which is not in the directory")
             continue
         before = anchors[i - 1]
-        if not isinstance(prev, dict) or prev.get("file") != before.path.name:
-            named = prev.get("file") if isinstance(prev, dict) else None
+        if link is None or link[0] != before.path.name:
+            named = None if link is None else link[0]
             faults.append(
                 f"{la.path.name} follows {named}, but the anchor before it is {before.path.name}"
             )
-        elif prev.get("sha256") != before.sha256:
+        elif link[1] != before.sha256:
             faults.append(
                 f"{before.path.name} was changed after {la.path.name} recorded its sha256"
             )
@@ -326,6 +347,7 @@ __all__ = [
     "load_anchor",
     "load_anchor_dir",
     "parse_anchor",
+    "previous_link",
     "same_state",
     "write_anchor",
 ]

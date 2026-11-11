@@ -5,8 +5,9 @@ Navigation
 What it is:   Unit tests for ``crb.core.anchor``.
 What it does: Pins the file's shape and its determinism, the deterministic name, the check
               that passes on growth and fails on a rewritten or shortened chain, the
-              directory's anchor chain (a deleted or edited anchor is named), and the
-              create-only write that never overwrites.
+              directory's anchor chain (a deleted or edited anchor is named, a malformed
+              predecessor link is a fault, not an exception), and the create-only write
+              that never overwrites.
 How:          Dict-built anchors, a ``hash_at`` over plain lists, ``tmp_path`` for the files.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0029-the-audit-trail-is-hash-chained.md
@@ -133,3 +134,37 @@ def test_is_inside_resolves_dot_dot(tmp_path: Path) -> None:
     data = tmp_path / "data"
     assert is_inside(data / "anchors", data) and is_inside(data, data)
     assert not is_inside(data / ".." / "anchors", data)
+
+
+MALFORMED_LINKS = (
+    "damaged",
+    7,
+    ["anchor-x.json", "0" * 64],
+    {},
+    {"sha256": "0" * 64},
+    {"file": "anchor-x.json"},
+    {"file": 3, "sha256": "0" * 64},
+    {"file": "anchor-x.json", "sha256": None},
+)
+
+
+@pytest.mark.parametrize("link", MALFORMED_LINKS)
+def test_a_malformed_predecessor_link_is_an_anchor_chain_fault(
+    tmp_path: Path, link: object
+) -> None:
+    """A ``previous_anchor`` that is not ``{file: str, sha256: str}`` (or null) is a damaged
+    link in the directory's anchor chain, reported as a fault — on the first anchor and on a
+    later one — never an exception."""
+    first = _anchor(2)
+    first["previous_anchor"] = link
+    p1 = tmp_path / anchor_name(first["chains"])
+    p1.write_bytes(anchor_bytes(first))
+    [fault] = check_anchor_links(load_anchor_dir(tmp_path))
+    assert p1.name in fault and "previous_anchor" in fault
+    p1.write_bytes(anchor_bytes(_anchor(2)))
+    second = _anchor(4)
+    second["previous_anchor"] = link
+    p2 = tmp_path / anchor_name(second["chains"])
+    p2.write_bytes(anchor_bytes(second))
+    [fault] = check_anchor_links(load_anchor_dir(tmp_path))
+    assert p2.name in fault and "previous_anchor" in fault
