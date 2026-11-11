@@ -32,6 +32,7 @@ Touch when:   a builder is refused an honest command in a client repository (add
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -185,6 +186,58 @@ def test_cost_meter_prefers_reported_cost_and_flags_unknown_pricing() -> None:
     assert bud.price_for("claude-opus-5").input_per_m == 5.0
 
 
+def test_pricing_bills_cache_writes_at_their_own_rate_and_round_trips() -> None:
+    pr = bud.Pricing(2.0, 10.0, cached_input_per_m=0.2, cache_write_per_m=2.5)
+    # 1000 in (100 cache reads, 300 cache writes, 600 plain), 50 out
+    assert pr.cost(1_000, 50, cached_in=100, cache_write_in=300) == pytest.approx(
+        600 * 2e-6 + 300 * 2.5e-6 + 100 * 0.2e-6 + 50 * 10e-6
+    )
+    # no cache-write rate: the writes are plain input, as before
+    plain = bud.Pricing(2.0, 10.0, cached_input_per_m=0.2)
+    assert plain.cost(1_000, 50, cached_in=100, cache_write_in=300) == plain.cost(
+        1_000, 50, cached_in=100
+    )
+    assert "cache_write_per_m" not in plain.to_dict()  # an entry's shape is unchanged
+    assert bud.Pricing.from_dict(pr.to_dict()) == pr
+    assert bud.DEFAULT_PRICING["claude-sonnet-5"].cache_write_per_m == 2.5
+
+
+def test_table_cost_prefers_the_table_and_records_its_source() -> None:
+    priced = bud.Pricing(2.0, 10.0)
+    assert bud.table_cost(priced, 1_000, 100, reported_cost=9.0) == (
+        pytest.approx(0.003),
+        True,
+        bud.COST_SOURCE_TABLE,
+    )
+    unpriced = bud.Pricing(0.0, 0.0, known=False)
+    assert bud.table_cost(unpriced, 1_000, 100, reported_cost=9.0) == (
+        9.0,
+        True,
+        bud.COST_SOURCE_CLI,
+    )
+    assert bud.table_cost(unpriced, 1_000, 100) == (0.0, False, bud.COST_SOURCE_UNKNOWN)
+
+
+def test_merge_cost_provenance_sums_the_cli_figures_and_flags_a_mix() -> None:
+    table = bud.cost_provenance(bud.COST_SOURCE_TABLE, 0.5)
+    assert table == {"cost_source": "price_table", "cli_cost_usd": 0.5}
+    assert bud.merge_cost_provenance(table, bud.cost_provenance("price_table", 0.25)) == {
+        "cost_source": "price_table",
+        "cli_cost_usd": 0.75,
+    }
+    # one call without a CLI figure: no partial sum passes for the whole
+    assert bud.merge_cost_provenance(table, bud.cost_provenance("price_table", None)) == {
+        "cost_source": "price_table",
+        "cli_cost_usd_partial": 0.5,
+    }
+    assert bud.merge_cost_provenance(table, bud.cost_provenance("cli_reported", 0.1)) == {
+        "cost_source": "mixed",
+        "cli_cost_usd": 0.6,
+    }
+    assert bud.merge_cost_provenance(table, {}) == table
+    assert bud.merge_cost_provenance({}, {"other": 1}) == {}
+
+
 def test_load_pricing_overlay_and_malformed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -199,6 +252,88 @@ def test_load_pricing_overlay_and_malformed(
         bud.load_pricing(bad)
     monkeypatch.setenv(bud.PRICING_ENV, str(f))
     assert bud.load_pricing()["azure:gpt-4o"].output_per_m == 10
+
+
+@pytest.mark.parametrize("rate", ["NaN", "Infinity", "-Infinity", "-0.5", "1" + "0" * 400])
+@pytest.mark.parametrize(
+    "field", ["input_per_m", "output_per_m", "cached_input_per_m", "cache_write_per_m"]
+)
+def test_load_pricing_refuses_a_non_finite_or_negative_rate(
+    tmp_path: Path, rate: str, field: str
+) -> None:
+    """A NaN cost never trips a spend cap (``spent + next > cap`` is always False), and a
+    negative one hands the cap money back — either is an error, not a price."""
+    entry = {"input_per_m": 1.0, "output_per_m": 2.0, field: "__RATE__"}
+    f = tmp_path / "p.json"
+    f.write_text(json.dumps({"m-x": entry}).replace('"__RATE__"', rate), encoding="utf-8")
+    with pytest.raises(ValueError, match=field):
+        bud.load_pricing(f)
+
+
+@pytest.mark.parametrize("figure", [float("nan"), float("inf"), float("-inf"), -0.5])
+def test_a_non_finite_or_negative_cli_figure_is_no_cost(figure: float) -> None:
+    """JSON admits NaN, Infinity and negatives as the CLI's cost; none is a cost, so an
+    unpriced model's build stays unknown and the figure is not recorded beside it."""
+    unpriced = bud.Pricing(0.0, 0.0, known=False)
+    assert bud.table_cost(unpriced, 1_000, 100, reported_cost=figure) == (
+        0.0,
+        False,
+        bud.COST_SOURCE_UNKNOWN,
+    )
+    assert bud.cost_provenance(bud.COST_SOURCE_UNKNOWN, figure) == {
+        bud.EXTRA_COST_SOURCE: bud.COST_SOURCE_UNKNOWN
+    }
+
+
+def test_a_pricing_overlay_inherits_the_rates_it_omits(tmp_path: Path) -> None:
+    """An overlay that re-prices a default model's input, output and cache reads keeps the
+    default cache-write rate rather than dropping it (writes billed at the input rate)."""
+    f = tmp_path / "p.json"
+    f.write_text(
+        json.dumps(
+            {
+                "claude-sonnet-5": {
+                    "input_per_m": 3.0,
+                    "output_per_m": 15.0,
+                    "cached_input_per_m": 0.3,
+                },
+                "claude-haiku-4-5": {"output_per_m": 6.0},
+                "claude-opus-5": {"cache_write_per_m": None},  # an explicit null clears it
+            }
+        ),
+        encoding="utf-8",
+    )
+    table = bud.load_pricing(f)
+    assert table["claude-sonnet-5"] == bud.Pricing(
+        3.0, 15.0, cached_input_per_m=0.3, cache_write_per_m=2.5
+    )
+    haiku = bud.DEFAULT_PRICING["claude-haiku-4-5"]
+    assert table["claude-haiku-4-5"] == bud.Pricing(
+        haiku.input_per_m,
+        6.0,
+        cached_input_per_m=haiku.cached_input_per_m,
+        cache_write_per_m=haiku.cache_write_per_m,
+    )
+    assert table["claude-opus-5"].cache_write_per_m is None
+    assert table["claude-opus-5"].input_per_m == 5.0
+
+
+def test_one_hour_cache_writes_are_billed_at_twice_input() -> None:
+    """The CLI's cache writes are 1-hour (``ephemeral_1h_input_tokens``): 2x input, not the
+    5-minute 1.25x ``cache_write_per_m``."""
+    pr = bud.DEFAULT_PRICING["claude-sonnet-5"]  # $2 in, $2.50 5-minute write
+    five = pr.cost(10_000, 0, cache_write_in=4_000)
+    both = pr.cost(10_000, 0, cache_write_in=4_000, cache_write_1h_in=3_000)
+    assert five == pytest.approx(6_000 * 2e-6 + 4_000 * 2.5e-6)
+    assert both == pytest.approx(3_000 * 2e-6 + 4_000 * 2.5e-6 + 3_000 * 4e-6)
+    # a table with no cache-write premium bills every write at the input rate
+    plain = bud.Pricing(2.0, 10.0)
+    assert plain.cost(10_000, 0, cache_write_1h_in=3_000) == pytest.approx(10_000 * 2e-6)
+    # writes are a subset of the uncached input: never billed past it
+    assert pr.cost(1_000, 0, cache_write_1h_in=5_000) == pytest.approx(1_000 * 4e-6)
+    cost, known, src = bud.table_cost(pr, 10_000, 0, cache_write_in=0, cache_write_1h_in=3_000)
+    assert known and src == bud.COST_SOURCE_TABLE
+    assert cost == pytest.approx(7_000 * 2e-6 + 3_000 * 4e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -1128,3 +1263,15 @@ def test_blind_brief_carries_the_harness_command_but_never_the_oracle() -> None:
     txt = b.task_text(worktree="/wt")
     assert "PYTHONPATH=/wt/src /venv/bin/python -m pytest -q <paths>" in txt
     assert "test_secret" not in txt and b.test_command == "" and b.target_tests == ()
+
+
+def test_load_pricing_configured_placeholder_is_known(tmp_path: Path) -> None:
+    """Pricing the unpriced ``azure`` placeholder makes it known: an overlay inherits
+    omitted rates from a priced default only, never a placeholder's ``known=False``."""
+    assert not bud.DEFAULT_PRICING["azure"].known
+    f = tmp_path / "p.json"
+    f.write_text('{"azure": {"input_per_m": 1, "output_per_m": 2}}', encoding="utf-8")
+    table = bud.load_pricing(f)
+    assert table["azure"].known
+    price = bud.price_for("azure:gpt-4o", table)
+    assert price.known and price.input_per_m == 1 and price.output_per_m == 2

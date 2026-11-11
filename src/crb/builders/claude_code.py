@@ -81,8 +81,9 @@ What it is:   The Claude Code adapter — ``ClaudeCodeBuilder`` drives ``claude 
               ``crb doctor``, the admin route and the run preflight use.
 What it does: Runs the census's measured agentic path with a restricted, pre-approved tool
               set, deny rules, a minimal child environment and no session persistence;
-              meters turns, tool uses, tokens and reported cost from the stream (usage once
-              per ``message.id``, not once per content-block event); applies the
+              meters turns, tool uses and tokens from the stream (usage once per
+              ``message.id``, not once per content-block event) and prices them from the
+              product's own table (the CLI's ``total_cost_usd`` kept beside it); applies the
               test-file and shell guards and the nested-model-call tripwire (every tool
               input) post hoc (a hit is a recorded ``tamper:`` / ``archaeology:`` /
               ``network:`` error, never silently dropped); stops early on a nested model
@@ -116,7 +117,11 @@ Touch when:   never for a new repository (``auth``, ``model`` and ``bare`` are p
               test; a new model id goes in ``KNOWN_MODELS`` AND the price table in
               src/crb/builders/budget.py.
 Claims:       ``done`` is the CLI's own claim and is never trusted; ``cost_usd`` is the
-              CLI-reported figure when present (docs/EVIDENCE-AND-CLAIMS.md).
+              CLI's token counts priced from the product's table (``DEFAULT_PRICING`` +
+              ``CRB_PRICING_JSON``), the CLI's own ``total_cost_usd`` only for a model the
+              table does not price, and unknown when the table cannot be read
+              (``extra.pricing_error``); ``extra.cost_source`` says which,
+              ``extra.cli_cost_usd`` keeps the CLI's figure (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -131,7 +136,7 @@ import tempfile
 import threading
 import time
 import warnings
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -153,7 +158,17 @@ from crb.builders.base import (
     emit,
     nested_model_call_input,
 )
-from crb.builders.budget import CostMeter, price_for
+from crb.builders.budget import (
+    COST_SOURCE_TABLE,
+    COST_SOURCE_UNKNOWN,
+    EXTRA_PRICING_ERROR,
+    CostMeter,
+    Pricing,
+    cost_provenance,
+    load_pricing,
+    price_for,
+    table_cost,
+)
 from crb.core.execution import (
     POST_KILL_DRAIN_S,
     SandboxUnavailable,
@@ -543,6 +558,27 @@ def subprocess_spawn(
 # ---------------------------------------------------------------------------
 
 
+#: ``message.model`` of the assistant messages the CLI writes itself (an API error shown
+#: as a message): no model answered them
+SYNTHETIC_MODEL = "<synthetic>"
+#: ``BuildOutcome.extra`` key: the models other than the builder's that answered messages
+EXTRA_OTHER_MODELS = "other_models"
+
+
+def _one_hour_writes(usage: Mapping[str, Any], written: int) -> int:
+    """The 1-hour-TTL part of a usage block's ``written`` cache-write tokens, from
+    ``usage.cache_creation.ephemeral_1h_input_tokens`` (the split the CLI's session
+    transcripts carry), never more than ``written``; ``0`` when the split is absent or
+    malformed, so those writes are priced as 5-minute, as before."""
+    split = usage.get("cache_creation")
+    if not isinstance(split, Mapping):
+        return 0
+    hour = split.get("ephemeral_1h_input_tokens")
+    if isinstance(hour, bool) or not isinstance(hour, int) or hour <= 0:
+        return 0
+    return min(hour, max(0, written))
+
+
 class StreamStats:
     """Accumulates what the stream-json events say. Tolerant of unknown shapes:
     anything it cannot read is skipped, never inferred."""
@@ -569,6 +605,15 @@ class StreamStats:
         #: the whole message's usage, so a message counts once and its last event wins; an
         #: event with no id is a message of its own
         self.usage_by_message: dict[str, tuple[int, int, int]] = {}
+        #: the cache-WRITE part of each message's ``tokens_in`` (same keys), priced at the
+        #: table's cache-write rate
+        self.cache_writes_by_message: dict[str, int] = {}
+        #: the 1-hour-TTL part of each message's cache writes (same keys), when the CLI
+        #: reports the split (``usage.cache_creation.ephemeral_1h_input_tokens``)
+        self.cache_writes_1h_by_message: dict[str, int] = {}
+        #: the model that answered each message (same keys), as the API reports it in
+        #: ``message.model``; absent where the event gave none
+        self.model_by_message: dict[str, str] = {}
         self.result: dict[str, Any] | None = None
         self.init: dict[str, Any] = {}
         self.last_text = ""
@@ -614,7 +659,7 @@ class StreamStats:
                 self.auth_failed = True
         elif kind == "assistant":
             msg = ev.get("message") or {}
-            self._usage(msg.get("id"), msg.get("usage"))
+            self._usage(msg.get("id"), msg.get("usage"), msg.get("model"))
             names: list[str] = []
             for block in msg.get("content") or []:
                 if not isinstance(block, dict):
@@ -661,7 +706,7 @@ class StreamStats:
         self.events.append(summary)
         return summary
 
-    def _usage(self, msg_id: Any, usage: Any) -> None:
+    def _usage(self, msg_id: Any, usage: Any, model: Any = None) -> None:
         """Record one assistant event's ``usage`` block under its ``message.id`` (the last
         event of a message replaces the earlier ones); an event with no id gets a key of
         its own, so it is summed as before. A block that is not a mapping records the
@@ -673,12 +718,67 @@ class StreamStats:
             return
         # cache CREATION is real input (billed at a premium); cache READS are recorded
         # separately so "tokens in" is never a misleading 50 for a 60k-token session.
+        written = int(usage.get("cache_creation_input_tokens", 0) or 0)
         seen[key] = (
-            int(usage.get("input_tokens", 0) or 0)
-            + int(usage.get("cache_creation_input_tokens", 0) or 0),
+            int(usage.get("input_tokens", 0) or 0) + written,
             int(usage.get("output_tokens", 0) or 0),
             int(usage.get("cache_read_input_tokens", 0) or 0),
         )
+        self.cache_writes_by_message[key] = written
+        self.cache_writes_1h_by_message[key] = _one_hour_writes(usage, written)
+        if isinstance(model, str) and model:
+            self.model_by_message[key] = model
+
+    def other_models(self, own: Iterable[str]) -> list[str]:
+        """The models, other than the builder's ``own`` (its configured id and the one the
+        CLI's init event resolved it to), that answered a message with tokens spent: a
+        sub-agent or a fallback. The CLI's ``<synthetic>`` error messages are not a model."""
+        mine = [m for m in own if m]
+        out: set[str] = set()
+        for key, model in self.model_by_message.items():
+            if model == SYNTHETIC_MODEL or not any(self.usage_by_message.get(key, ())):
+                continue
+            if not any(model.startswith(m) or m.startswith(model) for m in mine):
+                out.add(model)
+        return sorted(out)
+
+    def cost_by_message(
+        self, pricing: Pricing, table: Mapping[str, Pricing], own: Iterable[str]
+    ) -> tuple[float, bool]:
+        """``(cost_usd, known)`` with every message priced at the rate of the model that
+        answered it (``pricing`` for the builder's own and for a message that named none):
+        what a session that used more than one model is costed from. Unknown, ``0.0``, as
+        soon as one of the other models is not in the table, and when the result event
+        reports more tokens than the messages add up to: those tokens have no model to be
+        priced at, and leaving them out would under-count the spend."""
+        other = set(self.other_models(own))
+        rows = self.usage_by_message.values()
+        if any(t > sum(r[i] for r in rows) for i, t in enumerate(self.totals())):
+            return 0.0, False
+        # the same for cache writes, which carry a premium the token totals do not show
+        if self.cache_write_tokens() > sum(self.cache_writes_by_message.values()):
+            return 0.0, False
+        if self.cache_write_1h_tokens() > sum(self.cache_writes_1h_by_message.values()):
+            return 0.0, False
+        total = 0.0
+        for key, (tin, tout, cached) in self.usage_by_message.items():
+            model = self.model_by_message.get(key, "")
+            rate = pricing
+            if model in other:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")  # recorded as an unknown cost instead
+                    rate = price_for(model, table)
+            if not rate.known:
+                return 0.0, False
+            hour = self.cache_writes_1h_by_message.get(key, 0)
+            total += rate.cost(
+                tin + cached,
+                tout,
+                cached_in=cached,
+                cache_write_in=self.cache_writes_by_message.get(key, 0) - hour,
+                cache_write_1h_in=hour,
+            )
+        return total, True
 
     def host_view(self, text: str) -> str:
         """``text`` with the container alias replaced by the guard's host root (only
@@ -754,6 +854,24 @@ class StreamStats:
             )
         rows = self.usage_by_message.values()
         return sum(r[0] for r in rows), sum(r[1] for r in rows), sum(r[2] for r in rows)
+
+    def cache_write_tokens(self) -> int:
+        """The cache-write part of :meth:`totals`' ``tokens_in``, from the same source (the
+        result event's usage when it is authoritative, else the per-message sum)."""
+        r = self.result or {}
+        usage = r.get("usage")
+        if isinstance(usage, dict) and (usage.get("input_tokens") or usage.get("output_tokens")):
+            return int(usage.get("cache_creation_input_tokens", 0) or 0)
+        return sum(self.cache_writes_by_message.values())
+
+    def cache_write_1h_tokens(self) -> int:
+        """The 1-hour-TTL part of :meth:`cache_write_tokens`, from the same source; ``0``
+        where the CLI reported no TTL split (those writes are priced as 5-minute)."""
+        r = self.result or {}
+        usage = r.get("usage")
+        if isinstance(usage, dict) and (usage.get("input_tokens") or usage.get("output_tokens")):
+            return _one_hour_writes(usage, int(usage.get("cache_creation_input_tokens", 0) or 0))
+        return sum(self.cache_writes_1h_by_message.values())
 
     def reported_cost(self) -> float | None:
         """The CLI's own ``total_cost_usd`` from the result event, if it gave one."""
@@ -991,7 +1109,21 @@ class ClaudeCodeBuilder:
         stats = StreamStats(
             GitArchaeologyGuard(cwd=workspace.root), guard, workdir_alias=self.workdir_alias
         )
-        meter = CostMeter(price_for(self.model), model=self.model)
+        # an unreadable deployment table is an error, not a fallback (load_pricing): the
+        # cost is UNKNOWN — never the CLI's own figure, which a capped run would then count
+        # as spend at the CLI's price list, nor the defaults the deployment overrode — so a
+        # capped run stops at once; the error is kept in ``extra.pricing_error``
+        pricing_error = ""
+        try:
+            table: Mapping[str, Pricing] = load_pricing()
+        except (OSError, ValueError) as exc:
+            pricing_error = redact_and_cap(f"{type(exc).__name__}: {exc}", max_chars=300)
+            table = {}
+        with warnings.catch_warnings():
+            if pricing_error:
+                warnings.simplefilter("ignore")  # the error says why, not "unpriced model"
+            pricing = price_for(self.model, table)
+        meter = CostMeter(pricing, model=self.model)
         errors: list[str] = []
 
         def finish(
@@ -1003,7 +1135,27 @@ class ClaudeCodeBuilder:
             errors.extend(stats.violations)
             tin, tout, cached = stats.totals()
             # tokens_in is TOTAL input (cache reads included, as CostMeter expects); cached is the subset
-            meter.add(tin + cached, tout, cached_in=cached, cost_usd=stats.reported_cost())
+            meter.add(tin + cached, tout, cached_in=cached)
+            # priced from OUR table, not the CLI's total_cost_usd (its own price list: CLI
+            # 2.1.132 priced sonnet-5 at 2.5x); the CLI figure is the unpriced-model fallback
+            cli_cost = stats.reported_cost()
+            cost, known, source = table_cost(
+                pricing,
+                meter.tokens_in,
+                meter.tokens_out,
+                cached_in=meter.cached_in,
+                cache_write_in=stats.cache_write_tokens() - stats.cache_write_1h_tokens(),
+                cache_write_1h_in=stats.cache_write_1h_tokens(),
+                reported_cost=None if pricing_error else cli_cost,
+            )
+            # a sub-agent or a fallback answered some messages: the session's totals do
+            # not say which model spent what, so each message is priced at its own
+            # model's rate, and the cost is unknown when the table lacks one of them
+            own = (self.model, str(stats.init.get("model") or ""))
+            others = stats.other_models(own)
+            if others and source == COST_SOURCE_TABLE:
+                cost, known = stats.cost_by_message(pricing, table, own)
+                source = COST_SOURCE_TABLE if known else COST_SOURCE_UNKNOWN
             return BuildOutcome(
                 builder=self.name,
                 model=self.model,
@@ -1016,14 +1168,19 @@ class ClaudeCodeBuilder:
                 tokens_in=meter.tokens_in,
                 tokens_out=meter.tokens_out,
                 tokens_cached=meter.cached_in,
-                cost_usd=meter.cost_usd,
-                cost_known=meter.cost_known,
+                cost_usd=cost,
+                cost_known=known,
                 latency_s=time.monotonic() - started,
                 stop_reason=stop,
                 errors=tuple(errors),
                 transcript=tuple(stats.events) if self.keep_transcript else (),
                 budget=budget,
-                extra=dict(extra),
+                extra={
+                    **extra,
+                    **cost_provenance(source, cli_cost),
+                    **({EXTRA_OTHER_MODELS: others} if others else {}),
+                    **({EXTRA_PRICING_ERROR: pricing_error} if pricing_error else {}),
+                },
             )
 
         try:
