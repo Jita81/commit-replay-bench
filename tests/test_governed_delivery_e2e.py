@@ -420,7 +420,7 @@ def test_a_governed_delivery_passes_every_gate_in_order_on_the_chain(
     login(env.client, "operator")
     verify = env.get("/ledger/verify", params={"full": "true"}).json()
     assert verify["ok"] and verify["events"]["chain_ok"] and verify["signoffs"]["chain_ok"]
-    assert APPARATUS_VERSION == "2.4" and row.apparatus_version == APPARATUS_VERSION
+    assert APPARATUS_VERSION == "2.5" and row.apparatus_version == APPARATUS_VERSION
 
 
 # --- each gate's condition removed, in turn ------------------------------------------------

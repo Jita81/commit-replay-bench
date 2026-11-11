@@ -428,7 +428,7 @@ row — carries its own chain over the whole table in id order, set in each writ
 
 ### 7.4 Versioning
 
-`crb.core.version.__version__` is the package version; `APPARATUS_VERSION` (currently `2.3`) is the version of the **measuring instrument** — belt semantics, size table, class
+`crb.core.version.__version__` is the package version; `APPARATUS_VERSION` (currently `2.5`) is the version of the **measuring instrument** — belt semantics, size table, class
 taxonomy, routing rule. Changing any of those bumps `APPARATUS_VERSION` and needs an ADR.
 Rows and packs from different apparatus versions are never blended in a claim
 ([EVIDENCE-AND-CLAIMS §4](EVIDENCE-AND-CLAIMS.md)).
@@ -441,6 +441,10 @@ required `GradeContext`; belt 3 subtracts the in-posture baseline; a verdict tha
 builder needs a witness run in the same posture (`MisattributionViolation` at construction
 and at the ledger); the worker admits only tasks qualified in the live posture
 (`crb.server.posture_gate`). Posture is a stamp and a read filter, never a cell-key field.
+
+**2.5 (ADR-0049) — the stamp alone moves.** It separates rows graded after the Wave 3 harness
+fixes from rows graded before them; belts, the failure rule and `mutation.v2` are unchanged.
+The apparatus is part of the posture id, so every task is qualified again at 2.5.
 
 ### 7.5 Change class: two axes, one resolved value
 

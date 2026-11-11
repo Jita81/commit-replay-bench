@@ -68,6 +68,7 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
+from crb.core.version import APPARATUS_VERSION
 from crb.server.routes.readings import standard_for
 from crb.store.models import Task
 from fixtures.proven import (
@@ -435,7 +436,7 @@ def test_rows_imported_through_the_ledger_never_count_toward_a_reading(env: Env)
     assert _cells(env) == []
     # read as history, under its named version, the cell is shown — and the reading counts
     # none of the imported rows either (P-321)
-    (cell,) = _cells(env, "&apparatus=2.4")
+    (cell,) = _cells(env, f"&apparatus={APPARATUS_VERSION}")
     assert cell["route"] != "deliver", cell
     assert cell["reason_code"] == "look_pending"
     arms = {a["arm"]: a for a in cell["reading"]["arms"]}

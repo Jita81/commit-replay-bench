@@ -49,6 +49,7 @@ from crb.core.ledger import GradeRow
 from crb.core.reading import register
 from crb.core.run import RunSpec, row_from
 from crb.core.spec import TaskSpec
+from crb.core.version import APPARATUS_VERSION
 from crb.factory.standard import CellRef, Readers, Standard, gate_for
 from crb.intake import client as c
 from crb.server import class_set_state
@@ -242,8 +243,8 @@ def test_a_routing_version_stamps_intake_and_its_classifications_are_counted(env
 def _org_world(routes: bool) -> Readers:
     pool = commits(20, "org")
     reading = register(
-        repo="cobra", cell=CELL, hierarchy=("S3",), pool=pool, apparatus="2.4", taxonomy=V1,
-        posture_class=SEALED, checks_arm="off", actor="op-1", now=REGISTERED_AT,
+        repo="cobra", cell=CELL, hierarchy=("S3",), pool=pool, apparatus=APPARATUS_VERSION,
+        taxonomy=V1, posture_class=SEALED, checks_arm="off", actor="op-1", now=REGISTERED_AT,
         org_class="parser-fix",
     )  # fmt: skip
     rows = [sealed_row(x, arm="S3", labels={"taxonomy": V1}) for x in pool]
@@ -336,8 +337,9 @@ def test_a_reading_of_an_organisation_class_is_a_cell_of_its_own_and_a_global_re
 
     pool = commits(20, "own")
     kw: dict[str, Any] = {
-        "repo": "cobra", "cell": CELL, "hierarchy": ("S3",), "pool": pool, "apparatus": "2.4",
-        "posture_class": SEALED, "checks_arm": "off", "actor": "op-1", "now": REGISTERED_AT,
+        "repo": "cobra", "cell": CELL, "hierarchy": ("S3",), "pool": pool,
+        "apparatus": APPARATUS_VERSION, "posture_class": SEALED, "checks_arm": "off",
+        "actor": "op-1", "now": REGISTERED_AT,
     }  # fmt: skip
     plain = register(taxonomy="global/classes@v1", **kw)
     assert "org_class" not in plain.to_dict()  # a global reading's body and id never moved
@@ -383,7 +385,6 @@ def _a_proven_org_cell(env: Env) -> dict[str, Any]:
     before its build as the worker reserves it: the served readers find its ceiling."""
     from datetime import UTC, datetime, timedelta
 
-    from crb.core.version import APPARATUS_VERSION
     from crb.server.factory_standard import readers_in
     from crb.store.ledger import DbLedger
     from crb.store.models import Task

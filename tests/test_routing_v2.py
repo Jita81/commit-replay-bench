@@ -62,10 +62,16 @@ from crb.core.routing import (
     RoutingPolicy,
     route,
 )
+from crb.core.version import APPARATUS_VERSION
 from fixtures.readings import BEFORE, REPO, S1, commits, register_reading, rows_for, sealed_row
 
 PASSED = ControlsVerdict(
-    passed=True, constructible=6, total=7, escapes=0, run_id="ctl-1", apparatus_version="2.4"
+    passed=True,
+    constructible=6,
+    total=7,
+    escapes=0,
+    run_id="ctl-1",
+    apparatus_version=APPARATUS_VERSION,
 )
 
 
@@ -270,13 +276,23 @@ def test_a_report_of_another_apparatus_or_a_cancelled_run_never_passes() -> None
     old = ControlsVerdict(passed=True, constructible=6, total=7, escapes=0, apparatus_version="2.3")
     assert cell_of(S1, rows, [reading], controls=old).reason_code == REASON_CONTROLS_UNMEASURED
     cancelled = ControlsVerdict(
-        passed=True, constructible=6, total=7, escapes=0, complete=False, apparatus_version="2.4"
+        passed=True,
+        constructible=6,
+        total=7,
+        escapes=0,
+        complete=False,
+        apparatus_version=APPARATUS_VERSION,
     )
     assert (
         cell_of(S1, rows, [reading], controls=cancelled).reason_code == REASON_CONTROLS_UNMEASURED
     )
     failing = ControlsVerdict(
-        passed=False, constructible=6, total=7, escapes=0, complete=False, apparatus_version="2.4"
+        passed=False,
+        constructible=6,
+        total=7,
+        escapes=0,
+        complete=False,
+        apparatus_version=APPARATUS_VERSION,
     )
     assert cell_of(S1, rows, [reading], controls=failing).route == ROUTE_HUMAN
 
