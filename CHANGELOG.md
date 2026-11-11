@@ -21,6 +21,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   longer holds, when the ledger was cut at its end or rebuilt. docs/LEDGER-ANCHORS.md says who
   should hold anchors and what an unsigned anchor cannot prove.
 
+- **The factory's pull request names the cell that licensed it**
+  ([#125](https://github.com/Jita81/commit-replay-bench/pull/125)).
+  The body of a pull request the factory opens on a customer's repository now carries a block
+  for the licensing cell: its route, the clean rate with its n and Wilson interval, the mode,
+  the builder and model the rate was measured on, the builder, model, provider and arm the
+  licence was read on, the apparatus, the ledger head and the task. A datum the delivery step
+  does not hold reads `unavailable` (the ledger head always does today). The block says that
+  `clean` and `deliver` are mechanical results under human review, in the MCP server's words.
+  PR text only: no routing, licensing or ledger change.
+
 - **Set-up progress in the header; one action on each empty list**
   ([#122](https://github.com/Jita81/commit-replay-bench/pull/122)). Off /home, an operator now
   sees "n of 8" with a Continue link to the next Get-started task. It comes from a `useGetStarted`
