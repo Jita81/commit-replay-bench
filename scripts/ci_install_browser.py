@@ -37,28 +37,41 @@ an install that exits non-zero every time says so instead, since a rerun meets t
 blamed the mirror), and a last attempt still printing when the budget ran out is called slow,
 not silent.
 
+The system libraries are fetched only when the browser needs them. On 11 Nov 2026 the runners
+could not resolve any Ubuntu mirror: apt waited 20 s on each package at each of three mirrors,
+kept printing, and the first attempt spent a whole 450 s budget on nine font packages while
+every library Chromium links against was already on the image; all nine browser jobs of run
+43042027976 failed that way, and three of run 43042354459 (P-816). So the default install now
+downloads the browser alone (``npx playwright install chromium``, which never calls apt), then
+starts it once (``browser_starts``). A browser that starts is the whole install and apt is
+never run; one that does not sends the next attempt down the ``--with-deps`` path above, with
+its timeouts and retries. A command given after ``--`` is run as written, with no probe.
+
 Navigation
 ----------
 What it is:   The bounded, retried Playwright browser install (stdlib only) every CI job that
               needs Chromium runs instead of calling ``playwright install`` itself.
-What it does: Runs the install command (``npx playwright install --with-deps chromium``, or the
-              one after ``--``) until it succeeds, an attempt stalls (no output for
+What it does: Runs the install (the browser alone, then ``--with-deps`` only if the browser does
+              not start; or the command after ``--``) until it succeeds, an attempt stalls (no
+              output for
               ``--idle-timeout`` s) or fails, retrying within ``--attempts`` and ``--budget``;
               exits 0 on success and 1 with an ``::error`` annotation when attempts or budget
               run out, and either way records its time and budget for the job's budget guard.
               It never leaves a stopped attempt's process group running.
-How:          ``write_apt_timeouts`` (best effort, bounded) → for each attempt,
-              ``run_attempt`` starts the command with ``start_new_session``, a reader thread
-              timestamps every chunk of output, and the poll loop stops the group on idle or
-              budget → ``cleanup`` → backoff. ``main(argv, *, run, cleanup, apt, sleep, clock,
-              out)`` takes every effect as a parameter, so the tests drive it with real child
-              processes and short timeouts.
+How:          For each attempt, ``run_attempt`` starts the command with ``start_new_session``,
+              a reader thread timestamps every chunk of output, and the poll loop stops the
+              group on idle or budget → ``cleanup`` → backoff. A browser-only attempt that
+              succeeds is followed by ``browser_starts``; ``write_apt_timeouts`` (best effort,
+              bounded) runs before the first attempt that can call apt. ``main(argv, *, run,
+              cleanup, apt, sleep, clock, out, record, probe)`` takes every effect as a
+              parameter, so the tests drive it with real child processes and short timeouts.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   .github/workflows/ci.yml (the ``ui-smoke``, ``walkthrough-story`` and
               ``walkthrough-screens`` jobs run it), docs/PREVENTION.md (P-751 — the class it
-              closes; P-813, its room), scripts/ci_job_budget.py (the guard that measures the
-              rest of the job and reads this one's record)
+              closes; P-813, its room; P-816, apt only when needed),
+              scripts/ci_job_budget.py (the guard that measures the rest of the job and reads
+              this one's record)
 Tested by:    tests/test_ci_install_browser.py
 Touch when:   never for a new repository (it installs this repository's own CI browser); a CI
               job starts needing a Playwright browser (call this, never ``playwright install``);
@@ -84,8 +97,19 @@ from typing import TextIO
 SECONDS_VAR = "CRB_INSTALL_SECONDS"
 BUDGET_VAR = "CRB_INSTALL_BUDGET"
 
-#: The install every browser job needs: Chromium and the system libraries it links against.
+#: The install that needs apt: Chromium and the system libraries it links against. It runs only
+#: after the browser alone was installed and did not start (P-816).
 DEFAULT_COMMAND = ("npx", "playwright", "install", "--with-deps", "chromium")
+#: The install tried first: the browser download alone, which never calls apt.
+BROWSER_ONLY_COMMAND = ("npx", "playwright", "install", "chromium")
+#: Starts the installed Chromium once, headless, as the tests will: exit 0 means every system
+#: library it links against is already on the image.
+PROBE_COMMAND = (
+    "node",
+    "-e",
+    "require('@playwright/test').chromium.launch().then(b => b.close())"
+    ".catch(e => { console.error(String(e)); process.exit(1); });",
+)
 #: apt's own network bounds, written before the first attempt so a dead mirror times out in apt.
 #: A dead socket gives up after three tries of 30 s, about 90 s, well inside the idle timeout;
 #: a slow download is never cut short by them, since its bytes keep arriving while apt is silent.
@@ -100,8 +124,8 @@ HELPER_TIMEOUT_S = 30.0
 
 @dataclass(frozen=True)
 class Attempt:
-    """How one attempt ended: ``ok``, ``failed`` (with its exit code), ``stalled`` or
-    ``out-of-budget``."""
+    """How one attempt ended: ``ok``, ``failed`` (with its exit code), ``stalled``,
+    ``out-of-budget`` or ``unusable`` (the browser alone installed, and did not start)."""
 
     outcome: str
     returncode: int | None
@@ -116,6 +140,11 @@ class Attempt:
             )
         if self.outcome == "out-of-budget":
             return f"was stopped when the install budget ran out, after {self.seconds:.0f} s"
+        if self.outcome == "unusable":
+            return (
+                f"downloaded Chromium in {self.seconds:.0f} s, but it does not start on this "
+                "image without its system libraries"
+            )
         return f"succeeded in {self.seconds:.0f} s"
 
 
@@ -207,6 +236,26 @@ def write_apt_timeouts() -> bool:
     return _helper(("sudo", "-n", "tee", APT_CONF_PATH), stdin=APT_CONF)
 
 
+def browser_starts(out: TextIO | None = None) -> bool:
+    """Start the installed Chromium once and close it; True when it ran. What a failed start
+    printed is echoed, so the log says which library is missing."""
+    sink = out if out is not None else sys.stdout
+    try:
+        done = subprocess.run(
+            list(PROBE_COMMAND),
+            text=True,
+            capture_output=True,
+            timeout=HELPER_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"browser start probe did not finish: {exc}", file=sink, flush=True)
+        return False
+    if done.returncode != 0:
+        print((done.stdout + done.stderr).strip(), file=sink, flush=True)
+    return done.returncode == 0
+
+
 def cleanup() -> None:
     """Kill a root apt-get a stopped attempt left behind (none is the usual case)."""
     _helper(CLEANUP_COMMAND)
@@ -235,6 +284,7 @@ def main(
     clock: Callable[[], float] = time.monotonic,
     out: TextIO | None = None,
     record: Callable[[float, float], None] = record_install,
+    probe: Callable[[], bool] = browser_starts,
 ) -> int:
     sink = out if out is not None else sys.stdout
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -245,22 +295,33 @@ def main(
     parser.add_argument("--no-apt-timeouts", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
-    command = [c for c in args.command if c != "--"] or list(DEFAULT_COMMAND)
+    custom = [c for c in args.command if c != "--"]
     if args.attempts < 1 or args.idle_timeout <= 0 or args.budget <= 0 or args.backoff < 0:
         parser.error("--attempts must be at least 1, the timeouts positive, --backoff not negative")
 
-    if not args.no_apt_timeouts and not apt():
-        print(
-            "::warning title=browser install::could not write apt's network timeouts "
-            f"({APT_CONF_PATH}); a stalled mirror is bounded only by the idle timeout",
-            file=sink,
-        )
     started = clock()
     deadline = started + args.budget
     tried: list[Attempt] = []
+    # The default install tries the browser alone first and calls apt only if it does not
+    # start (P-816); a command given after ``--`` is run as written.
+    browser_only = not custom
+    apt_bounded = args.no_apt_timeouts
     for k in range(1, args.attempts + 1):
+        if not browser_only and not apt_bounded:
+            apt_bounded = True
+            if not apt():
+                print(
+                    "::warning title=browser install::could not write apt's network timeouts "
+                    f"({APT_CONF_PATH}); a stalled mirror is bounded only by the idle timeout",
+                    file=sink,
+                )
+        command = custom or list(BROWSER_ONLY_COMMAND if browser_only else DEFAULT_COMMAND)
         print(f"::group::browser install, attempt {k} of {args.attempts}", file=sink, flush=True)
         attempt = run(command, idle_timeout_s=args.idle_timeout, deadline=deadline, out=sink)
+        if attempt.outcome == "ok" and browser_only and not probe():
+            # Downloaded, but a system library is missing: the next attempt installs them.
+            attempt = Attempt("unusable", attempt.returncode, attempt.seconds)
+            browser_only = False
         tried.append(attempt)
         print("::endgroup::", file=sink, flush=True)
         if attempt.outcome == "ok":
@@ -274,15 +335,32 @@ def main(
             file=sink,
             flush=True,
         )
+        if attempt.outcome == "unusable":
+            # Nothing was stopped and no mirror was asked: no apt to clean up, no backoff.
+            if k == args.attempts or clock() >= deadline:
+                break
+            continue
         cleanup()
         if k == args.attempts or clock() + args.backoff >= deadline:
             break
         sleep(args.backoff)
-    if all(a.outcome == "failed" for a in tried):
+    # An "unusable" attempt asked no mirror and stopped nothing, so it says nothing about the
+    # network: the cause is read from the attempts that ran an install to its end.
+    installs = [a for a in tried if a.outcome != "unusable"]
+    if (
+        installs
+        and tried[-1].outcome != "unusable"
+        and all(a.outcome == "failed" for a in installs)
+    ):
         cause = (
             f"the install exited non-zero every time (the last with exit {tried[-1].returncode}), "
             "so read its output above before rerunning: a rerun meets the same error unless the "
             "network caused it"
+        )
+    elif tried[-1].outcome == "unusable":
+        cause = (
+            "Chromium was downloaded but does not start, and no attempt or budget was left to "
+            "install its system libraries; read the probe's output above"
         )
     elif tried[-1].outcome == "out-of-budget":
         cause = (
