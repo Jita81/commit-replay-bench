@@ -16,10 +16,11 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   ([#124](https://github.com/Jita81/commit-replay-bench/pull/124)).
   `scripts/check_ui_types_drift.py` builds the OpenAPI schema offline and compares each
   `ui/src/api/types.ts` interface that maps to a component; the fresh-clone gates fail on drift
-  not in the reviewed `scripts/ui_types_drift_allowlist.txt` or on a stale entry. Every finding
-  today is a required field the UI does not declare **[measured — n = 52 findings over the 71
-  of 172 shapes that map to a component; method: `check_ui_types_drift.py --list` at
-  `0909129d`; apparatus 2.5]**. `.github/workflows/scorecard.yml` runs the OpenSSF Scorecard
+  not in the reviewed `scripts/ui_types_drift_allowlist.txt`, on a stale entry, or when the
+  committed `scripts/ui_types_mapped.txt` coverage changes. Every finding today is a required
+  field the UI does not declare **[measured — n = 56 findings over the 78 of 172 shapes that
+  map to a component; method: `check_ui_types_drift.py --list` merged with `e1d267c9`;
+  apparatus 2.5]**. `.github/workflows/scorecard.yml` runs the OpenSSF Scorecard
   weekly and on push to `main`, uploading SARIF to code scanning.
 
 - **Wave 4 amendment 1: the four ordered lists**

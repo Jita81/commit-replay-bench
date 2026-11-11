@@ -22,8 +22,13 @@ The drift that existed when the check landed is recorded in
 ``scripts/ui_types_drift_allowlist.txt``, one line per finding with the reason it is
 tolerated. The check fails on a finding that is not on the list, and on a list entry that no
 longer drifts (so the list only shrinks, like ``scripts/code_map_onboarding_baseline.txt``).
+The coverage is committed too: ``scripts/ui_types_mapped.txt`` lists every interface compared
+and its component, and the check fails when a listed interface stops mapping to its component
+(a response model renamed on the server would otherwise leave the comparison in silence) or
+when a mapping appears that the list does not record.
 
-    python scripts/check_ui_types_drift.py --check   # CI: exit 1 on new drift or a stale entry
+    python scripts/check_ui_types_drift.py --check   # CI: exit 1 on new drift, a stale entry
+                                                     # or a change in the mapped shapes
     python scripts/check_ui_types_drift.py --list    # every finding and every unmapped type
 
 Navigation
@@ -34,8 +39,8 @@ What it is:   The drift check between the UI's hand-written wire types and the A
 What it does: Parses each exported interface (and object-literal type alias) of
               ui/src/api/types.ts into its field names, maps it to an OpenAPI schema component,
               reports fields the component lacks and required fields types.ts lacks, and in
-              ``--check`` mode fails on a finding not in the allowlist or an allowlist entry
-              that no longer drifts.
+              ``--check`` mode fails on a finding not in the allowlist, an allowlist entry
+              that no longer drifts, or a mapping that differs from the committed list.
 How:          Comments stripped, braces counted, only depth-1 ``name?:`` declarations read;
               ``create_app(Settings(env="dev")).openapi()`` for the schema (needs the server
               extra; the parser and the comparison are stdlib only).
@@ -43,10 +48,12 @@ Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   ui/src/api/types.ts (the types it reads), src/crb/server/app.py (``create_app``,
               whose ``.openapi()`` it compares against), scripts/ui_types_drift_allowlist.txt
-              (the reviewed drift), .github/workflows/ci.yml (the ``fresh-clone-gates`` line)
+              (the reviewed drift), scripts/ui_types_mapped.txt (the committed coverage),
+              .github/workflows/ci.yml (the ``fresh-clone-gates`` line)
 Tested by:    tests/test_check_ui_types_drift.py
 Touch when:   never for a new repository (it compares this repository's own UI and API); a
-              response model is renamed so an interface stops mapping (add it to ``ALIASES``);
+              response model is renamed so an interface stops mapping (add it to ``ALIASES``
+              and keep its line in scripts/ui_types_mapped.txt);
               a field is added to or removed from either side (fix the side that is wrong, and
               delete the allowlist line the fix retires).
 """
@@ -67,11 +74,19 @@ from crb.server.settings import Settings
 ROOT = Path(__file__).resolve().parent.parent
 TYPES_TS = ROOT / "ui" / "src" / "api" / "types.ts"
 ALLOWLIST = Path(__file__).resolve().parent / "ui_types_drift_allowlist.txt"
+MAPPED = Path(__file__).resolve().parent / "ui_types_mapped.txt"
 
 #: Interfaces whose component name is not mechanical (``X``, ``XOut``, ``X-Output``),
 #: each read against the route that returns it. Add one only after reading that route.
 ALIASES: dict[str, str] = {
     "ApiErrorEnvelope": "ErrorEnvelope",
+    "CapabilityMap": "CapabilityMapWithControlsOut",  # GET /capability-map
+    "FactoryBacklogItem": "BacklogItemOut",  # GET /factory/backlog items
+    "FactoryRefusal": "RefusalOut",  # a factory task's refusal
+    "FactoryWayForward": "WayForwardOut",  # a factory task's way forward
+    "GitHubInstallation": "InstallationOut",  # POST /github/installations/sync
+    "LedgerDisqualifiedBuilder": "DisqualifiedBuilderOut",  # the ledger's by_builder rows
+    "RoutingPolicy": "RoutingPolicyWithControlsOut",  # the policy of /capability-map, /routes
 }
 
 KINDS = ("unknown-field", "missing-required")
@@ -180,6 +195,45 @@ def component_for(name: str, schemas: Mapping[str, Any]) -> str | None:
     return None
 
 
+def mapping(shapes: Mapping[str, TsShape], schemas: Mapping[str, Any]) -> dict[str, str]:
+    """``{interface: component}`` for every shape that maps to a component (the coverage)."""
+    out = {name: component_for(name, schemas) for name in sorted(shapes)}
+    return {name: comp for name, comp in out.items() if comp is not None}
+
+
+def read_mapped(text: str) -> dict[str, str]:
+    """The committed coverage: ``{interface: component}``, one ``Interface Component`` per line."""
+    out: dict[str, str] = {}
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            raise ValueError(f"mapped list line {n}: want 'Interface Component'")
+        out[parts[0]] = parts[1]
+    return out
+
+
+def check_coverage(current: Mapping[str, str], committed: Mapping[str, str]) -> list[str]:
+    """Each coverage error: a committed interface that no longer maps to its component (a
+    server rename would otherwise drop it from the comparison in silence), and a new mapping
+    the committed list does not record (so the list is the coverage, exactly)."""
+    errors = [
+        f"coverage lost: {name} no longer maps to {comp} "
+        f"(now {current.get(name) or 'unmapped'}) — add an ALIASES entry after reading the "
+        "route, or change its line in scripts/ui_types_mapped.txt"
+        for name, comp in sorted(committed.items())
+        if current.get(name) != comp
+    ]
+    errors += [
+        f"new mapping: {name} -> {comp} is not in scripts/ui_types_mapped.txt — add the line"
+        for name, comp in sorted(current.items())
+        if name not in committed
+    ]
+    return errors
+
+
 def compare(
     shapes: Mapping[str, TsShape], schemas: Mapping[str, Any]
 ) -> tuple[list[Finding], list[str]]:
@@ -256,6 +310,7 @@ def main(
     schemas: Mapping[str, Any] | None = None,
     types_text: str | None = None,
     allowlist_text: str | None = None,
+    mapped_text: str | None = None,
 ) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     mode = ap.add_mutually_exclusive_group(required=True)
@@ -264,7 +319,8 @@ def main(
     args = ap.parse_args(argv)
 
     shapes = parse_ts(types_text if types_text is not None else TYPES_TS.read_text("utf-8"))
-    findings, unmapped = compare(shapes, schemas if schemas is not None else openapi_schemas())
+    schemas = schemas if schemas is not None else openapi_schemas()
+    findings, unmapped = compare(shapes, schemas)
     if args.list:
         for f in findings:
             print(f"{f.line}  # {f.detail}")
@@ -275,12 +331,15 @@ def main(
         allowed = read_allowlist(
             allowlist_text if allowlist_text is not None else ALLOWLIST.read_text("utf-8")
         )
+        committed = read_mapped(
+            mapped_text if mapped_text is not None else MAPPED.read_text("utf-8")
+        )
     except ValueError as e:
         print(f"::error::{e}")
         return 1
-    errors = check(findings, allowed)
-    for e in errors:
-        print(f"::error::{e}")
+    errors = check(findings, allowed) + check_coverage(mapping(shapes, schemas), committed)
+    for err in errors:
+        print(f"::error::{err}")
     print(
         f"ui types drift: {len(shapes) - len(unmapped)} of {len(shapes)} shapes compared, "
         f"{len(findings)} finding(s), {len(allowed)} allowlisted, {len(errors)} error(s)"

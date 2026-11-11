@@ -1,6 +1,7 @@
 # The reviewed UI-types drift: ui/src/api/types.ts against the API's OpenAPI schema.
 #
-# Read by scripts/check_ui_types_drift.py --check (CI's `types` job). One line per finding:
+# Read by scripts/check_ui_types_drift.py --check (CI's `fresh-clone-gates`, and the `test`
+# job through tests/test_check_ui_types_drift.py). One line per finding:
 #
 #     Interface.field <kind>  # why it is tolerated
 #
@@ -9,12 +10,14 @@
 #        missing-required (the schema requires a field types.ts does not declare — the server
 #                          sends it and no screen reads it through this type)
 #
-# Recorded at 0909129d, when the check landed: every finding was missing-required, none was
+# Recorded at 0909129d, when the check landed (the CapabilityMap and RoutingPolicy lines when
+# their ALIASES entries were added): every finding was missing-required, none was
 # unknown-field. Each entry below is the server sending a required field that the UI's
 # hand-written type leaves out because no screen reads it through that type; none is a field
 # the UI reads and the server does not send. This list only shrinks: declare the field in
 # types.ts (or drop it from the response model) and delete its line — `--check` fails on a
 # line that no longer drifts, and on any drift that is not listed here.
+CapabilityMap.controls missing-required  # CapabilityMapWithControlsOut sends it; ui/src/screens/Capability/contract.ts's CapabilityMapWithControls extends this type and declares it; the screens read it there
 CapabilitySummary.cells_by_route missing-required  # CapabilitySummary sends it; types.ts declares a subset of CapabilitySummary and no screen reads this field
 CapabilitySummary.earned_coverage missing-required  # CapabilitySummary sends it; types.ts declares a subset of CapabilitySummary and no screen reads this field
 CapabilitySummary.profile_commits missing-required  # CapabilitySummary sends it; types.ts declares a subset of CapabilitySummary and no screen reads this field
@@ -63,6 +66,9 @@ RepoProfile.examined missing-required  # RepoProfile sends it; types.ts declares
 RepoProfile.ref missing-required  # RepoProfile sends it; types.ts declares a subset of RepoProfile and no screen reads this field
 RepoProfile.size_totals missing-required  # RepoProfile sends it; types.ts declares a subset of RepoProfile and no screen reads this field
 RepoProfile.skipped missing-required  # RepoProfile sends it; types.ts declares a subset of RepoProfile and no screen reads this field
+RoutingPolicy.controls_version missing-required  # RoutingPolicyWithControlsOut sends it; ui/src/screens/Capability/contract.ts's RoutingPolicyWithControls extends this type and declares it; the screens read it there
+RoutingPolicy.max_controls_escapes missing-required  # RoutingPolicyWithControlsOut sends it; ui/src/screens/Capability/contract.ts's RoutingPolicyWithControls extends this type and declares it; the screens read it there
+RoutingPolicy.min_controls_share missing-required  # RoutingPolicyWithControlsOut sends it; ui/src/screens/Capability/contract.ts's RoutingPolicyWithControls extends this type and declares it; the screens read it there
 Run.apparatus missing-required  # RunOut sends it; types.ts declares a subset of RunOut and no screen reads this field
 Run.retain missing-required  # RunOut sends it; types.ts declares a subset of RunOut and no screen reads this field
 RunTaskRow.first_pass_clean missing-required  # RunTaskRow sends it; types.ts declares a subset of RunTaskRow and no screen reads this field

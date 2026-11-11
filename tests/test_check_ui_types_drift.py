@@ -10,15 +10,17 @@ What it does: Pins that the parser reads each exported interface's own depth-1 f
               but never to a free-form component with no properties; that an unknown field and
               a missing required field are each a finding and an inherited field is not
               missing; that ``--check`` fails on new drift, on a stale allowlist entry and on
-              an entry with no reason, and passes when the list matches; and that this tree's
-              types.ts and schema pass ``--check`` against the committed allowlist, and CI's
-              fresh-clone gates run it.
+              an entry with no reason, and passes when the list matches; that it fails when a
+              committed mapping is lost (a server rename) or a new one is not recorded; and
+              that this tree's types.ts and schema pass ``--check`` against the committed
+              allowlist and mapped list, and CI's fresh-clone gates run it.
 How:          Calls the parser and ``compare`` on small inline sources and schemas; drives
               ``main`` with injected text; one test builds the real schema from the app.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   scripts/check_ui_types_drift.py (the code under test),
               scripts/ui_types_drift_allowlist.txt (the reviewed drift),
+              scripts/ui_types_mapped.txt (the committed coverage),
               ui/src/api/types.ts (the real types the tree-level test parses),
               .github/workflows/ci.yml (the ``fresh-clone-gates`` line that runs ``--check``)
 Tested by:    (this is a test file)
@@ -126,8 +128,16 @@ def test_compare_finds_unknown_and_missing_required_but_not_inherited() -> None:
     assert unmapped == ["Page"]
 
 
-def _run(allowlist: str, schemas: dict[str, Any]) -> int:
-    return int(m.main(["--check"], schemas=schemas, types_text=TS, allowlist_text=allowlist))
+def _run(allowlist: str, schemas: dict[str, Any], mapped: str = "Literal Literal\n") -> int:
+    return int(
+        m.main(
+            ["--check"],
+            schemas=schemas,
+            types_text=TS,
+            allowlist_text=allowlist,
+            mapped_text=mapped,
+        )
+    )
 
 
 SCHEMAS = {"Literal": _schema(["a"], ["a", "c"])}  # b unknown, c missing
@@ -178,3 +188,35 @@ def test_ci_runs_the_check_in_the_fresh_clone_gates() -> None:
     cmd = ".venv/bin/python scripts/check_ui_types_drift.py --check"
     fresh = [str(s.get("run", "")) for s in ci["jobs"]["fresh-clone-gates"]["steps"]]
     assert any(cmd in r for r in fresh)
+
+
+LISTED = "Literal.b unknown-field  # r\nLiteral.c missing-required  # r\n"
+
+
+def test_check_fails_when_a_mapped_shape_stops_mapping(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A server-side rename of a response model must not drop its interface in silence."""
+    assert _run(LISTED, SCHEMAS) == 0
+    renamed = {"LiteralRenamed": SCHEMAS["Literal"]}
+    assert _run("", renamed) == 1
+    assert "coverage lost: Literal no longer maps to Literal (now unmapped)" in (
+        capsys.readouterr().out
+    )
+    assert _run(LISTED, {"LiteralOut": SCHEMAS["Literal"]}) == 1  # mapped elsewhere: also lost
+    assert "now LiteralOut" in capsys.readouterr().out
+
+
+def test_check_fails_on_a_mapping_the_list_does_not_record(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert _run(LISTED, SCHEMAS, mapped="") == 1
+    assert "new mapping: Literal -> Literal" in capsys.readouterr().out
+    with pytest.raises(ValueError):
+        m.read_mapped("Literal\n")
+
+
+def test_the_committed_mapped_list_is_the_coverage() -> None:
+    committed = m.read_mapped(m.MAPPED.read_text("utf-8"))
+    assert committed["ApiErrorEnvelope"] == "ErrorEnvelope"
+    assert set(m.ALIASES) <= set(committed)  # every reviewed alias is compared
