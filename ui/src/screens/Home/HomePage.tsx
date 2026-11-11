@@ -62,12 +62,11 @@
  *               `ErrorState`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none (DL-042, DL-044, DL-074)
- * Works with:   ui/src/screens/Home/useGetStarted.ts (the reads and statuses below, shared
- *               with the shell's "n of 8"),
+ * Works with:   ui/src/screens/Home/useGetStarted.ts (the reads in hooks.ts and the statuses
+ *               below, shared with the shell's "n of 8"),
  *               ui/src/components/govuk.tsx (TaskList, NotificationBanner, InsetText),
  *               ui/src/components/ErrorState.tsx (the failed reads, with Retry),
  *               ui/src/help/hints.ts (the `task.home.*` copy; the trigger is `Hint`),
- *               ui/src/api/hooks.ts (`useActiveRun`, `useSignoffs`),
  *               ui/src/screens/Connect/connection.ts (the connection state each task reads),
  *               ui/src/screens/Factory/FactoryPage.tsx (where the tasks lead: with Connect
  *               and Results, the routes in ui/src/App.tsx; screens/Factory/intake.ts is the

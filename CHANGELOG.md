@@ -15,9 +15,17 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 - **Set-up progress in the header; one action on each empty list**
   ([#122](https://github.com/Jita81/commit-replay-bench/pull/122)). Off /home, an operator now
   sees "n of 8" with a Continue link to the next Get-started task. It comes from a `useGetStarted`
-  hook lifted out of HomePage, so the two cannot drift. A failed read shows "Get started:
-  unavailable", and the indicator hides at 8 of 8. The empty Factory items list now links to
+  hook lifted out of HomePage, and the count is for the page's `?repo=` and links to Home with
+  that repository, so the two show the same count. A failed read a task stands on shows "Get
+  started: unavailable", and the indicator hides at 8 of 8. The empty Factory items list now links to
   intake, and the empty Decisions queue links to the capability map. UI only; nothing is deployed.
+
+- **Wave 4 amendment 1: the four ordered lists**
+  ([#120](https://github.com/Jita81/commit-replay-bench/pull/120)). The registration's first
+  amendment, appended before the pilot. It records the two qualify runs at apparatus 2.5 and
+  their postures, each cell's key string, pool size, full seeded order and sha256, and strikes
+  the pilot's six click commits. The orders were checked against
+  `crb.core.reading.seeded_order`. Docs only; nothing is spent.
 
 - **The Wave 4 registration**
   ([#117](https://github.com/Jita81/commit-replay-bench/pull/117)). A new record,

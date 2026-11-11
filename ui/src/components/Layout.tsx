@@ -402,23 +402,29 @@ export function Layout() {
 /**
  * Home's "n of 8" and its Continue, on every other screen: the same derivation Home shows
  * (`useGetStarted`), so the next step is one press away wherever the operator is. Nothing while
- * a read is on its first fetch; "unavailable" when one failed — never a count that reads a
- * failed read as an incomplete task (G-164); nothing once all eight are Completed.
+ * a read is on its first fetch; nothing once all eight are Completed; "unavailable" when a
+ * task stands on a read that failed — never a count that reads a failed read as an incomplete
+ * task (G-164); a failed read no task stands on (health, intake) leaves the count. The count
+ * is for the page's `?repo=` (else the latest) and links to Home with that repository named.
  */
 function GetStartedProgress() {
-  const { tasks, completed, nextTask, unread, loading } = useGetStarted()
+  const { tasks, completed, nextTask, loading, chosen, q } = useGetStarted()
+  // Home counts the repository it is given, so the link carries the one this count is for
+  const home = `/home${q}`
   if (loading) return null
-  if (unread.length > 0) {
+  if (completed === tasks.length) return null
+  // only a read a task stands on makes the count unknown: such a task reads "Unavailable". A
+  // failed read no task stands on (health, board intake) leaves every task's status known
+  if (tasks.some((t) => t.status === 'Unavailable')) {
     return (
-      <Hint as={NavLink} id="stat.shell.get_started" to="/home" className="text-[14px] text-on-primary underline" data-testid="shell-get-started">
+      <Hint as={NavLink} id="stat.shell.get_started" to={home} className="text-[14px] text-on-primary underline" data-testid="shell-get-started">
         Get started: unavailable
       </Hint>
     )
   }
-  if (completed === tasks.length) return null
   return (
     <span className="inline-flex items-center gap-2 text-[14px]" data-testid="shell-get-started">
-      <Hint as={NavLink} id="stat.shell.get_started" to="/home" className="text-on-primary underline">
+      <Hint as={NavLink} id="stat.shell.get_started" to={home} aria-label={chosen ? `${chosen}: ${completed} of ${tasks.length}` : undefined} className="text-on-primary underline">
         {completed} of {tasks.length}
       </Hint>
       {nextTask?.to && (
