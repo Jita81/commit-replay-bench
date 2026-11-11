@@ -668,6 +668,22 @@ def test_the_anchor_directory_lock_excludes_a_second_holder(tmp_path: Path) -> N
         os.close(fd)
 
 
+def test_a_platform_without_fcntl_is_refused_and_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Where the directory cannot be locked the anchor is refused, not written unlocked: the
+    race the lock closes would otherwise stay open there."""
+    import sys
+
+    from crb.core.anchor import AnchorError, anchor_dir_lock
+
+    monkeypatch.setitem(sys.modules, "fcntl", None)  # makes ``import fcntl`` raise ImportError
+    out = tmp_path / "anchors"
+    with pytest.raises(AnchorError, match="no fcntl"), anchor_dir_lock(out):
+        pytest.fail("the lock must not be granted")
+    assert not out.exists()
+
+
 def test_an_anchor_waits_for_the_directory_lock_and_then_chains(
     ledger: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

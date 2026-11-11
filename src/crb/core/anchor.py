@@ -344,12 +344,14 @@ def anchor_dir_lock(directory: Path) -> Iterator[None]:
     2026-11-11). ``flock`` on the directory itself, so no lock file sits among the anchors;
     the directory is created if absent. After the lock is taken the path is checked to still
     be the locked directory, so a directory removed by the previous holder is taken again.
-    A platform without ``fcntl`` runs unlocked."""
+    A platform without ``fcntl`` is refused: an anchor written unlocked could fork the chain."""
     try:
         import fcntl  # noqa: PLC0415 — POSIX only; guarded
-    except ImportError:
-        yield
-        return
+    except ImportError as e:
+        raise AnchorError(
+            "cannot lock the anchor directory on this platform (no fcntl), so no anchor is "
+            "written: two unlocked commands could both write a first anchor"
+        ) from e
     while True:
         try:
             directory.mkdir(parents=True, exist_ok=True)

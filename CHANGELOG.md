@@ -18,9 +18,9 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   each chain's row count and head, chained to the directory's previous anchor. It refuses a
   directory inside the ledger's data directory and warns when the directory shares its
   filesystem. `crb ledger verify --anchor <file-or-dir>` fails, naming the first anchor that no
-  longer holds, when the ledger was cut at its end or rebuilt. One command at a time writes to
-  an anchor directory (a lock on the directory), so two cannot both write a first anchor.
-  docs/LEDGER-ANCHORS.md says who should hold anchors and what an unsigned anchor cannot prove.
+  longer holds, when the ledger was cut at its end or rebuilt. A lock on the directory lets one
+  command write at a time, so two cannot both write a first anchor; a platform with no `fcntl`
+  is refused. docs/LEDGER-ANCHORS.md says who should hold anchors and what one cannot prove.
 
 - **The factory's pull request names the cell that licensed it**
   ([#125](https://github.com/Jita81/commit-replay-bench/pull/125)).
