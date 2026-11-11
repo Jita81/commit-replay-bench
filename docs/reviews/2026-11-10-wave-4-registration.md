@@ -443,7 +443,8 @@ Harness².
 ## Amendment 1 — the four lists, before the pilot — 2026-11-11
 
 This is the first amendment of part 2, step 3. It is appended before the pilot and before any
-Wave 4 run is filed. No model money has been spent: both qualify runs cost $0.
+Wave 4 run is filed. No model money has been spent: both qualify runs cost $0
+**[measured — n = 2 qualify runs, method: the cost field of each run record read from the served API, apparatus 2.5]**.
 
 **Where the lists come from.** Each repository was re-qualified at apparatus 2.5 with one
 `qualify` run on the served stack, in the sealed docker posture the wave runs use
@@ -458,7 +459,9 @@ Wave 4 run is filed. No model money has been spent: both qualify runs cost $0.
 reads `qualified` and whose task row is `bug.fix`, of the cell's size, of the repository's
 language and in the `standard` pool. The order is `crb.core.reading.seeded_order` over that pool
 with the key string shown. The orders were computed twice, once in the browser from the served
-API and once with the product's own function, and the two agree. Each sha256 is over the list as
+API and once with the product's own function, and the two agree
+**[measured — n = 4 lists, method: the browser result from the served API compared with `seeded_order` commit by commit, apparatus 2.5]**.
+Each sha256 is over the list as
 written below: one commit per line, each line ended by a newline.
 
 **One thing not checked.** The product's pool rule also requires the qualified record's projected
