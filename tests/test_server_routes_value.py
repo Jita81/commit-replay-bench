@@ -27,6 +27,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -228,6 +229,82 @@ def test_a_row_from_before_2_3_is_placed_by_its_runs_executor(env: Env) -> None:
     assert (d["posture_class"], d["unqualified_posture"]) == (HOST, 2)
     assert d["north_star"]["n_attempts"] == 1
     assert env.get(f"/value?repo={ALPHA}&apparatus=2.2&posture={SEALED}").json()["rows"] == 0
+
+
+def _add_legacy_runs(env: Env, n: int) -> None:
+    """``n`` pre-2.3 runs the host graded, one blind row each, at apparatus 2.2."""
+    from crb.store.models import Run
+
+    with env.factory() as s:
+        for i in range(n):
+            s.add(
+                Run(
+                    id=f"9{i:031d}",
+                    repo=ALPHA,
+                    kind="replay",
+                    status="succeeded",
+                    apparatus_json={"executor": {"executor": "local"}},
+                )
+            )
+        s.commit()
+    ledger = DbLedger(env.factory)
+    template = next(r for r in ledger.rows(repo=ALPHA) if r.clean)
+    for i in range(n):
+        d = template.to_dict()
+        d.update(
+            {
+                "mode": "blind",
+                "row_id": "",
+                "prev_hash": "",
+                "row_hash": "",
+                "cost_usd": 0.5,
+                "task_id": f"g{i:039d}",
+                "run_id": f"9{i:031d}",
+            }
+        )
+        d["labels"] = {k: v for k, v in d["labels"].items() if not k.startswith(_POSTURE_KEYS)}
+        d.pop("failure_kind", None)
+        d.pop("cost_known", None)
+        ledger.append(GradeRow.from_dict(dict_at_apparatus(d, "2.2")))
+
+
+def _run_selects(env: Env, path: str) -> tuple[int, dict[str, Any]]:
+    """The ``SELECT``s on ``runs`` one request issues, and its body."""
+    from sqlalchemy import event as sa_event
+
+    engine = env.factory.kw["bind"]
+    seen: list[str] = []
+
+    def count(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+        del conn, cursor, args
+        if statement.lstrip().upper().startswith("SELECT") and "FROM runs" in statement:
+            seen.append(statement)
+
+    sa_event.listen(engine, "before_cursor_execute", count)
+    try:
+        r = env.get(path)
+    finally:
+        sa_event.remove(engine, "before_cursor_execute", count)
+    assert r.status_code == 200, r.text
+    return len(seen), r.json()
+
+
+@pytest.mark.parametrize("apparatus", ["2.2", "current"])
+def test_legacy_runs_are_read_in_one_batch_not_one_query_each(
+    env: Env, tmp_path: Path, apparatus: str
+) -> None:
+    """A pre-2.3 row is placed by its run's stamp: the stamps a request needs are read in
+    one batch, so the queries one ``/value`` issues do not grow with the ledger — and a run
+    outside the apparatus read is never looked up at all."""
+    path = f"/value?repo={ALPHA}&apparatus={apparatus}"
+    _add_legacy_runs(env, 2)
+    few, _ = _run_selects(env, path)
+    with make_env(tmp_path / "many") as many_env:
+        _add_legacy_runs(many_env, 12)
+        many, body = _run_selects(many_env, path)
+    assert many == few, (few, many)
+    if apparatus == "2.2":
+        assert body["north_star"]["n_attempts"] == 12
 
 
 def test_all_repositories_list_each_ones_north_star(env: Env) -> None:

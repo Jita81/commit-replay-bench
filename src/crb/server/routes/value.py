@@ -32,8 +32,9 @@ What it does: Serves ``ValueReport.to_dict()`` for one repository or all of them
               it; others counted in ``readings_other_posture``). Never writes and never
               calls a model.
 How:          ``DbLedger.rows`` (every repository — the pooled-review fallback needs them) →
-              ``value_row_from_grade`` with each row's comparable class
-              (``row_posture_class`` / ``comparable_class``, the map's rule);
+              the apparatus scope's rows → ``value_row_from_grade`` with each row's
+              comparable class (``row_posture_class`` / ``comparable_class``, the map's
+              rule; legacy runs' stamps read in one batch by ``legacy_executor_lookup``);
               ``DbReviewLedger.records`` → ``verdicts_from_reviews``
               (latest per row, joined to its row); ``all_prevention_records`` → the register →
               ``value_report`` scoped to ``repo`` and the posture class.
@@ -66,6 +67,7 @@ from crb.core.value import (
     REVIEWS_FROM_STORE,
     PosturePoolingError,
     default_register,
+    scope_label,
     select_rows,
     value_report,
     value_row_from_grade,
@@ -133,8 +135,13 @@ def value(  # noqa: PLR0917 — FastAPI dependencies + query params
     # every repository is read even for one: a repository with too few reviews borrows every
     # repository's before it falls back to the proxy, and a false-Q1 row anywhere refuses
     grades = list(DbLedger(factory).rows())
-    legacy_of = legacy_executor_lookup(db)
-    classed = [(g, comparable_class(row_posture_class(g, legacy_of))) for g in grades]
+    # the report reads only the apparatus scope (``select_rows``) — of every repository, for
+    # review placement and the pooled reviews — so only those rows are classed, and the
+    # legacy runs they need are read in one batch
+    want = scope_label(apparatus)
+    in_scope = [g for g in grades if want in ("all", g.apparatus_version)]
+    legacy_of = legacy_executor_lookup(db, in_scope)
+    classed = [(g, comparable_class(row_posture_class(g, legacy_of))) for g in in_scope]
     rows = [value_row_from_grade(g, posture_class=c) for g, c in classed if c != _LEGACY_DOCKER]
     unqualified = select_rows(
         (value_row_from_grade(g) for g, c in classed if c == _LEGACY_DOCKER),

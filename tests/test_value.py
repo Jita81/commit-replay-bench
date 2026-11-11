@@ -807,3 +807,33 @@ def test_a_ceiling_or_descriptive_arm_never_scores_a_deliver(arm: str) -> None:
         for i in range(25)
     ]
     assert prospective_routing(certifying).to_dict()["decisions"][ROUTE_DELIVER] == 5
+
+
+@pytest.mark.parametrize("repo", [None, "alpha"])
+@pytest.mark.parametrize("apparatus", ["current", "2.2", "all"])
+def test_the_report_reads_only_its_apparatus_scope(repo: str | None, apparatus: str) -> None:
+    """``GET /value`` classes only the rows of the apparatus read (every repository's): the
+    report over those rows and the reviews joined to them is the report over every row."""
+    rows: list[ValueRow] = []
+    for i in range(24):
+        kind = FAILURE_CLEAN if i % 3 else FAILURE_BUILDER_RED
+        rows.append(
+            vr(
+                i,
+                kind=kind,
+                repo="alpha" if i % 2 else "beta",
+                app="2.2" if i % 4 == 0 else APPARATUS_VERSION,
+                mode="blind" if i % 5 else "sighted",
+            )
+        )
+    every = [
+        verdict(i, mergeable=i % 7 != 0, repo=r.repo, row_hash=r.row_hash)
+        for i, r in enumerate(rows)
+        if r.clean
+    ]
+    every.append(verdict(99, mergeable=True))  # unjoined: placed by its repository
+    scoped = select_rows(rows, apparatus=apparatus)
+    hashes = {r.row_hash for r in scoped}
+    kept = [v for v in every if not v.grade_row_hash or v.grade_row_hash in hashes]
+    full = value_report(rows, every, repo=repo, apparatus=apparatus).to_dict()
+    assert value_report(scoped, kept, repo=repo, apparatus=apparatus).to_dict() == full
