@@ -62,6 +62,7 @@ from crb.core.value import (
     ReviewVerdict,
     ValueRow,
     default_register,
+    in_apparatus_scope,
     learning_curve,
     process_loss,
     prospective_routing,
@@ -837,3 +838,12 @@ def test_the_report_reads_only_its_apparatus_scope(repo: str | None, apparatus: 
     kept = [v for v in every if not v.grade_row_hash or v.grade_row_hash in hashes]
     full = value_report(rows, every, repo=repo, apparatus=apparatus).to_dict()
     assert value_report(scoped, kept, repo=repo, apparatus=apparatus).to_dict() == full
+
+
+@pytest.mark.parametrize("apparatus", ["current", "", "all", "2.2", APPARATUS_VERSION, "9.9"])
+def test_the_apparatus_scope_predicate_is_select_rows_rule(apparatus: str) -> None:
+    """``GET /value`` scopes its ledger rows by ``in_apparatus_scope`` before it builds value
+    rows: the predicate is the very rule ``select_rows`` applies, so the two cannot drift."""
+    rows = [vr(i, app="2.2" if i % 3 == 0 else APPARATUS_VERSION) for i in range(9)]
+    kept = [r for r in rows if in_apparatus_scope(r.apparatus_version, apparatus)]
+    assert kept == select_rows(rows, apparatus=apparatus)

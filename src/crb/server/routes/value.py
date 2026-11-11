@@ -67,7 +67,7 @@ from crb.core.value import (
     REVIEWS_FROM_STORE,
     PosturePoolingError,
     default_register,
-    scope_label,
+    in_apparatus_scope,
     select_rows,
     value_report,
     value_row_from_grade,
@@ -138,8 +138,7 @@ def value(  # noqa: PLR0917 — FastAPI dependencies + query params
     # the report reads only the apparatus scope (``select_rows``) — of every repository, for
     # review placement and the pooled reviews — so only those rows are classed, and the
     # legacy runs they need are read in one batch
-    want = scope_label(apparatus)
-    in_scope = [g for g in grades if want in ("all", g.apparatus_version)]
+    in_scope = [g for g in grades if in_apparatus_scope(g.apparatus_version, apparatus)]
     legacy_of = legacy_executor_lookup(db, in_scope)
     classed = [(g, comparable_class(row_posture_class(g, legacy_of))) for g in in_scope]
     rows = [value_row_from_grade(g, posture_class=c) for g, c in classed if c != _LEGACY_DOCKER]

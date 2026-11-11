@@ -1117,12 +1117,17 @@ def select_rows(
 ) -> list[ValueRow]:
     """Scope: one repository (``None`` = all) and one apparatus (``current`` = the running
     version, ``all`` = pooled on request — EVIDENCE-AND-CLAIMS §5: no claim blends versions)."""
-    want = scope_label(apparatus)
     return [
         r
         for r in rows
-        if (repo is None or r.repo == repo) and (apparatus == "all" or r.apparatus_version == want)
+        if (repo is None or r.repo == repo) and in_apparatus_scope(r.apparatus_version, apparatus)
     ]
+
+
+def in_apparatus_scope(apparatus_version: str, apparatus: str = "current") -> bool:
+    """Whether a row written under ``apparatus_version`` is in the ``apparatus`` scope — the
+    one rule :func:`select_rows` applies, for callers that scope other row types by it."""
+    return apparatus == "all" or apparatus_version == scope_label(apparatus)
 
 
 def scope_label(apparatus: str) -> str:
