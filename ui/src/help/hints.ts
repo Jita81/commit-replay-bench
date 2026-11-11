@@ -231,6 +231,10 @@ export const HINTS = {
     'This stack signs in any browser on the same computer as one named account, without a password. It refuses a request from another computer or one a proxy marks as forwarded (the UI dev server on this computer still works), and the server refuses to start with it in production. Sign out still works; reloading the page signs you in again.',
   'nav.version_line':
     'The three versions every claim cites: crb (the software), apparatus (the instrument that graded the rows) and policy (the routing rule). A sign-off made under an older apparatus is stale.',
+  'stat.shell.get_started':
+    'How many of Home’s eight set-up tasks are Completed, read the same way Home reads them. It says unavailable when part of the state could not be read, never a smaller number. Opens Home for the full list.',
+  'button.shell.continue':
+    'Go to the first set-up task you can act on now — the same task Home’s Continue names. Nothing spends money until a run you can see and cancel is queued.',
   'nav.footer_help':
     'The glossary and guides, in words, on every screen.',
   'nav.footer_glossary':
@@ -423,6 +427,8 @@ export const HINTS = {
   // ── /results — Baseline (screens/Results/ResultsPage.tsx + MapTable.tsx)
   'field.shared.repo_picker':
     'The repository every number on this screen is about. A cell says nothing about a repository it was not measured on. The choice is kept in the address so the page can be shared.',
+  'stat.results.summary':
+    'How many measured cells route deliver out of every measured cell, one line per apparatus the map reads, in the posture shown. n is the attempts behind all those measured cells, not only the deliver ones. No interval: these are exact counts of cells, not a sampled rate. The link opens the routes below, where each route carries its own n.',
   'banner.results.replay_running':
     'A replay is still grading attempts for this repository, so every number below moves as each row lands. Open the run to watch it.',
   'stat.results.controls':
@@ -742,6 +748,8 @@ export const HINTS = {
     'How long this decision has been waiting, from the moment the product first saw it was due. The clock is the server’s and runs whether or not anybody has this page open.',
   'stat.decisions.evidence':
     'On a cell row: the cell’s attempts (n), its clean rate with its 95 % Wilson interval, and the reason code that decided its route, under the apparatus in the kicker. On a re-measurement row: the rows needed to reach the rule’s first look, the estimated cost (or “cost not known” when no row recorded one), and the builder/model@provider it is re-measured on. On a factory or library row: what is missing or waiting.',
+  'link.decisions.empty_map':
+    'The capability map, one place decisions come from: a cell due a sign-off, a cell whose tests are too weak to trust or one whose evidence went stale appears here once the map says so. Factory items and library entries bring decisions here too.',
   'button.decisions.act':
     'Opens the page where this decision is taken — the sign-off form with the cell chosen, the Factory item, Learn (to strengthen the tests or queue a re-measurement), the Library entry, or the Ledger, depending on the kind. Nothing is recorded until you act there.',
   'button.decisions.read':
@@ -1106,6 +1114,8 @@ export const HINTS = {
     'What this deployment has measured about changes of this kind and size — the cell’s route, how many graded attempts it rests on and the interval around the rate. It is read before any build, never after.',
   'item.intake.item':
     'The backlog item this ticket is, or would be. Nothing is registered until every question a good acceptance test needs is answered on the ticket and an operator registers the draft.',
+  'link.factory.empty_intake':
+    'The board’s watched column for this repository: tickets read there can be registered as backlog items, which is how items arrive here besides typing them. Reading it is a viewer’s act.',
   'link.factory.intake':
     'The watched column on your own team’s board: which tickets the product has read, what it understood, what each one still needs answering, and where the ones it accepted went. Reading it is a viewer’s act; switching the listener on is an operator’s.',
   'item.intake.unclassified':
@@ -1432,6 +1442,10 @@ export const HINTS = {
     'The inference provider, when the builder supports more than one. Stamped on every row.',
   'field.run_new.ladder':
     'Comma-separated rung labels; each rung is one attempt, and the next runs only if the previous was not clean. Object rungs below are appended in order.',
+  'text.run_new.login_missing':
+    'A rung of this run calls Claude Code, and the login it would use has no credential on the server, or its last check failed, so the run would be refused before any attempt. A missing api_key login needs ANTHROPIC_API_KEY in the worker’s environment (or the run switched to auth cli); otherwise fix it on the Settings login card, then start the run.',
+  'link.run_new.login_settings':
+    'Opens the Claude Code login card in Settings in a new tab, where an operator saves the token or verifies the login this run needs. This dialog and its draft stay open here; the notice re-reads the login when you come back.',
   'field.run_new.cli_login':
     'Run the builder on the operator’s own subscription login instead of an API key. Developer and evaluation use only; the repository’s CLAUDE.md is auto-discovered in this mode.',
   'field.run_new.spend_cap':

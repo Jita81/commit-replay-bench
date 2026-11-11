@@ -11,7 +11,11 @@
  *               or not run, the gates card offers one click back to the walk step that
  *               produces it (`oracleTone` → `gateOpen`, one reading for the tile and the
  *               door, G-236 / G-444, P-634); the "Waiting on a person" card
- *               lists the first `SHOWN` rows and says how many more there are (G-237).
+ *               lists the first `SHOWN` rows and says how many more there are (G-237). Above
+ *               everything, one plain line per set the map shows (`summaryLines`: grouped by
+ *               apparatus, never pooled) says "k of N cells earn deliver" (measured cells
+ *               only) with the posture, the apparatus and a link to the routes card
+ *               holding the n; a failed map read says "Unavailable".
  * What it does: Gives an enterprise reader the answer in the order they need it — is the
  *               instrument trustworthy here, what may the builder be trusted to do, what is
  *               waiting on me — before any grid. Every number keeps its n, an interval or an
@@ -231,6 +235,67 @@ function poolTile(pool: RepoPool | undefined, pending: boolean, failed: boolean)
   }
 }
 
+/**
+ * One summary line per set the map shows: the measured cells grouped by the apparatus their
+ * rows were graded under (the server reads one apparatus and one posture by default, so this is
+ * normally one line), each saying how many of them route `deliver` under the product's own rule
+ * — the same count the deliver tile shows — with the attempts behind all N measured cells
+ * (never only the deliver cells', which read n = 0 before anything delivers). Sets are never
+ * pooled: two apparatus versions give two lines.
+ */
+export function summaryLines(cells: CapabilityCell[]): Array<{ apparatus: string; earned: number; measured: number; n: number }> {
+  const sets = new Map<string, { apparatus: string; earned: number; measured: number; n: number }>()
+  for (const c of cells) {
+    if (c.route === NOT_YET_MEASURED || c.n <= 0) continue
+    const apparatus = c.apparatus_versions.join('/') || '—'
+    const s = sets.get(apparatus) ?? { apparatus, earned: 0, measured: 0, n: 0 }
+    s.measured += 1
+    s.n += c.n
+    if (c.route === 'deliver') s.earned += 1
+    sets.set(apparatus, s)
+  }
+  return [...sets.values()].sort((a, b) => a.apparatus.localeCompare(b.apparatus))
+}
+
+/**
+ * The plain line at the top of the Baseline: "3 of 12 cells earn deliver" (of the measured cells), scoped to
+ * the posture and apparatus the map reads, with the attempts behind it one click away (the
+ * routes card below). A map read that failed says "Unavailable", never a stale or zero count.
+ */
+function SummaryLine({ state, cells, posture }: { state: 'pending' | 'failed' | 'ready'; cells: CapabilityCell[]; posture: string }) {
+  const lines = state === 'ready' ? summaryLines(cells) : []
+  return (
+    <Hint as="div" id="stat.results.summary" className="mb-4 text-[19px] font-bold leading-[1.4]" data-testid="results-summary">
+      {state === 'failed' ? (
+        <p className="m-0" data-testid="results-summary-line">
+          Unavailable
+        </p>
+      ) : state === 'pending' ? (
+        <p className="m-0 font-normal text-on-surface-muted" data-testid="results-summary-line">
+          Reading the map…
+        </p>
+      ) : lines.length === 0 ? (
+        <p className="m-0" data-testid="results-summary-line">
+          No cell measured yet
+        </p>
+      ) : (
+        lines.map((l) => (
+          <p key={l.apparatus} className="m-0" data-testid="results-summary-line">
+            {l.earned} of {l.measured} cell{l.measured === 1 ? ' earns' : 's earn'} deliver{' '}
+            <span className="text-[16px] font-normal text-on-surface-muted">
+              · measured cells only · posture {posture || '—'} · apparatus {l.apparatus} ·{' '}
+              <a href="#baseline-routes" className="text-primary underline" data-testid="results-summary-n">
+                n = {l.n} attempts behind the {l.measured} measured cell{l.measured === 1 ? '' : 's'}
+              </a>{' '}
+              · no interval: exact counts of measured cells, not a sampled rate
+            </span>
+          </p>
+        ))
+      )}
+    </Hint>
+  )
+}
+
 /** The controls report's own stamp: `apparatus 2.2 · controls.v3`; the keys the report writes (crb.core.oracle.controls). */
 function controlsApparatus(stamp: Record<string, unknown>): string {
   const v = typeof stamp.apparatus_version === 'string' ? stamp.apparatus_version : '—'
@@ -340,6 +405,7 @@ export function ResultsPage() {
         actions={<RepoPicker value={repo} onChange={setRepo} />}
       />
       {!repo && <EmptyState title="Choose a repository" reason="Results are per repository — a cell says nothing about a repository it was not measured on." action={<LinkButton to="/connect">Connect one</LinkButton>} />}
+      {repo && <SummaryLine state={map.isError ? 'failed' : mapData ? 'ready' : 'pending'} cells={mapData?.cells ?? []} posture={mapData?.summary.posture_class ?? ''} />}
       {repo && map.isPending && <p className="text-sm text-on-surface-muted">Loading the baseline for {repo}…</p>}
       {repo && map.isError && <ErrorState error={map.error} onRetry={() => void map.refetch()} />}
       {repo && mapData && (
@@ -423,7 +489,7 @@ export function ResultsPage() {
             </div>
           </Card>
 
-          <Card title="What may the builder be trusted to do?" eyebrow="the routes, with n" actions={<LinkButton size="sm" to={`/capability?${q}`} hint="button.results.full_map">Open the full map</LinkButton>}>
+          <Card id="baseline-routes" title="What may the builder be trusted to do?" eyebrow="the routes, with n" actions={<LinkButton size="sm" to={`/capability?${q}`} hint="button.results.full_map">Open the full map</LinkButton>}>
             {measured.length === 0 ? (
               <EmptyState compact glyph="◌" title="Nothing measured yet" reason="A first sighted replay puts rows on the map." action={<LinkButton size="sm" to={walk} hint="button.results.back_to_walk">Back to the walk</LinkButton>} />
             ) : (
