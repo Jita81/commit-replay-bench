@@ -748,8 +748,13 @@ class StreamStats:
         """``(cost_usd, known)`` with every message priced at the rate of the model that
         answered it (``pricing`` for the builder's own and for a message that named none):
         what a session that used more than one model is costed from. Unknown, ``0.0``, as
-        soon as one of the other models is not in the table."""
+        soon as one of the other models is not in the table, and when the result event
+        reports more tokens than the messages add up to: those tokens have no model to be
+        priced at, and leaving them out would under-count the spend."""
         other = set(self.other_models(own))
+        rows = self.usage_by_message.values()
+        if any(t > sum(r[i] for r in rows) for i, t in enumerate(self.totals())):
+            return 0.0, False
         total = 0.0
         for key, (tin, tout, cached) in self.usage_by_message.items():
             model = self.model_by_message.get(key, "")

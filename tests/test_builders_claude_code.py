@@ -1015,6 +1015,23 @@ def test_a_message_from_a_model_the_table_lacks_makes_the_cost_unknown(tmp_path:
     ws.remove()
 
 
+def test_result_tokens_no_message_accounts_for_make_a_mixed_cost_unknown(tmp_path: Path) -> None:
+    """The result reports more than the messages add up to (a call whose message never
+    reached the stream): in a session with a second model those tokens have no rate, so
+    the cost is unknown instead of a lower figure recorded as measured."""
+    lines = [
+        ev_init("claude-sonnet-5"),
+        ev_assistant(text("a"), tin=1_000, tout=100, msg_id="m1", model="claude-sonnet-5"),
+        ev_assistant(text("b"), tin=2_000, tout=200, msg_id="m2", model="claude-opus-5"),
+        _priced_result(cost=9.99, tin=3_000, tout=900),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == 0.0 and not out.cost_known  # a capped run stops
+    assert out.extra["cost_source"] == "unknown"
+    assert out.tokens_in == 3_000 and out.tokens_out == 900  # the tokens are still metered
+    ws.remove()
+
+
 def test_the_builders_own_model_under_another_spelling_is_not_another_model(
     tmp_path: Path,
 ) -> None:
