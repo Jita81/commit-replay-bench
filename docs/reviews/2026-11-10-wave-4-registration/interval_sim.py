@@ -6,8 +6,9 @@ Prints, for each setting,
 the true mean per-commit difference, the share of simulated waves whose 95% interval
 missed it on either side, the share whose UPPER end fell below it, and that last share
 again counting only waves in which at least ``MIN_NONZERO`` batches had a non-zero sum
-(the registration's guard on the "no 15-point effect" call; this is the call's error
-rate if the true effect sat exactly at the threshold). Then the same for distributions
+(the registration's guard on the "no 15-point effect" call). That last share is a miss
+rate of the guarded interval only: the primary and sensitivity tests of the call are not
+applied here, so it is not an error rate for the call. Then the same for distributions
 chosen to break the interval, and the half-width of the distribution-free bound.
 
 Model of one wave: 18 batches laid out as the registration's four cells in batches of
