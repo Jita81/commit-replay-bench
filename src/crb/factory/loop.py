@@ -1338,6 +1338,7 @@ class FactoryLoop:
                 repo_id=self.credentials_key,
                 waivers=_waiver_notes(verdict),
                 licence_line=licence_line,
+                licence_cell=lic.cell.to_dict(),
             )
         except DeliveryError as exc:
             s.evidence.record_delivery_refused(
