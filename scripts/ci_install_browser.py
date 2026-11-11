@@ -236,16 +236,16 @@ def write_apt_timeouts() -> bool:
     return _helper(("sudo", "-n", "tee", APT_CONF_PATH), stdin=APT_CONF)
 
 
-def browser_starts(out: TextIO | None = None) -> bool:
-    """Start the installed Chromium once and close it; True when it ran. What a failed start
-    printed is echoed, so the log says which library is missing."""
+def browser_starts(timeout_s: float = HELPER_TIMEOUT_S, out: TextIO | None = None) -> bool:
+    """Start the installed Chromium once and close it; True when it ran within ``timeout_s``.
+    What a failed start printed is echoed, so the log says which library is missing."""
     sink = out if out is not None else sys.stdout
     try:
         done = subprocess.run(
             list(PROBE_COMMAND),
             text=True,
             capture_output=True,
-            timeout=HELPER_TIMEOUT_S,
+            timeout=timeout_s,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -284,7 +284,7 @@ def main(
     clock: Callable[[], float] = time.monotonic,
     out: TextIO | None = None,
     record: Callable[[float, float], None] = record_install,
-    probe: Callable[[], bool] = browser_starts,
+    probe: Callable[[float], bool] = browser_starts,
 ) -> int:
     sink = out if out is not None else sys.stdout
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -318,10 +318,15 @@ def main(
         command = custom or list(BROWSER_ONLY_COMMAND if browser_only else DEFAULT_COMMAND)
         print(f"::group::browser install, attempt {k} of {args.attempts}", file=sink, flush=True)
         attempt = run(command, idle_timeout_s=args.idle_timeout, deadline=deadline, out=sink)
-        if attempt.outcome == "ok" and browser_only and not probe():
-            # Downloaded, but a system library is missing: the next attempt installs them.
-            attempt = Attempt("unusable", attempt.returncode, attempt.seconds)
-            browser_only = False
+        if attempt.outcome == "ok" and browser_only:
+            # The probe is part of the install, so it runs inside the same budget.
+            left = deadline - clock()
+            if left <= 0:
+                attempt = Attempt("out-of-budget", attempt.returncode, attempt.seconds)
+            elif not probe(min(HELPER_TIMEOUT_S, left)):
+                # Downloaded, but a system library is missing: the next attempt installs them.
+                attempt = Attempt("unusable", attempt.returncode, attempt.seconds)
+                browser_only = False
         tried.append(attempt)
         print("::endgroup::", file=sink, flush=True)
         if attempt.outcome == "ok":

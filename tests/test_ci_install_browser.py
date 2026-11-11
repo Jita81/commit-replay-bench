@@ -395,7 +395,7 @@ def _default_install(
         clock=lambda: 1000.0,
         out=out,
         record=lambda _seconds, _budget: None,
-        probe=lambda: (effects.append("probe"), answers.pop(0))[1],
+        probe=lambda _left: (effects.append("probe"), answers.pop(0))[1],
     )
     return rc, out.getvalue(), commands, effects
 
@@ -453,6 +453,46 @@ def test_a_system_library_install_that_fails_every_time_is_not_called_a_network_
     assert "not answering" not in out
 
 
+def _timed_install(download_s: float, budget: float) -> tuple[int, str, list[float]]:
+    """Run the default install with a clock the download advances by ``download_s``; returns
+    the exit code, the output and the time each probe was given."""
+    m = _mod()
+    now = [1000.0]
+    given: list[float] = []
+
+    def run(_cmd: list[str], **_kw: object) -> object:
+        now[0] += download_s
+        return m.Attempt("ok", 0, download_s)
+
+    out = io.StringIO()
+    rc = m.main(
+        ["--budget", str(budget), "--attempts", "1"],
+        run=run,
+        apt=lambda: True,
+        cleanup=lambda: None,
+        sleep=lambda _s: None,
+        clock=lambda: now[0],
+        out=out,
+        record=lambda _seconds, _budget: None,
+        probe=lambda left: given.append(left) is None,
+    )
+    return rc, out.getvalue(), given
+
+
+def test_the_probe_is_given_only_what_is_left_of_the_install_budget() -> None:
+    m = _mod()
+    rc, _out, given = _timed_install(download_s=95.0, budget=100.0)
+    assert rc == 0 and given == [5.0]
+    rc, _out, given = _timed_install(download_s=10.0, budget=600.0)
+    assert rc == 0 and given == [m.HELPER_TIMEOUT_S]
+
+
+def test_a_download_that_used_the_whole_budget_is_not_probed_and_is_not_a_success() -> None:
+    rc, out, given = _timed_install(download_s=100.0, budget=100.0)
+    assert rc == 1 and given == []
+    assert "the install budget ran out" in out
+
+
 def test_a_command_of_its_own_is_run_as_written_and_never_probed() -> None:
     out = io.StringIO()
     probes: list[int] = []
@@ -462,7 +502,7 @@ def test_a_command_of_its_own_is_run_as_written_and_never_probed() -> None:
         sleep=lambda _s: None,
         out=out,
         record=lambda _seconds, _budget: None,
-        probe=lambda: probes.append(1) is None,
+        probe=lambda _left: probes.append(1) is None,
     )
     assert rc == 0 and probes == []
 
@@ -474,12 +514,12 @@ def test_the_probe_reads_the_browsers_own_exit_and_echoes_why_it_did_not_start(
     out = io.StringIO()
     code = "import sys; print('error while loading shared libraries: libnss3.so'); sys.exit(1)"
     monkeypatch.setattr(m, "PROBE_COMMAND", (PY, "-c", code))
-    assert m.browser_starts(out) is False
+    assert m.browser_starts(out=out) is False
     assert "libnss3.so" in out.getvalue()
     monkeypatch.setattr(m, "PROBE_COMMAND", (PY, "-c", "pass"))
-    assert m.browser_starts(io.StringIO()) is True
+    assert m.browser_starts(out=io.StringIO()) is True
     monkeypatch.setattr(m, "PROBE_COMMAND", ("crb-no-such-node-binary",))
-    assert m.browser_starts(io.StringIO()) is False
+    assert m.browser_starts(out=io.StringIO()) is False
 
 
 def test_the_probe_starts_the_browser_the_ui_tests_use() -> None:
@@ -519,7 +559,7 @@ def _defaults() -> dict[str, float]:
         cleanup=lambda: None,
         clock=lambda: now,
         out=out,
-        probe=lambda: True,
+        probe=lambda _left: True,
     )
     attempts = re.search(r"attempt 1 of (\d+)", out.getvalue())
     assert attempts is not None
