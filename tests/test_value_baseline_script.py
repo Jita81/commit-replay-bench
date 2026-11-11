@@ -544,3 +544,45 @@ def test_the_register_renderer_prints_the_pages_table_shape() -> None:
         "| `harness:other` | 1 (1 / 0) | 1 of 3 blind (apparatus 2.2) | 1 | $0.44 | no | "
         "none the loop may apply | `item:prevent-class` | open (watch) |"
     )
+
+
+def test_the_page_counts_the_exported_reviews_no_posture_class_placed(vb: ModuleType) -> None:
+    """P-135: an exported review whose task was graded in two posture classes, or that no row
+    holds in an input of two, is left out of precision. The page says how many, beside n."""
+    from crb.core.value import APPARATUS_VERSION, FAILURE_CLEAN, ReviewVerdict, ValueRow
+
+    host, sealed = "local/inplace/host-env", "docker/copy/sealed"
+
+    def row(i: int, task: str, posture: str) -> ValueRow:
+        return ValueRow(
+            row_hash=f"{i:064x}",
+            repo="alpha",
+            task_id=task,
+            created="2026-09-14T00:00:00+00:00",
+            capability_class="bug.fix",
+            size="XS",
+            mode="blind",
+            clean=True,
+            failure_kind=FAILURE_CLEAN,
+            cost_usd=1.0,
+            cost_known=True,
+            apparatus_version=APPARATUS_VERSION,
+            posture_class=posture,
+        )
+
+    rows = [row(1, "t1", host), row(2, "t2", host), row(3, "t2", sealed)]
+    reviews = [
+        ReviewVerdict(
+            grade_row_hash="",
+            repo="alpha",
+            task_id=t,
+            grade_clean=True,
+            mergeable=True,
+            verdict="ok",
+        )
+        for t in ("t1", "t2", "t99")
+    ]
+    out = vb.render_markdown(rows, reviews, apparatus="current", posture=host)
+    line = next(x for x in out.splitlines() if "reviewed clean patches judged mergeable" in x)
+    assert "n = 1 reviews" in line
+    assert "2 exported review(s) placed in no single posture class, left out" in line

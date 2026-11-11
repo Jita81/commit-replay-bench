@@ -1147,26 +1147,30 @@ def _verdicts_in_scope(
 def _place_unjoined(
     verdicts: Sequence[ReviewVerdict], rows: Sequence[ValueRow], read: str
 ) -> tuple[list[ReviewVerdict], list[ReviewVerdict]]:
-    """The one place a review meets the posture filter (ADR-0019 §8). A joined review keeps
-    its row's class (``_verdicts_in_scope`` admits it only beside a row of the class read). An
-    unjoined one is placed by every row given on its repository and task: their one class, or
-    — when no row holds the task — the one class every row given holds. It is kept when that
-    class is ``read`` and dropped when it is another; a task graded in two classes, or one no
-    row holds in an input of two, places nothing: returned apart, to be counted, never read."""
+    """The one place a review meets the posture filter (ADR-0019 §8). ``rows`` are every
+    repository's rows in the apparatus scope, of every class. A joined review keeps its row's
+    class (``_verdicts_in_scope`` admits it only beside a row of the class read). An unjoined
+    one is placed by the rows on its repository and task: their one class, or — when no row
+    holds the task — the one class its repository's rows hold. It is kept when that class is
+    ``read`` and dropped when it is another. A task graded in two classes, one no row holds in
+    a repository of two, or one placed only in ``""`` (no posture recorded) while a named
+    class is read, places nothing: returned apart, to be counted, never read."""
     by_task: dict[tuple[str, str], set[str]] = {}
+    by_repo: dict[str, set[str]] = {}
     for r in rows:
         by_task.setdefault((r.repo, r.task_id), set()).add(r.posture_class)
-    every = {r.posture_class for r in rows}
+        by_repo.setdefault(r.repo, set()).add(r.posture_class)
     kept: list[ReviewVerdict] = []
     unplaced: list[ReviewVerdict] = []
     for v in verdicts:
         if v.grade_row_hash:
             kept.append(v)
             continue
-        classes = by_task.get((v.repo, v.task_id)) or every
-        if len(classes) != 1:
+        classes = by_task.get((v.repo, v.task_id)) or by_repo.get(v.repo, set())
+        placed = next(iter(classes)) if len(classes) == 1 else None
+        if placed is None or (placed == "" and read != ""):
             unplaced.append(v)
-        elif next(iter(classes)) == read:
+        elif placed == read:
             kept.append(v)
     return kept, unplaced
 
@@ -1316,8 +1320,11 @@ def value_report(
     else:
         read = posture
     all_rows = [r for r in all_rows if r.posture_class == read]
-    # a review is placed by the rows of every class before the filter drops the others
-    all_verdicts, unplaced = _place_unjoined(list(verdicts), given, read)
+    # a review is placed by the rows of every class in the apparatus scope, before the
+    # filter drops the other classes
+    all_verdicts, unplaced = _place_unjoined(
+        list(verdicts), select_rows(given, apparatus=apparatus), read
+    )
     left_out = _answers(unplaced)
     every_arm = select_rows(all_rows, repo=repo, apparatus=apparatus)
     scoped = [r for r in every_arm if r.checks_arm == checks]

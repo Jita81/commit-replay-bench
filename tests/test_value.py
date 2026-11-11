@@ -455,13 +455,52 @@ def test_an_unjoined_review_reads_the_posture_of_its_graded_row_or_none() -> Non
     assert rep["precision"]["review"]["n"] == 1
     assert rep["precision"]["review"]["posture_unplaced"] == 2
     # the pooled call counts every repository's; a repository's counts its own
+    # (beta's t98 has no row; every beta row is sealed, so it reads sealed and is out)
     pooled = value_report(both, [*mine, verdict(98, mergeable=True, repo="beta")], posture=host)
-    assert pooled.to_dict()["precision"]["review"]["posture_unplaced"] == 3
-    # one class in the whole input: an unmatched review reads it, as before
+    assert pooled.to_dict()["precision"]["review"]["posture_unplaced"] == 2
+    # one class in the repository: an unmatched review reads it, as before
     single = [r for r in rows if r.repo == "alpha"]
     kept = value_report(single, [verdict(99, mergeable=True)], repo="alpha").to_dict()
     assert kept["precision"]["review"]["n"] == 1
     assert kept["precision"]["review"]["posture_unplaced"] == 0
+    beside = value_report(rows, [verdict(99, mergeable=True)], repo="alpha").to_dict()
+    assert (beside["precision"]["review"]["n"], beside["posture_class"]) == (1, host)
+
+
+def test_an_unjoined_review_is_placed_by_the_rows_of_the_apparatus_scope_only() -> None:
+    """P-135: a row of another apparatus version is outside every figure, so it never places
+    a review either. ``posture=all`` over a scope of one class reads an unmatched review as
+    before, though an older version graded another class or the same task."""
+    host, sealed = "local/inplace/host-env", "docker/copy/sealed"
+    rows = [
+        *(dataclasses.replace(vr(i, kind=FAILURE_CLEAN), posture_class=host) for i in (1, 2)),
+        dataclasses.replace(vr(5, kind=FAILURE_CLEAN, app="0.1"), posture_class=sealed),
+        dataclasses.replace(vr(2, kind=FAILURE_CLEAN, app="0.1"), posture_class=sealed),
+    ]
+    mine = [verdict(i, mergeable=True) for i in (2, 99)]
+    rep = value_report(rows, mine, repo="alpha", apparatus="current").to_dict()
+    assert rep["posture_class"] == host
+    assert rep["precision"]["review"]["n"] == 2
+    assert rep["precision"]["review"]["posture_unplaced"] == 0
+
+
+def test_a_review_placed_only_by_rows_of_no_recorded_posture_is_counted() -> None:
+    """P-135: a row below apparatus 2.3 recorded no posture (``""``). A review whose task only
+    such rows hold has no established class: reading a named class, it is counted
+    ``posture_unplaced``, never dropped unseen; reading ``""`` itself, it is read."""
+    host = "local/inplace/host-env"
+    rows = [
+        *(dataclasses.replace(vr(i, kind=FAILURE_CLEAN), posture_class=host) for i in (1, 2)),
+        *(vr(i, kind=FAILURE_CLEAN) for i in (101, 102)),
+    ]
+    assert {r.posture_class for r in rows} == {host, ""}
+    mine = [verdict(i, mergeable=True) for i in (101, 102)]
+    rep = value_report(rows, mine, repo="alpha", posture=host).to_dict()
+    assert rep["precision"]["review"]["n"] == 0
+    assert rep["precision"]["review"]["posture_unplaced"] == 2
+    old = value_report(rows, mine, repo="alpha", posture="").to_dict()
+    assert old["precision"]["review"]["n"] == 2
+    assert old["precision"]["review"]["posture_unplaced"] == 0
 
 
 # --- process loss -----------------------------------------------------------------------
