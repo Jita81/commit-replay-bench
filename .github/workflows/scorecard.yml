@@ -9,9 +9,11 @@
 # allows (checkout, upload-artifact, upload-sarif, scorecard-action, harden-runner). Keep it
 # that way, or the publish step fails.
 #
-# What it cannot see with the default GITHUB_TOKEN: the Branch-Protection check needs a token
-# with Administration: read to read the rule set (without one it scores what the public API
-# shows); no such token is wired here (`repo_token` is left at its default).
+# What it cannot see with the default GITHUB_TOKEN: classic branch-protection rules need a
+# token with Administration: read, which GITHUB_TOKEN cannot be granted, so the
+# Branch-Protection check scores inconclusive (-1, not a 0) unless the branch uses rulesets.
+# `repo_token` is left at its default on purpose: the admin-read BRANCH_PROTECTION_TOKEN
+# stays in branch-protection.yml, not in a job holding id-token: write.
 #
 # When: weekly, on every push to main, and when a branch-protection rule changes. It is not a
 # pull-request check, so scripts/check_branch_protection.py does not hold it to the required

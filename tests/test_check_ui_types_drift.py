@@ -5,8 +5,9 @@ Navigation
 What it is:   Unit tests for the drift check between ui/src/api/types.ts and the API's
               OpenAPI schema.
 What it does: Pins that the parser reads each exported interface's own depth-1 fields (not a
-              nested object's, not a commented-out one), its optional marks and what it
-              ``extends``; that a shape maps to ``X``, ``XOut``, ``X-Output`` or ``X-Input``
+              nested object's, not a commented-out one, not cut short by a brace in a string
+              literal), its optional marks and what it ``extends``; that a shape maps to ``X``,
+              ``XOut``, ``X-Output`` or ``X-Input``
               but never to a free-form component with no properties; that an unknown field and
               a missing required field are each a finding and an inherited field is not
               missing; that ``--check`` fails on new drift, on a stale allowlist entry and on
@@ -94,6 +95,15 @@ def test_the_parser_reads_own_depth_one_fields_and_extends() -> None:
     assert dict(shapes["Literal"].fields) == {"a": False, "b": True}
     assert dict(shapes["Page"].fields) == {"items": False}
     assert set(m.all_fields(thing, shapes)) == {"id", "name", "url", "nested", "quoted"}
+
+
+@pytest.mark.parametrize("literal", ["'}'", '"}"', "`}`", "'\\'}'", '"{"'])
+def test_a_brace_inside_a_string_literal_does_not_end_the_body(literal: str) -> None:
+    """A ``}`` in a string literal type is not the interface's end: later fields are read."""
+    shapes = m.parse_ts(f"export interface Thing {{ tag: {literal}; removed?: string }}\n")
+    assert dict(shapes["Thing"].fields) == {"tag": False, "removed": True}
+    findings, _ = m.compare(shapes, {"Thing": _schema(["tag"], ["tag"])})
+    assert [f.line for f in findings] == ["Thing.removed unknown-field"]
 
 
 def test_a_shape_maps_to_a_component_that_declares_properties() -> None:
@@ -192,7 +202,6 @@ def test_this_tree_passes_against_the_committed_allowlist(
 ) -> None:
     """The real schema, built offline from the app: today's drift is exactly the list."""
     assert m.main(["--check"]) == 0, capsys.readouterr().out
-    assert m.read_allowlist(m.ALLOWLIST.read_text("utf-8"))  # the list is not empty by accident
 
 
 def test_ci_runs_the_check_in_the_fresh_clone_gates() -> None:

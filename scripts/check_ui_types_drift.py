@@ -137,11 +137,23 @@ def strip_comments(text: str) -> str:
 
 def _body(text: str, open_at: int) -> str:
     """The text between the ``{`` at ``open_at`` and its matching ``}``, with everything at
-    depth 2 or deeper blanked, so only the shape's own declarations remain."""
+    depth 2 or deeper blanked, so only the shape's own declarations remain. A brace inside a
+    string literal (``'}'``, ``"{"``, a template literal; escapes honoured) is not counted."""
     depth = 0
     out: list[str] = []
+    quote = ""  # the open string literal's quote character, "" outside one
+    escaped = False
     for ch in text[open_at:]:
-        if ch == "{":
+        if quote:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = ""
+        elif ch in "'\"`":
+            quote = ch
+        elif ch == "{":
             depth += 1
             if depth == 1:
                 out.append("{")
