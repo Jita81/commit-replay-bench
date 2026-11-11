@@ -320,7 +320,8 @@ def sealed_row(
     cell: dict[str, str] | None = None,
     **kw: Any,
 ) -> GradeRow:
-    """A row of apparatus 2.4 on :data:`CELL`, graded in the sealed posture by default."""
+    """A row of the live apparatus on :data:`CELL`, graded in the sealed posture by default;
+    ``apparatus_version`` in ``kw`` stamps another."""
     fields: dict[str, Any] = {
         "repo": repo,
         "task_id": commit,
@@ -331,7 +332,7 @@ def sealed_row(
         "source_changed": True,
         "repo_lint_clean": None,
         "evidence_pack_hash": "h" * 64 if clean else "",
-        "apparatus_version": "2.4",
+        "apparatus_version": APPARATUS_VERSION,
         "created": created,
         "trial": trial,
         "error": error,
@@ -383,6 +384,7 @@ def register_reading(
     repo: str = REPO,
     cell: dict[str, str] | None = None,
     campaign_id: str = "",
+    apparatus: str = APPARATUS_VERSION,
     **kw: Any,
 ) -> Reading:
     """A reading of :data:`CELL` on :data:`REPO`, registered at :data:`REGISTERED_AT` —
@@ -393,7 +395,7 @@ def register_reading(
         cell=cell or CELL,
         hierarchy=hierarchy,
         pool=list(pool),
-        apparatus="2.4",
+        apparatus=apparatus,
         taxonomy=GLOBAL_CLASS_SET,
         posture_class=SEALED,
         checks_arm="off",
@@ -413,9 +415,14 @@ def register_reading(
 
 # --- a proven world for any rows (routing.v2 for tests of what reads the map) ---------------
 
-#: A complete, passing controls report at apparatus 2.4.
+#: A complete, passing controls report at the live apparatus.
 LIVE_PASSED = ControlsVerdict(
-    passed=True, constructible=56, total=56, escapes=0, run_id="c" * 32, apparatus_version="2.4"
+    passed=True,
+    constructible=56,
+    total=56,
+    escapes=0,
+    run_id="c" * 32,
+    apparatus_version=APPARATUS_VERSION,
 )
 
 
@@ -440,7 +447,7 @@ def book_for(rows: Sequence[GradeRow], *, arm: str = S1) -> ReadingBook:
     over the cell's commits, with ``arm`` alone in its hierarchy."""
     groups: dict[tuple[str, Any], list[str]] = {}
     for r in rows:
-        if r.context_arm == arm and r.apparatus_version == "2.4":
+        if r.context_arm == arm and r.apparatus_version == APPARATUS_VERSION:
             groups.setdefault((r.repo, r.cell), []).append(r.task_id)
     readings = [
         register(
@@ -448,7 +455,7 @@ def book_for(rows: Sequence[GradeRow], *, arm: str = S1) -> ReadingBook:
             cell=cell.to_dict(),
             hierarchy=(arm,),
             pool=list(dict.fromkeys(ids)),
-            apparatus="2.4",
+            apparatus=APPARATUS_VERSION,
             taxonomy=GLOBAL_CLASS_SET,
             posture_class=SEALED,
             checks_arm="off",

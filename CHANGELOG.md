@@ -22,6 +22,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   pack notes records which figure was used; another model's message is priced at its own rate. Existing rows, their hashes and the schema are
   unchanged.
 
+- **Apparatus 2.5 separates rows graded after the Wave 3 harness fixes**
+  ([#116](https://github.com/Jita81/commit-replay-bench/pull/116); DL-417).
+  ADR-0049 moves `APPARATUS_VERSION` to 2.5, by Paul's decision of 2026-11-10: the builder's exec
+  `/tmp`, `git -C` past the builder's git guard and `cost_usd` from the price table change what a
+  row means, and no row label could tell the waves apart. Belt set `v5`, the failure rule and
+  `mutation.v2` are unchanged; no migration. Every posture id moves, so every task is qualified
+  again at 2.5 (test runs, no model money), and oracle scores, controls and sign-offs are redone
+  before a cell delivers. A run under a 2.4 reserved reading is refused `pool_drift`: close every
+  2.4 campaign first, and deploy only with all three fixes.
+
 - **The Wave 3 decision has no date; it is taken when Wave 3 reports** (DL-415;
   [#108](https://github.com/Jita81/commit-replay-bench/pull/108)). DL-377 set Friday 6 November
   2026, or Wave 3's report if sooner. The date passed before Wave 3's first row, so the operator
