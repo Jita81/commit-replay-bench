@@ -239,7 +239,8 @@ function poolTile(pool: RepoPool | undefined, pending: boolean, failed: boolean)
  * One summary line per set the map shows: the measured cells grouped by the apparatus their
  * rows were graded under (the server reads one apparatus and one posture by default, so this is
  * normally one line), each saying how many of them route `deliver` under the product's own rule
- * — the same count the deliver tile shows — with the attempts behind them. Sets are never
+ * — the same count the deliver tile shows — with the attempts behind all N measured cells
+ * (never only the deliver cells', which read n = 0 before anything delivers). Sets are never
  * pooled: two apparatus versions give two lines.
  */
 export function summaryLines(cells: CapabilityCell[]): Array<{ apparatus: string; earned: number; measured: number; n: number }> {
@@ -249,10 +250,8 @@ export function summaryLines(cells: CapabilityCell[]): Array<{ apparatus: string
     const apparatus = c.apparatus_versions.join('/') || '—'
     const s = sets.get(apparatus) ?? { apparatus, earned: 0, measured: 0, n: 0 }
     s.measured += 1
-    if (c.route === 'deliver') {
-      s.earned += 1
-      s.n += c.n
-    }
+    s.n += c.n
+    if (c.route === 'deliver') s.earned += 1
     sets.set(apparatus, s)
   }
   return [...sets.values()].sort((a, b) => a.apparatus.localeCompare(b.apparatus))
@@ -286,8 +285,9 @@ function SummaryLine({ state, cells, posture }: { state: 'pending' | 'failed' | 
             <span className="text-[16px] font-normal text-on-surface-muted">
               · measured cells only · posture {posture || '—'} · apparatus {l.apparatus} ·{' '}
               <a href="#baseline-routes" className="text-primary underline" data-testid="results-summary-n">
-                n = {l.n} attempts behind them
-              </a>
+                n = {l.n} attempts behind the {l.measured} measured cell{l.measured === 1 ? '' : 's'}
+              </a>{' '}
+              · no interval: exact counts of measured cells, not a sampled rate
             </span>
           </p>
         ))

@@ -33,12 +33,16 @@
  * Touch when:   never for a new repository; a field is added to `POST /runs` (docs/API.md) — assert
  *               its presence and absence in the body.
  */
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { QueryClientProvider, focusManager } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Principal, Settings } from '../../api/types'
+import { makeQueryClient } from '../../api/queryClient'
 import { PRINCIPAL, json, mockApi, renderApp } from '../../test/utils'
-import { BLIND_SWEEP_TOOL_CALLS, BUDGET_DEFAULTS, RunNewDialog, budgetFromDraft } from './RunNewDialog'
+import { useBuilderLogins } from '../Settings/claudeCodeLogin'
+import { BLIND_SWEEP_TOOL_CALLS, BUDGET_DEFAULTS, RunNewDialog, budgetFromDraft, ladderBuilders } from './RunNewDialog'
 
 const ADMIN: Principal = { ...PRINCIPAL, role: 'admin' }
 const SETTINGS: Settings = {
@@ -515,6 +519,14 @@ describe('RunNewDialog — posture (ADR-0019)', () => {
     expect('qualify_first' in body).toBe(false)
   })
 
+  it('ladderBuilders reads the builders the run calls as the server does (run_builders, P-706)', () => {
+    expect(ladderBuilders('claude_code', ['r1'], [])).toEqual(['claude_code'])
+    expect(ladderBuilders('claude_code', [], [])).toEqual(['claude_code'])
+    expect(ladderBuilders('editblock', ['r1', 'claude_code:claude-sonnet-5'], [])).toEqual(['editblock', 'claude_code'])
+    expect(ladderBuilders('claude_code', [], [{ builder: 'editblock' }])).toEqual(['editblock'])
+    expect(ladderBuilders(' editblock ', ['r1'], [{ builder: ' claude_code ' }])).toEqual(['editblock', 'claude_code'])
+  })
+
   describe('builder login notice', () => {
     const login = (over: Record<string, unknown>) => ({
       builder: 'claude_code', auth: 'api_key', state: 'unverified', status: 'unverified', present: true, default: true,
@@ -535,7 +547,71 @@ describe('RunNewDialog — posture (ADR-0019)', () => {
       await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')
       const notice = await screen.findByTestId('run-new-login-missing')
       expect(notice).toHaveTextContent('(api_key) is missing')
-      expect(within(notice).getByRole('link', { name: 'Open the Claude Code login in Settings' })).toHaveAttribute('href', '/settings#claude-code-login')
+      // the card's token form only fixes auth cli, so a missing api_key names its own fix
+      expect(notice).toHaveTextContent('Set ANTHROPIC_API_KEY in the worker’s environment')
+      const link = within(notice).getByRole('link', { name: 'Open the Claude Code login in Settings (new tab)' })
+      expect(link).toHaveAttribute('href', '/settings#claude-code-login')
+      // a new tab: navigating away would unmount the dialog and lose the run draft
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    })
+
+    it('reads a blank or padded config auth as the server does: blank is the default, padding is trimmed', async () => {
+      const user = userEvent.setup()
+      setupLogins([login({ state: 'verified' }), login({ auth: 'cli', default: false, state: 'verified' })])
+      await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')
+      await waitFor(() => expect(screen.getByLabelText(/Use my Claude Code login/)).toBeEnabled())
+      const config = screen.getByLabelText(/Builder config/)
+      await user.clear(config)
+      await user.click(config)
+      await user.paste('{"auth": ""}')
+      await new Promise((r) => setTimeout(r, 50))
+      expect(screen.queryByTestId('run-new-login-missing')).toBeNull()
+      await user.clear(config)
+      await user.click(config)
+      await user.paste('{"auth": " cli "}')
+      await new Promise((r) => setTimeout(r, 50))
+      expect(screen.queryByTestId('run-new-login-missing')).toBeNull()
+    })
+
+    it('follows the rungs the run calls, not only the run-level builder', async () => {
+      const user = userEvent.setup()
+      setupLogins([login({ present: false })])
+      await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'editblock')
+      const ladder = screen.getByLabelText(/^Ladder$/)
+      await user.clear(ladder)
+      await user.type(ladder, 'claude_code:claude-sonnet-5')
+      expect(await screen.findByTestId('run-new-login-missing')).toHaveTextContent('(api_key) is missing')
+    })
+
+    it('shows nothing for a claude_code run whose every rung names another builder', async () => {
+      const user = userEvent.setup()
+      const { calls } = mockApi({ 'GET /auth/me': PRINCIPAL, 'GET /repos': REPOS, 'GET /builders/logins': { items: [login({ present: false })] } })
+      renderApp(<RunNewDialog open onClose={() => {}} repo="httpx" />)
+      await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')
+      const ladder = screen.getByLabelText(/^Ladder$/)
+      await user.clear(ladder)
+      await user.type(ladder, 'editblock:gpt-oss-120b')
+      await new Promise((r) => setTimeout(r, 50))
+      // the default ladder r1 read the logins while the run called claude_code; now it does not
+      expect(calls.some((c) => c.path === '/builders/logins')).toBe(true)
+      expect(screen.queryByTestId('run-new-login-missing')).toBeNull()
+    })
+
+    it('re-reads the login when the reader returns to the tab, under the app defaults (no focus refetch, 10 s stale)', async () => {
+      const { calls } = mockApi({ 'GET /builders/logins': { items: [login({ present: false })] } })
+      const qc = makeQueryClient() // APP_QUERY_DEFAULTS: what the served app runs with
+      const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+      const reads = () => calls.filter((c) => c.path === '/builders/logins').length
+      const { result } = renderHook(() => useBuilderLogins(true, { refetchOnWindowFocus: 'always' }), { wrapper })
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+      expect(reads()).toBe(1)
+      act(() => {
+        focusManager.setFocused(false)
+        focusManager.setFocused(true)
+      })
+      await waitFor(() => expect(reads()).toBe(2))
+      act(() => focusManager.setFocused(undefined))
     })
 
     it('follows the config auth: an invalid cli login shows, a verified default does not hide it', async () => {

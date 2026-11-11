@@ -128,10 +128,19 @@ describe('ResultsPage', () => {
     const line = screen.getByTestId('results-summary-line')
     expect(line).toHaveTextContent('measured cells only')
     expect(line).toHaveTextContent('apparatus 2.2')
-    expect(within(line).getByTestId('results-summary-n')).toHaveTextContent('n = 22')
+    // n is the attempts behind BOTH measured cells (22 + 13 = summary.n_total), not the deliver cell's 22
+    expect(within(line).getByTestId('results-summary-n')).toHaveTextContent('n = 35 attempts behind the 2 measured cells')
+    expect(line).toHaveTextContent('no interval: exact counts of measured cells, not a sampled rate')
     expect(within(line).getByTestId('results-summary-n')).toHaveAttribute('href', '#baseline-routes')
     expect(document.getElementById('baseline-routes')).not.toBeNull()
     expect(screen.getByTestId('results-summary')).toHaveAttribute('data-hint', 'stat.results.summary')
+  })
+
+  it('the summary line with no deliver cell still shows the attempts behind the measured cells, never n = 0', async () => {
+    mockApi({ ...ROUTES, 'GET /capability-map': { ...MAP, cells: [HUMAN, { ...HUMAN, size: 'M', n: 20, route: 'calibrate' }] } })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('results-summary-line')).toHaveTextContent('0 of 2 cells earn deliver'))
+    expect(screen.getByTestId('results-summary-n')).toHaveTextContent('n = 33 attempts behind the 2 measured cells')
   })
 
   it('the summary line never pools apparatus versions: one line per version', async () => {

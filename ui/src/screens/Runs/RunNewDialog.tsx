@@ -13,8 +13,9 @@
  *               the tier every ledger row is stamped with), the run-level caps (only the
  *               typed ones are sent; blank = the builder's default shown), and a validated
  *               builder-config JSON with a one-click "Use my Claude Code login (dev)" toggle.
- *               For claude_code it reads `GET /builders/logins` and, when the login the run
- *               would use is missing or invalid, shows a notice linking to the Settings card.
+ *               When a rung the run calls is claude_code (`ladderBuilders`) it reads
+ *               `GET /builders/logins` and, when the login the run would use is missing or
+ *               invalid, shows a notice linking to the Settings card in a new tab.
  *               A non-build kind hides all of that. The executor default shown is the
  *               server's `sandbox_mode` when the viewer may read `/settings`. "Only these
  *               tasks" sends `task_ids` for any kind; a hand-off (Learn's re-qualify and
@@ -29,10 +30,10 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
  * Works with:   ui/src/api/hooks.ts (`useCreateRun`, `useSettings`),
- *               ui/src/screens/Settings/claudeCodeLogin.ts (`useBuilderLogins`), ui/src/api/types.ts
- *               (`RunCreateRequest`, `LadderRung`, `RunBudget`), ui/src/lib/jsonObject.ts
- *               (the builder-config rules), ui/src/lib/amount.ts (the numeric fields),
- *               src/crb/server/schemas.py (`RunCreateRequest`
+ *               ui/src/screens/Settings/claudeCodeLogin.ts (`useBuilderLogins`, the login
+ *               notice), ui/src/api/types.ts (`RunCreateRequest`, `LadderRung`, `RunBudget`),
+ *               ui/src/lib/jsonObject.ts and ui/src/lib/amount.ts (the builder-config rules
+ *               and the numeric fields), src/crb/server/schemas.py (`RunCreateRequest`
  *               validation, `BUDGET_DEFAULTS`), src/crb/builders/base.py (`Budget`
  *               defaults), src/crb/builders/claude_code.py (`DEFAULT_MODEL`, `KNOWN_MODELS`
  *               — mirrored in `CLAUDE_CODE_MODELS`), ui/src/screens/Runs/RunsPage.tsx and
@@ -147,6 +148,23 @@ function rungToEntry(r: RungDraft): LadderRung {
   const budget = budgetFromDraft({ max_tool_calls: r.max_tool_calls, max_turns: r.max_turns, wall_clock_s: r.wall_clock_s })
   if (budget) rung.budget = budget
   return rung
+}
+
+/**
+ * Every builder the run would call, read as the server reads it (`run_builders` /
+ * `run_rungs` in src/crb/server/routes/runs.py over `rungs_from_entries`): each label rung
+ * (`rN`, no `:`, is the run's own builder; `b:m[:p]` is `b`), then each object rung's builder;
+ * no rung at all is the run's own builder. The run's own builder is NOT counted when every
+ * rung names another (P-706), so a login notice follows the builders the run really calls.
+ */
+export function ladderBuilders(builder: string, labels: string[], rungs: { builder: string }[]): string[] {
+  const own = builder.trim()
+  const names = [
+    ...labels.map((l) => (l.includes(':') ? (l.split(':', 1)[0] ?? '').trim() : own)),
+    ...rungs.map((r) => r.builder.trim()),
+  ]
+  if (names.length === 0) names.push(own)
+  return [...new Set(names.filter(Boolean))]
 }
 
 interface Props {
@@ -268,16 +286,20 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
   const builders = settings.data?.builders ?? []
   const cliLogin = cfg.ok && cfg.value.auth === 'cli'
   // The login this run would use (P: builder login reachable from the dialog): the config's
-  // `auth`, else the server's default mode. Missing = the list loaded and that mode has no
-  // credential, or its last check failed. A failed read shows nothing — the run's own refusal
-  // still names the fix.
-  const logins = useBuilderLogins(open && needsBuilder && isClaudeCode)
+  // `auth` (trimmed; blank is the default, as `run_logins` reads it), else the server's
+  // default mode — read only when a rung the run would call is claude_code (`ladderBuilders`,
+  // the server's `run_builders`). Missing = the list loaded and that mode has no credential,
+  // or its last check failed. A failed read shows nothing — the run's own refusal still names
+  // the fix. The read refreshes on return to this tab (the Settings link opens a new one).
+  const callsClaudeCode = needsBuilder && ladderBuilders(builder, labels, rungs).includes('claude_code')
+  const logins = useBuilderLogins(open && callsClaudeCode, { refetchOnWindowFocus: 'always' })
   const loginItems = logins.isError ? [] : (logins.data?.items ?? []).filter((b) => b.builder === 'claude_code')
-  const explicitAuth = cfg.ok && typeof cfg.value.auth === 'string' ? cfg.value.auth : undefined
+  const rawAuth = cfg.ok && typeof cfg.value.auth === 'string' ? cfg.value.auth.trim() : ''
+  const explicitAuth = rawAuth || undefined
   const loginAuth = explicitAuth ?? loginItems.find((b) => b.default)?.auth
   const login = loginAuth === undefined ? undefined : loginItems.find((b) => b.auth === loginAuth)
   const loginMissing =
-    needsBuilder && isClaudeCode && logins.isSuccess && loginAuth !== undefined &&
+    callsClaudeCode && logins.isSuccess && loginAuth !== undefined &&
     (login === undefined || !login.present || login.state === 'invalid')
 
   /** One click: `{"auth": "cli"}` in the builder config (merged with whatever else is there). */
@@ -432,7 +454,10 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
             {loginMissing && (
               <Hint as="p" id="text.run_new.login_missing" data-testid="run-new-login-missing" role="status" className="rounded-[var(--radius-control)] border border-border bg-surface-container px-3 py-2 text-xs text-on-surface-body sm:col-span-2">
                 The Claude Code login this run would use ({loginAuth}) is {login === undefined || !login.present ? 'missing' : 'invalid'} — the run would be refused.{' '}
-                <Hint as={Link} id="link.run_new.login_settings" to="/settings#claude-code-login" className="font-semibold underline" data-testid="run-new-login-link">Open the Claude Code login in Settings</Hint>
+                {loginAuth === 'api_key' && (login === undefined || !login.present) ? (
+                  <>Set ANTHROPIC_API_KEY in the worker&rsquo;s environment, or set the builder config to <code>{'{"auth": "cli"}'}</code> to use the stored login. </>
+                ) : null}
+                <Hint as={Link} id="link.run_new.login_settings" to="/settings#claude-code-login" target="_blank" rel="noopener noreferrer" className="font-semibold underline" data-testid="run-new-login-link">Open the Claude Code login in Settings (new tab)</Hint>
               </Hint>
             )}
 

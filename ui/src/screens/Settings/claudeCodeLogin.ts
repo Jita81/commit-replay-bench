@@ -217,9 +217,14 @@ export interface BuilderLoginState {
 const builderLoginsKey = ['builders', 'logins'] as const
 
 /** `GET /builders/logins` — read from the recorded verifications; never calls a model.
- *  `enabled` lets the run dialog read it only while a builder that needs a login is chosen. */
-export function useBuilderLogins(enabled = true): UseQueryResult<{ items: BuilderLoginState[] }, ApiError> {
-  return useQuery({ queryKey: builderLoginsKey, queryFn: () => api<{ items: BuilderLoginState[] }>('/builders/logins'), enabled })
+ *  `enabled` lets the run dialog read it only while a builder that needs a login is chosen;
+ *  `refetchOnWindowFocus: 'always'` lets it re-read when the reader returns from fixing the
+ *  login, even inside the app's 10 s stale window. */
+export function useBuilderLogins(
+  enabled = true,
+  { refetchOnWindowFocus = false }: { refetchOnWindowFocus?: boolean | 'always' } = {},
+): UseQueryResult<{ items: BuilderLoginState[] }, ApiError> {
+  return useQuery({ queryKey: builderLoginsKey, queryFn: () => api<{ items: BuilderLoginState[] }>('/builders/logins'), enabled, refetchOnWindowFocus })
 }
 
 /** `POST /builders/{builder}/login/verify?auth=` — one no-tool Haiku turn for that auth mode,

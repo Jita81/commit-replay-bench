@@ -424,7 +424,7 @@ export const HINTS = {
   'field.shared.repo_picker':
     'The repository every number on this screen is about. A cell says nothing about a repository it was not measured on. The choice is kept in the address so the page can be shared.',
   'stat.results.summary':
-    'How many measured cells route deliver out of every measured cell, one line per apparatus the map reads, in the posture shown. The link opens the routes below, where each route carries n, the attempts inside its cells.',
+    'How many measured cells route deliver out of every measured cell, one line per apparatus the map reads, in the posture shown. n is the attempts behind all those measured cells, not only the deliver ones. No interval: these are exact counts of cells, not a sampled rate. The link opens the routes below, where each route carries its own n.',
   'banner.results.replay_running':
     'A replay is still grading attempts for this repository, so every number below moves as each row lands. Open the run to watch it.',
   'stat.results.controls':
@@ -1435,9 +1435,9 @@ export const HINTS = {
   'field.run_new.ladder':
     'Comma-separated rung labels; each rung is one attempt, and the next runs only if the previous was not clean. Object rungs below are appended in order.',
   'text.run_new.login_missing':
-    'The Claude Code login this run would use has no credential on the server, or its last check failed, so the run would be refused before any attempt. Fix it on the Settings login card, then start the run.',
+    'A rung of this run calls Claude Code, and the login it would use has no credential on the server, or its last check failed, so the run would be refused before any attempt. A missing api_key login needs ANTHROPIC_API_KEY in the worker’s environment (or the run switched to auth cli); otherwise fix it on the Settings login card, then start the run.',
   'link.run_new.login_settings':
-    'Opens the Claude Code login card in Settings, where an operator saves the token or verifies the login this run needs. The run is not started; come back and start it once the login is fixed.',
+    'Opens the Claude Code login card in Settings in a new tab, where an operator saves the token or verifies the login this run needs. This dialog and its draft stay open here; the notice re-reads the login when you come back.',
   'field.run_new.cli_login':
     'Run the builder on the operator’s own subscription login instead of an API key. Developer and evaluation use only; the repository’s CLAUDE.md is auto-discovered in this mode.',
   'field.run_new.spend_cap':
