@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Wave 4's second amendment: the pilot, the cut and the batch orders**
+  ([#129](https://github.com/Jita81/commit-replay-bench/pull/129)). The registration gains
+  Amendment 2, written before the first wave run: the three pilot runs and their product
+  costs, each pilot gate read one by one (two did not hold as written, and Paul's decision on
+  them is quoted), the turn limit doubled once to 50, the cut to 15 commits a cell (60 commits,
+  12 batches) with each cut list's sha256, every batch's seeded arm order, and the power
+  simulation rerun on the cut lists with its script and output beside the page.
+
 - **A Baseline summary line and a login notice in the run dialog**
   ([#121](https://github.com/Jita81/commit-replay-bench/pull/121)).
   The Baseline screen opens with one plain line per apparatus the map reads: how many measured

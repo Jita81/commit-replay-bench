@@ -8,6 +8,10 @@ part 4 are deployed. Paul's yes to the spends is recorded under Authority.
 apparatus 2.5 and the ordered lists are appended at the end of this page. Still nothing is
 spent **[hypothesis — the detail and its evidence are in Amendment 1 below]**.
 
+**Amendment 2 (2026-11-11).** The pilot is run, at a product cost of $3.05. Two of its six
+gates did not hold as written; the turn limit is 50, `k` is 15 and the wave is 60 commits in 12
+batches **[hypothesis — the detail and its evidence are in Amendment 2 below]**.
+
 **Authority.** Paul's "yes to all four, go ahead" of 2026-11-10 (the Wave 3 closure; this design
 with a money line of $60 for stage 1 and $35 for stage 2, in real dollars; apparatus 2.5 with a
 short ADR; `gpt-oss-120b` on Cerebras as the test author), and his "Yes" of the same day to three
@@ -619,3 +623,153 @@ them **[aspiration — the pilot is not yet run; this fixes which commits it wil
 26  a0a6ae020bb3899ff0276067863e50523f897370
 27  df547f5fc6ee86071f73c36c16afd885bb4e3f28
 ```
+
+## Amendment 2 — the pilot, the cut and the batch orders, before the first wave run — 2026-11-11
+
+This is the second amendment of part 2, step 4. Its commit is pushed to the repository before
+the first wave run is filed; the report will give that commit and the time of every run beside
+it. Nothing below is a result of the wave: pilot rows are never counted (part 5)
+**[aspiration — this amendment fixes the wave's settings; no wave run is filed yet]**.
+
+### The pilot
+
+Three runs on the six struck click commits, all in campaign `cmp_88cf9e875edba15371e6d3f7`, all
+at the product's default limit of 25 turns, transcripts kept
+**[measured — n = 3 pilot runs of 6 commits each, method: each run record and the campaign record read from the served API, apparatus 2.5]**.
+
+| Run | Arm | Run id | Status | Rows | Product cost |
+|---|---|---|---|---|---|
+| 1 | `A0`, attempt 1 | `a7c9cb6621f44125b959af46bc811691` | succeeded | 6 | $0.781581 |
+| 2 | `S1@gpt-oss-120b` | `09fa16a633a64d86a26e61fa9bc9a292` | succeeded | 6 | $1.647818, of which $0.006401 is the author's calls |
+| 3 | `A0`, attempt 2 | `a101480af5454bfc84ff546fdca827ed` | succeeded | 6 | $0.618152 |
+
+The campaign's spend after the pilot is $3.047552
+**[measured — n = 1 campaign record, method: `spent_usd` read from `GET /api/v1/campaigns` on the served stack, apparatus 2.5]**.
+
+### The gates of part 5, read one by one
+
+| Gate | Reading | Holds |
+|---|---|---|
+| No more than 1 of 18 builds misses for a harness reason | 2 by the checklist of part 7 as written; 1 if the author's failure is left to its own gate (see below) | **no, as written** |
+| The author produces a usable test for at least 5 of 6 commits | 5 of 6 | yes |
+| No `S1` build disqualified because of the authored test file | 0 disqualified rows in run 2 | yes |
+| A build with no usable test still ends as a row, and its run is not halted or failed | commit `047adef2` has a row with failure kind `authoring`; run 2 succeeded | yes |
+| An `S1` row's label reads `S1@gpt-oss-120b`; a transcript exists for a build of each arm | all 6 rows of run 2 carry the label; 17 of 18 builds kept a transcript, the one without is the build that never started | yes |
+| The product's cost is within 10% of the provider consoles | not shown (see below) | **no** |
+
+All six readings are of pilot rows and events
+**[measured — n = 18 pilot builds, method: each row's labels, stop reason and failure kind read from `GET /api/v1/grades/<row>`, and its kept transcript read where one exists, apparatus 2.5]**.
+
+**The two harness-reason misses.** In run 3 the builder's `git stash list` on commit `82f377c5`
+was refused by the command guard and the build ended there; that is "an allowed command
+refused" in spirit, a read-only command the guard does not list. In run 2 the author's test for
+commit `047adef2` passed at the parent, so it could not be shown to fail there and no build was
+started. Part 7 classes that as a harness miss, and part 5 also gives the author its own gate
+(5 of 6), which this one failure meets. Counted as part 7 is written the first gate reads 2 of
+18 and fails by one. Claude Code first reported it to Paul as 1 of 18, which was wrong against
+the text **[hypothesis — the reading and its correction were made in Claude Code's session of 2026-11-11; the transcript is not in this repository]**.
+
+**The cost gate.** The product priced the pilot's builder rows at $3.041150 from its own price
+table. The Claude Code CLI's own total for the same builds is about $7.60, 2.5 times as much:
+the CLI prices `claude-sonnet-5` from its own list, which fix 4 (PR #115) set aside in favour
+of the product's table. When Paul read the Anthropic console on 2026-11-11 it did not yet show
+that day's spend, so neither figure is confirmed against it. The gate is therefore not shown to
+hold **[hypothesis — the CLI totals are in the kept transcripts on the served stack and the console was read by Paul; neither is in this repository]**.
+
+**Paul's decision on the failed gates.** Part 5 says the wave does not start while a gate fails. Paul, who owns
+the money and the registration, was shown both failures on 2026-11-11 before any wave run and
+decided each in their own words. On the cost gate: "Don't blockthings for spend innaccuracies,
+its minimal cost just keep pushing". On the harness-reason gate, offered a repeat pilot of six
+more click commits or a start without one: "proceed without a repeat pilot". So the wave starts
+with both gates recorded as failed, not as passed and not redefined: the limit of one miss in 18
+stands as written and was missed by one. The two misses are an authored test that was not red at
+the parent and a refused `git stash list`; the wave's stop (b) still counts every refused
+allowed command, and both arms meet the same guard. A reader who holds that the gate should
+have stopped the wave should read every result below as coming from a wave that started on
+the operator's waiver **[hypothesis — Paul's words are from the session of 2026-11-11, which is not in this repository]**.
+
+**The turn limit, by rule.** Eight of the 17 builds that ran ended on the 25-turn limit. Four of
+them had run the tests within their last five tool turns: commit `82f377c5` in run 1 and commit
+`fcd85032` in runs 1, 2 and 3. That is at least 3 of 18, so the limit is doubled, once, for
+every arm: **50 turns**
+**[measured — n = 18 pilot builds, method: the stop reason of each row and the commands of the last five tool turns of each kept transcript, apparatus 2.5]**.
+
+### The cut
+
+By the rule of part 3, with the product's costs
+**[measured — n = 12 `A0` attempts and n = 6 `S1` attempts, method: run costs from the campaign record divided by attempts, author's calls included, apparatus 2.5]**:
+
+- mean cost of an `A0` attempt: ($0.781581 + $0.618152) / 12 = $0.116644;
+- mean cost of an `S1` attempt: $1.647818 / 6 = $0.274636;
+- `c` = their equal-weight average = $0.195640;
+- `N` = floor((95 − 3.047552) / (5 × 1.5 × 0.195640)) = floor(62.67) = **62 commits**;
+- the four lists after striking hold 28, 36, 17 and 27 commits; cut to 15 they hold 60, cut to
+  16 they hold 64, so **`k` = 15** and the wave is **60 commits**, 30 in each repository.
+
+Each cut list is the first 15 commits of its list in Amendment 1. The sha256 is over the cut
+list, one commit per line, each line ended by a newline
+**[measured — n = 4 cut lists, method: the first 15 lines of each Amendment 1 list hashed, apparatus 2.5]**.
+
+| Cell | Commits | sha256 of the cut list |
+|---|---|---|
+| click XS | 1 to 15 | `4be598d74781c45123a2183cb7657f4256f371d712ecbd33c0be780a4493370f` |
+| click S | 1 to 15 | `70c884819e4a78cca97ec1768e6a3b7892b5c06d0dd9d925a9c9f61230f60a3b` |
+| cobra XS | 1 to 15 | `14f3ee8612cebe6889e1da9086b07a3f94c7a1ee8182db166703cfec2320f559` |
+| cobra S | 1 to 15 | `08428d27117ddf7725772a262c12567147a3351a9ac9982c1db9b2fca3dc7fb3` |
+
+Both repositories hold commits, so the wave may start (part 2, step 4). The pilot ran at 25
+turns and the wave runs at 50, so a wave attempt may cost more than `c`; the rule fixes `c`
+from the pilot and it is not adjusted. The campaign's ceiling and each run's own cap are what
+hold the line **[aspiration — the wave's settings; no wave run is filed yet]**.
+
+### The batches and their orders
+
+Twelve batches of five commits, six in each repository, filed in this order. The coin is the
+first hex digit of `sha256("crb.wave4.order|" + repo + "|" + batch number)`, with `repo` as the
+run body names it (`click`, `cobra`): an even digit gives `A0, S1, S1, A0`, an odd digit gives
+`S1, A0, A0, S1` **[hypothesis — the sha256 of each of the 12 strings, computed outside the product; anyone can recompute them from the rule above]**.
+
+| Repository | Batch | Cell | List positions | First hex digit | Order of the four runs |
+|---|---|---|---|---|---|
+| click | 1 | XS | 1 to 5 | `0` | `A0, S1, S1, A0` |
+| click | 2 | S | 1 to 5 | `c` | `A0, S1, S1, A0` |
+| click | 3 | XS | 6 to 10 | `a` | `A0, S1, S1, A0` |
+| click | 4 | S | 6 to 10 | `2` | `A0, S1, S1, A0` |
+| click | 5 | XS | 11 to 15 | `e` | `A0, S1, S1, A0` |
+| click | 6 | S | 11 to 15 | `7` | `S1, A0, A0, S1` |
+| cobra | 1 | XS | 1 to 5 | `5` | `S1, A0, A0, S1` |
+| cobra | 2 | S | 1 to 5 | `a` | `A0, S1, S1, A0` |
+| cobra | 3 | XS | 6 to 10 | `6` | `A0, S1, S1, A0` |
+| cobra | 4 | S | 6 to 10 | `b` | `S1, A0, A0, S1` |
+| cobra | 5 | XS | 11 to 15 | `6` | `A0, S1, S1, A0` |
+| cobra | 6 | S | 11 to 15 | `6` | `A0, S1, S1, A0` |
+
+Every wave run carries the body of part 2 with `budget: {max_turns: 50}`, the campaign id
+above, `env_stop: 2`, `outage_stop: 3` and `max_cost_usd: 6`. All six click batches run first.
+Cobra follows after the image switch and the second restart, which Paul allowed on 2026-11-11
+as an operations step, once the worker is idle; cobra's posture is read again after it, and if
+it differs from `pst_a308788d88899137d5fae9c7` cobra re-qualifies at no model cost and the
+difference is reported before any cobra run. `S3` runs are filed last, under the rule of
+part 2 **[aspiration — the wave's settings; no wave run is filed yet]**.
+
+### The power of the test on the cut lists
+
+The simulation was rerun for 12 batches of five. Its model is the one R-1's revised simulation
+describes: a starting chance with a mean of 0.3, 0.5 or 0.7 and a within-commit correlation of
+0, 0.25 or 0.5, a shock for each of a batch's four runs with a standard deviation of 0, 5 or 10
+points, and the exact two-sided test at 0.05 that flips whole batches over all 4,096 sign
+patterns. Across the 27 settings
+**[hypothesis — `docs/reviews/2026-11-10-wave-4-registration/power_sim.py` and its output `power_sim.out.txt` beside it, seed 20261112, 2,000 waves a setting; a simulation, not a measurement of the product]**:
+
+- the test rejected a true null in 2.5% to 3.9% of waves;
+- it detected a 15-point effect in 42% to 74% of waves;
+- it detected a 20-point effect in 62% to 94% of waves, and a 25-point effect in 82% to 100%.
+
+A wave of 60 commits has less power than the one R-1 simulated: R-1 gave 58% to 89% for a
+15-point effect on about 81 commits in 18 batches, the pools as they stood before apparatus 2.5. A wave of this size is more likely than not to detect a 20-point effect and
+may well miss a 15-point one. The outcome rules of part 6 are unchanged, and a result that is
+neither *Cleared* nor *No 15-point effect* is reported as inconclusive
+**[hypothesis — `docs/reviews/2026-11-10-wave-4-registration/power_sim.py` and its output `power_sim.out.txt` beside it, seed 20261112, 2,000 waves a setting; a simulation, not a measurement of the product]**.
+
+From here nothing is added to or removed from the lists, and any change to the served code
+stops the wave (part 6, item 9).
