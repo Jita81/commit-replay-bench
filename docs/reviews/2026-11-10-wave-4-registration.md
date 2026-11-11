@@ -311,9 +311,22 @@ Every item below is a rule for rows that do not exist yet **[aspiration — this
    unit: with `B` batches, `n_b` commits in batch `b`, batch sum `S_b`, estimate `d` and `N`
    commits, it is `sqrt(B/(B−1) × Σ(S_b − n_b×d)²) / N`. The interval is the estimate plus and
    minus that error times the 97.5% point of Student's t with `B − 1` degrees of freedom **[aspiration — this registration's design; nothing is run yet]**.
-   In simulation on the registered batch layout this interval missed the true mean in 4.3% to
-   6.9% of waves; the worst settings had a starting chance of 0.9, where the ceiling skews the
-   differences **[hypothesis — a simulation run in Claude Code's session on 2026-11-11, 4,000 to 20,000 waves a setting, seed 20261111; its script and output are not in this repository]**.
+   This interval is approximate: no interval of this form has guaranteed coverage for every
+   distribution of batch sums, and it is reported as a description, not as a second test **[aspiration — this registration's design; nothing is run yet]**.
+   The simulation that checks it is in this repository. Its model: the registered layout of 18
+   batches over 81 commits; each commit has a starting chance of a clean row of 0.3, 0.5, 0.7
+   or 0.9, the same for all commits or spread by a beta distribution with intra-class
+   correlation 0.25 or 0.5; `S1` adds 0, 15 or 30 points; each of a batch's four runs shifts
+   all its commits by one normal draw with standard deviation 0, 0.05 or 0.10; two attempts an
+   arm; the truth of each setting is the mean of a 200,000-commit sample **[hypothesis — `docs/reviews/2026-11-10-wave-4-registration/interval_sim.py` and its output `interval_sim.out.txt` beside it, seed 20261111, 4,000 waves a setting; a simulation, not a measurement of the product]**.
+   Over those 108 settings the interval missed the true mean in at most 7.3% of waves, and its
+   upper end fell below the true mean in at most 6.3%; the worst settings had a starting
+   chance of 0.9, where the ceiling skews the differences **[hypothesis — `docs/reviews/2026-11-10-wave-4-registration/interval_sim.py` and its output `interval_sim.out.txt` beside it, seed 20261111, 4,000 waves a setting; a simulation, not a measurement of the product]**.
+   Distributions built to break it do worse: when a whole batch differs by nothing with chance
+   0.9 and by half a point otherwise, the interval missed in 19.4% of waves, because a wave in
+   which every batch is zero gives an interval of no width **[hypothesis — `docs/reviews/2026-11-10-wave-4-registration/interval_sim.py` and its output `interval_sim.out.txt` beside it, seed 20261111, 4,000 waves a setting; a simulation, not a measurement of the product]**.
+   The one bound that holds for every distribution (Hoeffding's, on independent batch sums)
+   is 66.5 points either side on this layout, too wide to say anything about a 15-point effect **[hypothesis — `docs/reviews/2026-11-10-wave-4-registration/interval_sim.py` and its output `interval_sim.out.txt` beside it, seed 20261111, 4,000 waves a setting; a simulation, not a measurement of the product]**.
 3. **Author failures that run across batches.** The primary test treats batches as independent.
    A long failure of the test author breaks that: it turns `S1` rows into misses in several
    batches in a row. Those misses stay in the primary result, because an author that fails is
@@ -322,12 +335,23 @@ Every item below is a rule for rows that do not exist yet **[aspiration — this
    read from the runs' events. Author-hit batches that follow one another in filing order
    within a repository form one block, which flips as a whole in the test and counts as one
    unit in the interval. The same test and interval are then recomputed twice: with those
-   blocks, and with every author-hit batch left out. If either differs from the primary result
-   on which side of 0.05 it falls, the wave is reported as *inconclusive*, whatever the primary
-   p-value says **[aspiration — this registration's design; nothing is run yet]**.
-4. **What each outcome may be called.** *Cleared*: p below 0.05 with `S1` ahead and the sensitivity result of item 3 on the same side. *No 15-point
-   effect*: p not below 0.05 and the interval's upper end below 15 points. *Inconclusive*:
-   anything else. Under option B the claim is about the average over the listed commits of both
+   blocks, and with every author-hit batch left out. The wave is reported as
+   *inconclusive*, whatever the primary p-value says, if either recomputed result falls on the
+   other side of 0.05 from the primary, or has a summed difference of the other sign, or
+   cannot be calculated. It cannot be calculated when no batch is left, or when fewer than two
+   units are left, so that the test has no more than two sign patterns and the interval no
+   degrees of freedom **[aspiration — this registration's design; nothing is run yet]**.
+4. **What each outcome may be called.** *Cleared*: p below 0.05 with `S1` ahead, and both sensitivity results of item 3 also below 0.05 with `S1` ahead. *No 15-point
+   effect*: p not below 0.05, both sensitivity results of item 3 also not below 0.05, the
+   interval's upper end below 15 points, and at least six batches with a summed difference
+   that is not zero. *Inconclusive*: anything else **[aspiration — this registration's design; nothing is run yet]**.
+   The six-batch guard is there because the interval is approximate (item 2): it refuses the
+   call when too few batches moved for the spread between batches to mean anything. With the
+   guard, the share of simulated waves in which the upper end fell below the true mean was at
+   most 5.1% over the 108 settings, and 0.0% to 1.9% under the distributions built to break
+   the interval **[hypothesis — `docs/reviews/2026-11-10-wave-4-registration/interval_sim.py` and its output `interval_sim.out.txt` beside it, seed 20261111, 4,000 waves a setting; a simulation, not a measurement of the product]**.
+   So *No 15-point effect* is an approximate call with roughly that error rate if the true
+   effect is 15 points, not a guaranteed one, and the report says so beside it **[aspiration — this registration's design; nothing is run yet]**. Under option B the claim is about the average over the listed commits of both
    repositories together; nothing is claimed for either repository alone.
 5. **Every row is a miss unless clean.** Disqualified rows, missing rows, outages, turn-limit
    endings and an author that produced no usable test all count as misses, under both arms. The
