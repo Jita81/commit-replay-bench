@@ -13,7 +13,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **The ledger's heads can be anchored to a file kept off the machine**
-  ([#129](https://github.com/Jita81/commit-replay-bench/pull/129)).
+  ([#130](https://github.com/Jita81/commit-replay-bench/pull/130)).
   `crb ledger anchor --out <dir>` writes a deterministic, never-overwritten JSON file holding
   each chain's row count and head, chained to the directory's previous anchor. It refuses a
   directory inside the ledger's data directory and warns when the directory shares its
