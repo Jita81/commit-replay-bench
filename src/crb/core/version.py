@@ -60,4 +60,10 @@ __version__ = "2.0.0a1"
 #: that apparatus; every measured row stamps ``failure_kind``, ``lint_reason``,
 #: ``change_id``, ``context_arm`` and ``taxonomy``; ``mutation.v2`` scores). Rows stamped 2.3
 #: keep their meaning, are never re-graded and license nothing at 2.4.
-APPARATUS_VERSION = "2.4"
+#: 2.4 → 2.5 (2026-11-10, ADR-0049: the stamp alone moves, to separate rows graded after the
+#: Wave 3 harness fixes — the builder's exec ``/tmp``, ``git -C`` past the builder's git guard,
+#: ``cost_usd`` from the price table — from rows graded before them; belt set ``v5``, the
+#: failure rule and ``mutation.v2`` unchanged; no migration). Every posture id moves with it,
+#: so every qualification is measured again; rows stamped 2.4 keep their meaning and are never
+#: pooled with 2.5.
+APPARATUS_VERSION = "2.5"

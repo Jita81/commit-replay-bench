@@ -282,7 +282,10 @@ def add_oracle(
                 "oracle_strength": strength,
                 "total": 10,
                 "killed": round(strength * 10),
-                "provenance": {"apparatus_version": "2.4", "mutation_version": "mutation.v2"},
+                "provenance": {
+                    "apparatus_version": APPARATUS_VERSION,
+                    "mutation_version": "mutation.v2",
+                },
             },
         )
 
@@ -305,7 +308,7 @@ def add_oracle_and_controls(
             "not_constructible": 1,
             "escapes": 0,
             "apparatus": {
-                "apparatus_version": "2.4",
+                "apparatus_version": APPARATUS_VERSION,
                 "complete": True,
                 "controls_version": "controls.v3",
             },

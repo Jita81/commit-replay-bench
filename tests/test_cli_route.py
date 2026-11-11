@@ -33,6 +33,7 @@ import pytest
 from crb.cli.main import main
 from crb.core.ledger import JsonlLedger
 from crb.core.routing import DEFAULT_POLICY
+from crb.core.version import APPARATUS_VERSION
 from fixtures.readings import S1, commits, register_reading, rows_for, sealed_row
 
 
@@ -64,7 +65,7 @@ def _exports(tmp_path: Path, commits_: list[str]) -> tuple[Path, Path]:
                         "strength": 0.9,
                         "total": 10,
                         "killed": 9,
-                        "apparatus_version": "2.4",
+                        "apparatus_version": APPARATUS_VERSION,
                     }
                     for c in commits_
                 ],
@@ -82,7 +83,7 @@ def _exports(tmp_path: Path, commits_: list[str]) -> tuple[Path, Path]:
                 "not_constructible": 1,
                 "escapes": 0,
                 "apparatus": {
-                    "apparatus_version": "2.4",
+                    "apparatus_version": APPARATUS_VERSION,
                     "complete": True,
                     "controls_version": "controls.v3",
                 },
