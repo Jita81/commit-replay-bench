@@ -45,8 +45,9 @@ What it is:   The anchor format and its checks — ``build_anchor``, ``anchor_na
               ``check_chains`` (the chains a source's anchor must record, one with a row),
               ``check_anchor`` (does today's ledger still extend this anchor?),
               ``check_anchor_links`` (is the directory's anchor chain whole?),
-              ``previous_link`` (the one validated read of a predecessor link), the loaders
-              and the no-overwrite ``write_anchor``.
+              ``previous_link`` (the one validated read of a predecessor link), the loaders,
+              the no-overwrite ``write_anchor`` and ``anchor_dir_lock`` (one writer per
+              directory).
 What it does: Builds a self-describing, deterministic JSON anchor from chain heads; names it
               from its row counts and heads; refuses to overwrite one; finds the row at an
               anchored count through a caller-supplied reader and names the first chain that
@@ -72,7 +73,7 @@ import hashlib
 import json
 import os
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -334,6 +335,44 @@ def check_anchor_links(anchors: Sequence[LoadedAnchor]) -> list[str]:
     return faults
 
 
+@contextlib.contextmanager
+def anchor_dir_lock(directory: Path) -> Iterator[None]:
+    """An exclusive, cross-process lock on one anchor directory, held from before the ledger's
+    heads are read until the anchor file is written. Without it two commands that read
+    different heads can both see an empty directory and both write a first anchor (no
+    ``previous_anchor``), which breaks the directory's chain for good (CodeRabbit on PR #130,
+    2026-11-11). ``flock`` on the directory itself, so no lock file sits among the anchors;
+    the directory is created if absent. After the lock is taken the path is checked to still
+    be the locked directory, so a directory removed by the previous holder is taken again.
+    A platform without ``fcntl`` runs unlocked."""
+    try:
+        import fcntl  # noqa: PLC0415 — POSIX only; guarded
+    except ImportError:
+        yield
+        return
+    while True:
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            fd = os.open(directory, os.O_RDONLY)
+        except OSError as e:
+            raise AnchorError(f"cannot open the anchor directory {directory}: {e}") from e
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            same = os.path.samestat(os.fstat(fd), os.stat(directory))
+        except FileNotFoundError:
+            same = False
+        except OSError as e:
+            os.close(fd)
+            raise AnchorError(f"cannot lock the anchor directory {directory}: {e}") from e
+        if same:
+            break
+        os.close(fd)
+    try:
+        yield
+    finally:
+        os.close(fd)  # closing the descriptor releases the lock
+
+
 def write_anchor(directory: Path, anchor: Mapping[str, Any]) -> tuple[Path, bool]:
     """Create ``directory/anchor_name(...)`` holding ``anchor``; never overwrite. Returns
     ``(path, written)``: ``written`` is ``False`` when a file of the same ledger state is
@@ -375,6 +414,7 @@ __all__ = [
     "HashAt",
     "LoadedAnchor",
     "anchor_bytes",
+    "anchor_dir_lock",
     "anchor_name",
     "build_anchor",
     "check_anchor",

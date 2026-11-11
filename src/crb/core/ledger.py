@@ -1640,14 +1640,16 @@ class JsonlLedger:
         rows; ``""`` for a line that is not a readable row, so positions still count lines."""
         if not self.path.exists():
             return []
-        with self.path.open("rb") as f:
-            lines = [raw for raw in f if not _blank_line(raw)]
-        hashes = []
-        for n, raw in enumerate(lines, start=1):
-            try:
-                hashes.append(str(jsonl_record(raw, n, self.path).get("row_hash", "")))
-            except LedgerIntegrityError:
-                hashes.append("")
+        hashes: list[str] = []
+        with self.path.open("rb") as f:  # streamed: only the hashes are kept, never the lines
+            for raw in f:
+                if _blank_line(raw):
+                    continue
+                try:
+                    record = jsonl_record(raw, len(hashes) + 1, self.path)
+                    hashes.append(str(record.get("row_hash", "")))
+                except LedgerIntegrityError:
+                    hashes.append("")
         return hashes
 
 

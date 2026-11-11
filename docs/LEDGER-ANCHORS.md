@@ -6,11 +6,14 @@ where it must be kept, who must hold it, and what it cannot prove._
 ## 1. Why an anchor exists
 
 The grade ledger and the audit trail (`events`) are hash-chained (ADR-0002, ADR-0029). A chain
-shows that no row was edited, removed from the middle or moved. It cannot show that rows were cut
-from its end, or that the whole ledger was rebuilt from a new start: a rebuilt chain verifies
-too.
+on its own shows that a row was edited, removed from the middle or moved only when the hashes
+after the change were left as they were. Someone who can write the ledger can change a row and
+recompute its hash and every hash after it, and that chain verifies. A chain also cannot show
+that rows were cut from its end, or that the whole ledger was rebuilt from a new start: a
+rebuilt chain verifies too.
 
-An anchor closes that gap. It is a small JSON file (`crb.ledger-anchor/v1`) that records, for
+An anchor kept where that writer cannot reach it closes that gap for everything up to the
+anchor, from the time the anchor was taken. It is a small JSON file (`crb.ledger-anchor/v1`) that records, for
 each chain, the row count and the `row_hash` of the row at that count. Later, the row at that
 count must still carry that hash. If it does not, the history up to the anchor was rewritten or
 cut.
@@ -29,7 +32,9 @@ crb ledger verify --anchor ~/anchors/my-jsonl/anchor-g00000003-….json   # one 
 - reads the ledger and verifies its chain first. A broken chain writes no anchor (exit 1). A
   line that is not a readable row (not JSON, not an object) counts as a broken chain.
 - refuses an empty ledger (exit 2): an anchor with no row attests nothing. A store with an
-  audit trail but no grade yet is anchored, with `grades` at 0 rows.
+  audit trail but no grade yet is anchored, with `grades` at 0 rows (pinned by
+  `test_a_store_with_events_and_no_grade_is_anchored_and_holds` in
+  `tests/test_cli_ledger_anchor.py`).
 - writes one file named from the row counts and heads, for example
   `anchor-g00000412-1f3a…-e00009311-77c0….json`. It never overwrites a file. Running it again
   on an unchanged ledger writes nothing and says so.
@@ -109,8 +114,9 @@ The worker log is a second, independent copy: every worker start writes both hea
 - **An operator who controls both copies can rewrite both.** The anchor repository's history and
   its host's push log make that harder to do quietly, not impossible. Separate custody (§3) is
   what makes it hard.
-- **It says nothing about whether a row is true.** Hash-chained and anchored means unaltered
-  since it was written and since it was anchored, not verified true.
+- **It says nothing about whether a row is true.** A protected anchor shows changes made to
+  the rows it covers after it was taken. It does not show that a row is as it was first
+  written, and it does not show that a row is true.
 - **It is unsigned.** The file says `"signed": false`. A public transparency log (Sigstore /
   Rekor) would give a timestamp and a record no operator controls. That is not built, and any
   later version is off by default because it sends data off the machine; the `signed` field is

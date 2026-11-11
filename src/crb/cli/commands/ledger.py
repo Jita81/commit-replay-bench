@@ -71,6 +71,7 @@ from crb.core.anchor import (
     ChainHead,
     HashAt,
     LoadedAnchor,
+    anchor_dir_lock,
     build_anchor,
     check_anchor,
     check_anchor_links,
@@ -752,6 +753,23 @@ def cmd_anchor(args: argparse.Namespace) -> int:
     directory. Never overwrites. Exit 1 on a finding, 2 on a refusal of the request."""
     out_dir = Path(args.out).expanduser()
     created_at = _created_at(args.created_at)
+    created = not out_dir.exists()
+    try:
+        # one writer per directory, from before the heads are read until the file is written
+        with anchor_dir_lock(out_dir):
+            try:
+                return _anchor_locked(args, out_dir, created_at)
+            finally:
+                if created:  # a request that wrote nothing leaves no directory behind
+                    with contextlib.suppress(OSError):
+                        out_dir.rmdir()  # removes it only when empty
+    except AnchorError as e:
+        raise CliError(str(e)) from e
+
+
+def _anchor_locked(args: argparse.Namespace, out_dir: Path, created_at: str) -> int:
+    """:func:`cmd_anchor` under the directory's lock: read the heads, check the directory,
+    write the anchor."""
     with _open_for_anchor(args) as led:
         inside = next(
             (d for d in (led.data_dir, led.named_dir) if d is not None and is_inside(out_dir, d)),
