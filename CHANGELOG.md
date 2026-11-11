@@ -13,12 +13,19 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **A Baseline summary line and a login notice in the run dialog**
-  ([PR](https://github.com/Jita81/commit-replay-bench/pulls?q=is%3Apr+head%3Afeat%2Fui-summary-line-builder-login)).
+  ([#121](https://github.com/Jita81/commit-replay-bench/pull/121)).
   The Baseline screen opens with one plain line per apparatus the map reads: how many measured
   cells earn `deliver` under the published rule, the posture, and a link to the routes card that
   carries n. A failed map read says "Unavailable". The "Start run" dialog reads
   `GET /builders/logins` for a `claude_code` run and, when the login it would use is missing or
   invalid, shows a notice linking to the Claude Code login card in Settings. UI only; no API change.
+
+- **Wave 4 amendment 1: the four ordered lists**
+  ([#120](https://github.com/Jita81/commit-replay-bench/pull/120)). The registration's first
+  amendment, appended before the pilot. It records the two qualify runs at apparatus 2.5 and
+  their postures, each cell's key string, pool size, full seeded order and sha256, and strikes
+  the pilot's six click commits. The orders were checked against
+  `crb.core.reading.seeded_order`. Docs only; nothing is spent.
 
 - **The Wave 4 registration**
   ([#117](https://github.com/Jita81/commit-replay-bench/pull/117)). A new record,
