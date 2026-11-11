@@ -128,6 +128,20 @@ def test_compare_finds_unknown_and_missing_required_but_not_inherited() -> None:
     assert unmapped == ["Page"]
 
 
+def test_an_inherited_field_the_component_dropped_is_an_unknown_field() -> None:
+    """The derived component lacks a field the base interface (and base component) still has."""
+    shapes = m.parse_ts(
+        "export interface Base { id: string; gone: string }\n"
+        "export interface Kid extends Base { own: string }\n"
+    )
+    schemas = {
+        "Base": _schema(["id", "gone"], ["id"]),
+        "Kid": _schema(["id", "own"], ["id"]),
+    }
+    findings, _ = m.compare(shapes, schemas)
+    assert [f.line for f in findings] == ["Kid.gone unknown-field"]
+
+
 def _run(allowlist: str, schemas: dict[str, Any], mapped: str = "Literal Literal\n") -> int:
     return int(
         m.main(

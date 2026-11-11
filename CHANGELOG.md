@@ -19,7 +19,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   not in the reviewed `scripts/ui_types_drift_allowlist.txt`, on a stale entry, or when the
   committed `scripts/ui_types_mapped.txt` coverage changes. Every finding today is a required
   field the UI does not declare **[measured — n = 56 findings over the 78 of 172 shapes that
-  map to a component; method: `check_ui_types_drift.py --list` merged with `e1d267c9`;
+  map to a component; method: this pull request's `check_ui_types_drift.py --list` over main `e1d267c9`'s inputs;
   apparatus 2.5]**. `.github/workflows/scorecard.yml` runs the OpenSSF Scorecard
   weekly and on push to `main`, uploading SARIF to code scanning.
 

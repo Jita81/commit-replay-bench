@@ -250,7 +250,7 @@ def compare(
         props = set((schema.get("properties") or {}).keys())
         required = set(schema.get("required") or [])
         mine = all_fields(shapes[name], shapes)
-        for field_name in sorted(shapes[name].fields):
+        for field_name in sorted(mine):  # inherited fields too: a component can drop one
             if field_name not in props:
                 findings.append(
                     Finding(f"{name}.{field_name}", "unknown-field", f"not a property of {comp}")
