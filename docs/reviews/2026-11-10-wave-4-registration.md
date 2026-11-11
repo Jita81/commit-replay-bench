@@ -5,8 +5,8 @@ Decision R-1 is taken: option B, the combined test. No Wave 4 run is filed until
 part 4 are deployed. Paul's yes to the spends is recorded under Authority.
 
 **Amendment 1 (2026-11-11).** The fixes are deployed, both repositories are re-qualified at
-apparatus 2.5 and the four ordered lists are appended at the end of this page. Still nothing is
-spent.
+apparatus 2.5 and the ordered lists are appended at the end of this page. Still nothing is
+spent **[hypothesis — the detail and its evidence are in Amendment 1 below]**.
 
 **Authority.** Paul's "yes to all four, go ahead" of 2026-11-10 (the Wave 3 closure; this design
 with a money line of $60 for stage 1 and $35 for stage 2, in real dollars; apparatus 2.5 with a
