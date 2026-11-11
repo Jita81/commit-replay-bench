@@ -22,6 +22,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `scripts/value_baseline.py` takes `--posture`. A figure quoted from `/value` before may
   differ. This ports the October fix held by the feature freeze, which has ended.
 
+- **Set-up progress in the header; one action on each empty list**
+  ([#122](https://github.com/Jita81/commit-replay-bench/pull/122)). Off /home, an operator now
+  sees "n of 8" with a Continue link to the next Get-started task. It comes from a `useGetStarted`
+  hook lifted out of HomePage, and the count is for the page's `?repo=` and links to Home with
+  that repository, so the two show the same count. A failed read a task stands on shows "Get
+  started: unavailable", and the indicator hides at 8 of 8. The empty Factory items list now links to
+  intake, and the empty Decisions queue links to the capability map. UI only; nothing is deployed.
+
 - **CI installs the browser without apt when it already starts**
   ([#127](https://github.com/Jita81/commit-replay-bench/pull/127)).
   The CI browser install downloads Chromium alone and starts it once. Only when that start

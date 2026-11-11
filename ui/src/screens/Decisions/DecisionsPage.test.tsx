@@ -241,6 +241,10 @@ describe('DecisionsPage', () => {
     renderApp(<DecisionsPage />, { route: '/decisions' })
     await waitFor(() => expect(screen.getByText('Nothing is waiting on a person')).toBeInTheDocument())
     expect(screen.getByText('0 waiting')).toBeInTheDocument()
+    // the one action leads to where decisions start: the capability map
+    const map = screen.getByRole('link', { name: 'Read the capability map' })
+    expect(map).toHaveAttribute('href', '/capability')
+    expect(map).toHaveAttribute('data-hint', 'link.decisions.empty_map')
   })
 
   it('a connected but unmeasured repository is "nothing measured yet", never "no repository connected"', async () => {

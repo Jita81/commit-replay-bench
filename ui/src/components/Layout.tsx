@@ -37,7 +37,9 @@
  *               focus and tap on every screen; no native `title` remains.
  * How:          `useAuth` for the principal, `useHealth` / `useVersion` for the chrome facts,
  *               `useLogout` then navigate to `/login`; a skip link precedes the header; each
- *               `JOURNEY` / `INSTRUMENT` entry names its hint id.
+ *               `JOURNEY` / `INSTRUMENT` entry names its hint id. For an operator or admin off
+ *               Home, `useGetStarted` (screens/Home/useGetStarted.ts) gives the header Home's
+ *               "n of 8" and a Continue to the next task; "unavailable" when a read failed.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/App.tsx (mounts this under `RequireAuth`), ui/src/components/Hint.tsx
@@ -73,6 +75,7 @@ import { Hint } from './Hint'
 import { Pill } from './Pill'
 import { probeDisplay } from '../lib/verdict'
 import { useDecisionCount } from '../screens/Decisions/useDecisionCount'
+import { useGetStarted } from '../screens/Home/useGetStarted'
 
 /** The one brand string in chrome (design law 9): header, footer and the login page use it. */
 export const BRAND = 'Commit Replay Bench'
@@ -233,6 +236,10 @@ export function Layout() {
   const menu = useShellMenu()
   // below sm the three blocks show only while the menu is open; from sm up, always
   const folded = menu.open ? '' : 'max-sm:hidden'
+  // the set-up progress is the operators' to-do list (Home's own rule, G-911): an approver and
+  // a viewer read it on Home as a report; on Home itself the full list is the page
+  const { pathname } = useLocation()
+  const showProgress = can('operator') && me?.role !== 'approver' && !matchPath('/home', pathname)
 
   return (
     <div className="flex min-h-screen flex-col bg-surface text-on-surface">
@@ -273,6 +280,7 @@ export function Layout() {
               id={SHELL_MENU_IDS[0]}
               className={`${folded} flex basis-full flex-wrap items-center gap-x-2.5 gap-y-2 text-[16px] sm:ml-auto sm:basis-auto sm:justify-end sm:gap-x-4`}
             >
+              {showProgress && <GetStartedProgress />}
               {h && (
                 <Pill tone={h.tone} glyph={h.glyph} size="xs" label={`Instrument health: ${h.label}`} hint="pill.shell.health">
                   {h.label}
@@ -388,6 +396,49 @@ export function Layout() {
         </Hint>
       </footer>
     </div>
+  )
+}
+
+/**
+ * Home's "n of 8" and its Continue, on every other screen: the same derivation Home shows
+ * (`useGetStarted`), so the next step is one press away wherever the operator is. Nothing while
+ * a read is on its first fetch; nothing once all eight are Completed; "unavailable" when a
+ * task stands on a read that failed — never a count that reads a failed read as an incomplete
+ * task (G-164); a failed read no task stands on (health, intake) leaves the count. The count
+ * is for the page's `?repo=` (else the latest) and links to Home with that repository named.
+ */
+function GetStartedProgress() {
+  const { tasks, completed, nextTask, loading, chosen, q } = useGetStarted()
+  // Home counts the repository it is given, so the link carries the one this count is for
+  const home = `/home${q}`
+  if (loading) return null
+  if (completed === tasks.length) return null
+  // only a read a task stands on makes the count unknown: such a task reads "Unavailable". A
+  // failed read no task stands on (health, board intake) leaves every task's status known
+  if (tasks.some((t) => t.status === 'Unavailable')) {
+    return (
+      <Hint as={NavLink} id="stat.shell.get_started" to={home} className="text-[14px] text-on-primary underline" data-testid="shell-get-started">
+        Get started: unavailable
+      </Hint>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-2 text-[14px]" data-testid="shell-get-started">
+      <Hint as={NavLink} id="stat.shell.get_started" to={home} aria-label={chosen ? `${chosen}: ${completed} of ${tasks.length}` : undefined} className="text-on-primary underline">
+        {completed} of {tasks.length}
+      </Hint>
+      {nextTask?.to && (
+        <Hint
+          as={NavLink}
+          id="button.shell.continue"
+          to={nextTask.to}
+          aria-label={`Continue to task ${nextTask.num}: ${nextTask.name}`}
+          className="rounded-[var(--radius-control)] border border-on-primary px-2 py-0.5 font-semibold text-on-primary no-underline hover:bg-[#002265]"
+        >
+          Continue
+        </Hint>
+      )}
+    </span>
   )
 }
 
