@@ -26,7 +26,8 @@ crb ledger verify --anchor ~/anchors/my-jsonl/anchor-g00000003-….json   # one 
 
 `crb ledger anchor`:
 
-- reads the ledger and verifies its chain first. A broken chain writes no anchor (exit 1).
+- reads the ledger and verifies its chain first. A broken chain writes no anchor (exit 1). A
+  line that is not a readable row (not JSON, not an object) counts as a broken chain.
 - writes one file named from the row counts and heads, for example
   `anchor-g00000412-1f3a…-e00009311-77c0….json`. It never overwrites a file. Running it again
   on an unchanged ledger writes nothing and says so.

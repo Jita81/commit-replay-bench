@@ -1611,8 +1611,60 @@ class JsonlLedger:
                     yield GradeRow.from_dict(json.loads(line))
 
     def verify(self) -> int:
-        """Walk the chain; return the row count; raise on any break."""
-        return verify_chain(self.rows())
+        """Walk the chain; return the row count; raise on any break. A line that is not a
+        readable row (not UTF-8, not JSON, not an object, or refused by ``from_dict``) is a
+        break too: :class:`LedgerIntegrityError` naming the row, never a parse error."""
+        return verify_chain(self._readable_rows())
+
+    def _readable_rows(self) -> Iterator[GradeRow]:
+        if not self.path.exists():
+            return
+        with self.path.open("rb") as f:
+            n = 0
+            for raw in f:
+                if not raw.strip():
+                    continue
+                n += 1
+                d = jsonl_record(raw, n, self.path)
+                try:
+                    row = GradeRow.from_dict(d)
+                except (ValueError, TypeError, AssertionError) as e:  # incl. FalseQ1Violation
+                    raise LedgerIntegrityError(
+                        f"row {n} in {self.path} is a row the reader refuses — "
+                        f"{type(e).__name__}: {e}"
+                    ) from e
+                yield row
+
+    def row_hashes(self) -> list[str]:
+        """The ``row_hash`` of every non-blank line, in file order, without re-validating the
+        rows; ``""`` for a line that is not a readable row, so positions still count lines."""
+        if not self.path.exists():
+            return []
+        with self.path.open("rb") as f:
+            lines = [raw for raw in f if raw.strip()]
+        hashes = []
+        for n, raw in enumerate(lines, start=1):
+            try:
+                hashes.append(str(jsonl_record(raw, n, self.path).get("row_hash", "")))
+            except LedgerIntegrityError:
+                hashes.append("")
+        return hashes
+
+
+def jsonl_record(raw: bytes, n: int, path: Path) -> dict[str, Any]:
+    """Line ``n`` of the JSONL ledger at ``path`` as its JSON object. The one place a ledger
+    line is parsed for a check: a line that is not UTF-8, not JSON or not an object raises
+    :class:`LedgerIntegrityError` naming the row, so every reader reports a broken chain
+    rather than a parse error."""
+    try:
+        d = json.loads(raw.decode("utf-8"))
+    except ValueError as e:  # UnicodeDecodeError and JSONDecodeError are ValueErrors
+        raise LedgerIntegrityError(
+            f"row {n} in {path} is not a readable row — {type(e).__name__}: {e}"
+        ) from e
+    if not isinstance(d, dict):
+        raise LedgerIntegrityError(f"row {n} in {path} is not a JSON object")
+    return d
 
 
 def verify_chain(rows: Iterable[GradeRow]) -> int:

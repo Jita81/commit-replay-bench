@@ -12,7 +12,8 @@ What it does: Pins the round trip on a JSONL ledger and on a SQLite store (both 
               writes nothing to the ledger and no URL to the file; that the store reader
               returns the same hashes as a per-row read in one ordered pass per chain,
               however many anchors, and still checks anchors when a chain is broken; and
-              that a malformed predecessor link is an anchor-chain fault.
+              that a malformed predecessor link is an anchor-chain fault; and that a ledger
+              line that is not a readable row is a broken chain, never a parse error.
 How:          ``main(argv)`` in-process on ``tmp_path``: a JSONL ledger built with
               ``JsonlLedger``; a SQLite store built with ``crb migrate`` and ``DbLedger``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -279,6 +280,31 @@ def test_a_broken_chain_writes_no_anchor(
     code, d = _anchor(ledger, tmp_path / "anchors", capsys)
     assert code == 1 and "CHAIN BROKEN" in d["faults"][0]
     assert not (tmp_path / "anchors").exists()
+
+
+UNREADABLE_LINES = (b"{not json", b"[1, 2]", b"\xff\xfe not utf-8", b"{}")
+
+
+@pytest.mark.parametrize("bad", UNREADABLE_LINES)
+def test_an_unreadable_row_is_a_chain_fault_not_an_error(
+    bad: bytes, ledger: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A line that is not a readable row is ``grades: CHAIN BROKEN`` (exit 1, the structured
+    result) for ``anchor``, and a broken chain for ``verify --anchor`` — never a parse error."""
+    _, d = _anchor(ledger, tmp_path / "anchors", capsys)
+    lines = ledger.read_bytes().splitlines(keepends=True)
+    ledger.write_bytes(lines[0] + bad + b"\n" + b"".join(lines[1:]))
+    code, a = _anchor(ledger, tmp_path / "again", capsys)
+    assert code == 1 and a["ok"] is False and a["written"] is False
+    assert a["faults"][0].startswith("grades: CHAIN BROKEN") and "row 2" in a["faults"][0]
+    assert not (tmp_path / "again").exists()
+    code, v = _verify(ledger, Path(d["anchor"]), capsys)
+    assert code == 1 and v["ok"] is False and v["chain_ok"] is False and "row 2" in v["error"]
+    # the anchored row 3 is now line 4's row and line 3 holds the old row 2: the anchor fails
+    assert v["anchors"]["ok"] is False
+    ledger.write_bytes(b"".join(lines[:2]) + bad + b"\n")  # the anchored row itself unreadable
+    code, v = _verify(ledger, Path(d["anchor"]), capsys)
+    assert code == 1 and v["chain_ok"] is False and v["anchors"]["first_broken"]
 
 
 def test_verify_without_anchor_is_unchanged(

@@ -508,7 +508,8 @@ def _verify_store(args: argparse.Namespace) -> int:
 
 def _jsonl_hash_at(path: Path) -> HashAt:
     """``hash_at`` over a JSONL ledger: the ``row_hash`` of its n-th non-blank line, the file
-    read once on first use."""
+    read once on first use. An unreadable line has hash ``""``, so an anchor on it fails
+    as rewritten; the chain's own verification names the line."""
     hashes: list[str] | None = None
 
     def at(chain: str, n: int) -> str | None:
@@ -516,10 +517,7 @@ def _jsonl_hash_at(path: Path) -> HashAt:
         if chain != "grades":
             return None
         if hashes is None:
-            hashes = []
-            if path.exists():
-                with path.open("r", encoding="utf-8") as f:
-                    hashes = [str(json.loads(ln).get("row_hash", "")) for ln in f if ln.strip()]
+            hashes = JsonlLedger(path).row_hashes()
         return hashes[n - 1] if 0 < n <= len(hashes) else None
 
     return at

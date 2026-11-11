@@ -478,6 +478,33 @@ def test_ledger_refuses_a_false_q1_row_before_writing(tmp_path: Path) -> None:
     assert not led.path.exists()
 
 
+@pytest.mark.parametrize(
+    ("bad", "says"),
+    [
+        (b"{not json", "JSONDecodeError"),
+        (b"\xff not utf-8", "UnicodeDecodeError"),
+        (b'"a string"', "not a JSON object"),
+        (b"{}", "the reader refuses"),
+    ],
+)
+def test_an_unreadable_line_is_a_broken_chain(tmp_path: Path, bad: bytes, says: str) -> None:
+    led, rows = _fill(tmp_path / "g.jsonl")
+    lines = led.path.read_bytes().splitlines(keepends=True)
+    led.path.write_bytes(lines[0] + bad + b"\n" + b"".join(lines[1:]))
+    with pytest.raises(lg.LedgerIntegrityError, match=rf"row 2 .*{says}"):
+        led.verify()
+    assert led.row_hashes() == [rows[0].row_hash, "", *(r.row_hash for r in rows[1:])]
+
+
+def test_a_forged_false_q1_line_is_a_broken_chain(tmp_path: Path) -> None:
+    led, _ = _fill(tmp_path / "g.jsonl")
+    forged = {**row(clean=False).to_dict(), "clean": True, "target_green": False}
+    with led.path.open("a") as f:
+        f.write(json.dumps(forged) + "\n")
+    with pytest.raises(lg.LedgerIntegrityError, match=r"row 5 .*FalseQ1Violation"):
+        led.verify()
+
+
 def test_ledger_detects_an_edited_middle_line(tmp_path: Path) -> None:
     led, _ = _fill(tmp_path / "g.jsonl")
     lines = led.path.read_text().splitlines()
