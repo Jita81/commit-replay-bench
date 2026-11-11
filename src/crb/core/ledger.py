@@ -1622,13 +1622,13 @@ class JsonlLedger:
         with self.path.open("rb") as f:
             n = 0
             for raw in f:
-                if not raw.strip():
+                if _blank_line(raw):
                     continue
                 n += 1
                 d = jsonl_record(raw, n, self.path)
                 try:
                     row = GradeRow.from_dict(d)
-                except (ValueError, TypeError, AssertionError) as e:  # incl. FalseQ1Violation
+                except Exception as e:  # any refusal, incl. a mistyped field's AttributeError
                     raise LedgerIntegrityError(
                         f"row {n} in {self.path} is a row the reader refuses — "
                         f"{type(e).__name__}: {e}"
@@ -1641,7 +1641,7 @@ class JsonlLedger:
         if not self.path.exists():
             return []
         with self.path.open("rb") as f:
-            lines = [raw for raw in f if raw.strip()]
+            lines = [raw for raw in f if not _blank_line(raw)]
         hashes = []
         for n, raw in enumerate(lines, start=1):
             try:
@@ -1649,6 +1649,12 @@ class JsonlLedger:
             except LedgerIntegrityError:
                 hashes.append("")
         return hashes
+
+
+def _blank_line(raw: bytes) -> bool:
+    """A line every JSONL reader skips: empty once decoded and stripped, the same test
+    :meth:`JsonlLedger.rows` applies, so ``verify`` and ``rows`` count the same rows."""
+    return not raw.decode("utf-8", errors="replace").strip()
 
 
 def jsonl_record(raw: bytes, n: int, path: Path) -> dict[str, Any]:
@@ -1677,9 +1683,9 @@ def verify_chain(rows: Iterable[GradeRow]) -> int:
     for row in rows:
         n += 1
         if row.prev_hash != prev:
-            raise LedgerIntegrityError(f"row {n} ({row.task_id[:10]}) prev_hash mismatch")
+            raise LedgerIntegrityError(f"row {n} ({str(row.task_id)[:10]}) prev_hash mismatch")
         if not row.verify_hash():
-            raise LedgerIntegrityError(f"row {n} ({row.task_id[:10]}) row_hash mismatch")
+            raise LedgerIntegrityError(f"row {n} ({str(row.task_id)[:10]}) row_hash mismatch")
         prev = row.row_hash
     return n
 

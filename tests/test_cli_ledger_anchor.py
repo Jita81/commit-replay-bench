@@ -309,6 +309,34 @@ def test_an_unreadable_row_is_a_chain_fault_not_an_error(
     assert code == 1 and v["chain_ok"] is False and v["anchors"]["first_broken"]
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("provenance", None),
+        ("task_id", 5),
+        ("task_id", {"a": 1}),
+        ("apparatus_version", 1),
+        ("error", None),
+    ],
+)
+def test_a_mistyped_field_is_a_chain_fault_not_an_error(
+    field: str, value: object, ledger: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A row whose field has the wrong JSON type is ``CHAIN BROKEN`` (exit 1) for ``verify``,
+    ``verify --anchor`` and ``anchor`` — never an uncaught error (exit 2)."""
+    _, d = _anchor(ledger, tmp_path / "anchors", capsys)
+    rows = [json.loads(ln) for ln in ledger.read_text().splitlines()]
+    rows[1][field] = value
+    ledger.write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
+    code, text = _run(["ledger", "verify", "--path", str(ledger), "--json"], capsys)
+    assert code == 1 and "row 2" in json.loads(text)["error"]
+    code, v = _verify(ledger, Path(d["anchor"]), capsys)
+    assert code == 1 and v["chain_ok"] is False and "row 2" in v["error"]
+    code, a = _anchor(ledger, tmp_path / "again", capsys)
+    assert code == 1 and a["faults"][0].startswith("grades: CHAIN BROKEN")
+    assert not (tmp_path / "again").exists()
+
+
 def test_an_anchor_that_attests_no_jsonl_row_is_refused_not_passed(
     ledger: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
