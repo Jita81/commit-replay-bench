@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The value scorecard reads one posture class** (P-135, G-991, ADR-0019 §8;
+  [#128](https://github.com/Jita81/commit-replay-bench/pull/128)). `GET /value` summed spend
+  and counted working changes over every posture class, so a sealed row and a host row shared
+  one rate per pound. It now reads the deployment's class by default and another with
+  `posture=<class>`; `posture=all` over two classes is refused 422 `posture_pooling_refused`.
+  A pre-2.3 Docker row is counted `unqualified_posture`. `scripts/value_baseline.py` takes
+  `--posture`. The default read changes, so a figure quoted from `/value` before may differ.
+  This ports the October fix held unopened by the feature freeze, which has ended.
+
 - **A Baseline summary line and a login notice in the run dialog**
   ([#121](https://github.com/Jita81/commit-replay-bench/pull/121)).
   The Baseline screen opens with one plain line per apparatus the map reads: how many measured

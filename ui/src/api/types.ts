@@ -2424,6 +2424,12 @@ export interface ValueReport {
   pooled: boolean
   /** The one checks arm the headline reads (ADR-0024): the repository's own, or `off` across repositories. */
   checks?: string
+  /** The posture filter asked: `deployment`'s resolved class, a class, or `all` (ADR-0019 §8). Absent on an older server. */
+  posture?: string
+  /** The one posture class every figure reads (`''` when the scope held no row). Absent on an older server. */
+  posture_class?: string
+  /** Pre-2.3 rows a Docker run graded: in no figure, counted apart. Absent on an older server. */
+  unqualified_posture?: number
   rows: number
   usd_per_gbp: number
   north_star: ValueNorthStar

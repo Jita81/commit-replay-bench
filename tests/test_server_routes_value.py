@@ -34,7 +34,7 @@ from crb.core.ledger import FAILURE_BUDGET, LABEL_FAILURE_KIND, GradeRow
 from crb.core.version import APPARATUS_VERSION
 from crb.store.ledger import DbLedger
 from crb.store.models import Grade
-from fixtures.posture import with_posture_labels
+from fixtures.posture import TEST_POSTURE_CLASS, dict_at_apparatus, with_posture_labels
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, make_env
 from test_server_routes_reviews import Retained
 
@@ -52,14 +52,16 @@ def env(tmp_path: Path) -> Iterator[Env]:
         yield e
 
 
-def _add_blind(env: Env, *, clean: bool, n: int = 1) -> None:
-    """Append blind rows through the write path (chained, invariants checked)."""
+def _add_blind(env: Env, *, clean: bool, n: int = 1, posture_class: str = "") -> None:
+    """Append blind rows through the write path (chained, invariants checked), graded in the
+    test posture (``local/inplace/host-env``) unless ``posture_class`` names another."""
     ledger = DbLedger(env.factory)
     template = next(r for r in ledger.rows(repo=ALPHA) if r.clean)
     for i in range(n):
         d = template.to_dict()
         d.update({"mode": "blind", "row_id": "", "prev_hash": "", "row_hash": "", "cost_usd": 0.5})
-        d["task_id"] = f"{'b' if clean else 'c'}{i:039d}"
+        prefix = ("b" if clean else "c") if not posture_class else ("d" if clean else "e")
+        d["task_id"] = f"{prefix}{i:039d}"
         if not clean:
             d.update(
                 {
@@ -69,6 +71,12 @@ def _add_blind(env: Env, *, clean: bool, n: int = 1) -> None:
                     "labels": {LABEL_FAILURE_KIND: FAILURE_BUDGET, "stop_reason": "max_turns"},
                 }
             )
+        if posture_class:
+            d["labels"] = {
+                **d["labels"],
+                "posture_class": posture_class,
+                "posture_id": "pst_" + "6" * 24,
+            }
         d.pop("failure_kind", None)
         d.pop("cost_known", None)
         ledger.append(GradeRow.from_dict(with_posture_labels(d)))
@@ -114,6 +122,112 @@ def test_a_review_reaches_the_precision_joined_to_its_row(env: Env, tmp_path: Pa
     pr = env.get(f"/value?repo={ALPHA}").json()["precision"]
     assert pr["review"]["n"] == 1 and pr["review"]["k"] == 1 and pr["review"]["unjoined"] == 0
     assert pr["agreement"]["n"] == 1
+
+
+#: The test deployment runs ``sandbox.executor=local``: its own class is the host's.
+HOST = TEST_POSTURE_CLASS
+SEALED = "docker/copy/sealed"
+_POSTURE_KEYS = ("posture_", "qualification_id")
+
+
+def _mixed(env: Env) -> None:
+    """Three clean blind rows graded on the host and two budget-stopped blind rows graded in
+    a sealed container, $0.50 each: two instruments, never one rate per pound."""
+    _add_blind(env, clean=True, n=3)
+    _add_blind(env, clean=False, n=2, posture_class=SEALED)
+
+
+def test_the_scorecard_reads_the_deployments_posture_class_by_default(env: Env) -> None:
+    """ADR-0019 §8 (P-135): posture is a filter, never a blend. A sealed row and a host row
+    in one repository: the default reading counts only the deployment's own class (its
+    working changes per pound, its loss and its spend), for one repository and across every
+    repository, and names the class it read."""
+    _mixed(env)
+    d = env.get(f"/value?repo={ALPHA}").json()
+    assert (d["posture"], d["posture_class"]) == (HOST, HOST)
+    ns = d["north_star"]
+    assert (ns["clean"], ns["n_valid"], ns["n_attempts"]) == (3, 3, 3)
+    assert ns["spend_usd"] == pytest.approx(1.5)
+    assert d["process_loss"]["kinds"]["budget"]["rows"] == 0
+    every = env.get("/value").json()
+    assert (every["posture"], every["posture_class"]) == (HOST, HOST)
+    (alpha,) = (x for x in every["repos"] if x["repo"] == ALPHA)
+    assert alpha["north_star"]["n_attempts"] == 3
+    assert alpha["north_star"]["spend_usd"] == pytest.approx(1.5)
+
+
+def test_posture_names_another_class_and_reads_only_it(env: Env) -> None:
+    _mixed(env)
+    d = env.get(f"/value?repo={ALPHA}&posture={SEALED}").json()
+    assert (d["posture"], d["posture_class"], d["rows"]) == (SEALED, SEALED, 2)
+    ns = d["north_star"]
+    assert (ns["clean"], ns["n_valid"], ns["n_attempts"]) == (0, 2, 2)
+    assert ns["spend_usd"] == pytest.approx(1.0)
+    assert d["process_loss"]["kinds"]["budget"]["rows"] == 2
+    assert sum(c["attempts"] for c in d["cells"]) == 2
+
+
+def test_posture_all_refuses_to_reduce_two_classes(env: Env) -> None:
+    """``posture=all`` lifts the filter and is still never a blend: over rows of one class it
+    reads that class (and names it); over rows of two it refuses with the classes present,
+    for one repository and across every repository, as the economics fold withholds a cost
+    that spans two (a pound spent in a sealed container buys a different measurement)."""
+    _add_blind(env, clean=True, n=3)
+    one = env.get(f"/value?repo={ALPHA}&posture=all")
+    assert one.status_code == 200, one.text
+    assert (one.json()["posture"], one.json()["posture_class"]) == ("all", HOST)
+    _add_blind(env, clean=False, n=2, posture_class=SEALED)
+    for query in (f"?repo={ALPHA}&posture=all", "?posture=all"):
+        r = env.get(f"/value{query}")
+        assert r.status_code == 422, r.text
+        e = envelope(r)
+        assert e["code"] == "posture_pooling_refused" and "ADR-0019" in e["message"]
+        assert e["detail"]["present"] == [SEALED, HOST]
+
+
+def test_a_row_from_before_2_3_is_placed_by_its_runs_executor(env: Env) -> None:
+    """A pre-2.3 row carries no posture: its run's apparatus stamp places it, as on the map.
+    The host graded ``legacy:local`` in its own environment, so it reads with the host's
+    class; a ``legacy:docker`` row was graded against a baseline measured elsewhere, so it is
+    left out of every figure and counted ``unqualified_posture``."""
+    from crb.store.models import Run
+
+    with env.factory() as s:
+        for run_id, executor in (("7" * 32, "local"), ("8" * 32, "docker")):
+            s.add(
+                Run(
+                    id=run_id,
+                    repo=ALPHA,
+                    kind="replay",
+                    status="succeeded",
+                    apparatus_json={"executor": {"executor": executor}},
+                )
+            )
+        s.commit()
+    ledger = DbLedger(env.factory)
+    template = next(r for r in ledger.rows(repo=ALPHA) if r.clean)
+    for i, run_id in enumerate(("7" * 32, "8" * 32, "8" * 32)):
+        d = template.to_dict()
+        d.update(
+            {
+                "mode": "blind",
+                "row_id": "",
+                "prev_hash": "",
+                "row_hash": "",
+                "cost_usd": 0.5,
+                "task_id": f"f{i:039d}",
+                "run_id": run_id,
+            }
+        )
+        # a row of 2.2 carried no posture of its own: only its run's stamp places it
+        d["labels"] = {k: v for k, v in d["labels"].items() if not k.startswith(_POSTURE_KEYS)}
+        d.pop("failure_kind", None)
+        d.pop("cost_known", None)
+        ledger.append(GradeRow.from_dict(dict_at_apparatus(d, "2.2")))
+    d = env.get(f"/value?repo={ALPHA}&apparatus=2.2").json()
+    assert (d["posture_class"], d["unqualified_posture"]) == (HOST, 2)
+    assert d["north_star"]["n_attempts"] == 1
+    assert env.get(f"/value?repo={ALPHA}&apparatus=2.2&posture={SEALED}").json()["rows"] == 0
 
 
 def test_all_repositories_list_each_ones_north_star(env: Env) -> None:
