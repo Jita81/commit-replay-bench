@@ -497,14 +497,18 @@ def test_the_probe_is_given_only_what_is_left_of_the_install_budget() -> None:
 def test_a_download_that_used_the_whole_budget_is_not_probed_and_is_not_a_success() -> None:
     rc, out, given = _timed_install(download_s=100.0, budget=100.0)
     assert rc == 1 and given == []
-    assert "the install budget ran out" in out
+    assert "completed, but only after the install budget ran out, at 100 s" in out
+    assert "was stopped" not in out and "still printing" not in out
 
 
 def test_a_probe_that_passes_after_the_budget_ended_is_not_a_success() -> None:
     # The probe's timeout bounds the browser, not the time around it: the clock is read again.
     rc, out, given = _timed_install(download_s=95.0, budget=100.0, probe_s=6.0)
     assert rc == 1 and given == [5.0]
-    assert "the install budget ran out" in out
+    # Nothing was stopped, and the time reported is the download's and the probe's together.
+    assert "completed, but only after the install budget ran out, at 101 s" in out
+    assert "ran to its end, but only after the budget had ended" in out
+    assert "was stopped" not in out and "still printing" not in out
     # A probe that ends exactly on the deadline is still inside the budget.
     rc, _out, _given = _timed_install(download_s=95.0, budget=100.0, probe_s=5.0)
     assert rc == 0

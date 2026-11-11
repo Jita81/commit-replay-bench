@@ -125,7 +125,8 @@ HELPER_TIMEOUT_S = 30.0
 @dataclass(frozen=True)
 class Attempt:
     """How one attempt ended: ``ok``, ``failed`` (with its exit code), ``stalled``,
-    ``out-of-budget`` or ``unusable`` (the browser alone installed, and did not start)."""
+    ``out-of-budget`` (stopped at the budget's end), ``late`` (ran to its end, but only after
+    the budget had ended) or ``unusable`` (the browser alone installed, and did not start)."""
 
     outcome: str
     returncode: int | None
@@ -140,6 +141,8 @@ class Attempt:
             )
         if self.outcome == "out-of-budget":
             return f"was stopped when the install budget ran out, after {self.seconds:.0f} s"
+        if self.outcome == "late":
+            return f"completed, but only after the install budget ran out, at {self.seconds:.0f} s"
         if self.outcome == "unusable":
             return (
                 f"downloaded Chromium in {self.seconds:.0f} s, but it does not start on this "
@@ -317,19 +320,21 @@ def main(
                 )
         command = custom or list(BROWSER_ONLY_COMMAND if browser_only else DEFAULT_COMMAND)
         print(f"::group::browser install, attempt {k} of {args.attempts}", file=sink, flush=True)
+        began = clock()
         attempt = run(command, idle_timeout_s=args.idle_timeout, deadline=deadline, out=sink)
         if attempt.outcome == "ok" and browser_only:
             # The probe is part of the install, so it runs inside the same budget.
             left = deadline - clock()
             if left <= 0:
-                attempt = Attempt("out-of-budget", attempt.returncode, attempt.seconds)
+                # Nothing was stopped: the download ran to its end and left no time to probe.
+                attempt = Attempt("late", attempt.returncode, attempt.seconds)
             elif not probe(min(HELPER_TIMEOUT_S, left)):
                 # Downloaded, but a system library is missing: the next attempt installs them.
                 attempt = Attempt("unusable", attempt.returncode, attempt.seconds)
                 browser_only = False
             elif clock() > deadline:
                 # The probe passed, but only after the budget ended: the time is spent.
-                attempt = Attempt("out-of-budget", attempt.returncode, attempt.seconds)
+                attempt = Attempt("late", attempt.returncode, clock() - began)
         tried.append(attempt)
         print("::endgroup::", file=sink, flush=True)
         if attempt.outcome == "ok":
@@ -369,6 +374,11 @@ def main(
         cause = (
             "Chromium was downloaded but does not start, and no attempt or budget was left to "
             "install its system libraries; read the probe's output above"
+        )
+    elif tried[-1].outcome == "late":
+        cause = (
+            "the last attempt ran to its end, but only after the budget had ended, so the "
+            "install is slow rather than broken; rerun the job"
         )
     elif tried[-1].outcome == "out-of-budget":
         cause = (
