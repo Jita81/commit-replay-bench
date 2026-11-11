@@ -24,7 +24,9 @@
  * ADRs:         none
  * Works with:   src/crb/server/routes/admin.py (the three routes), src/crb/server/secrets.py
  *               (`SecretStatus`, the owner-only file and its shape checks),
- *               ui/src/screens/Settings/ClaudeCodeLoginCard.tsx (the only consumer),
+ *               ui/src/screens/Settings/ClaudeCodeLoginCard.tsx (the card),
+ *               ui/src/screens/Runs/RunNewDialog.tsx (reads `useBuilderLogins` to point a
+ *               run on a missing or invalid login at the card),
  *               ui/src/api/client.ts (`api`, per-call `timeoutMs`)
  * Tested by:    ui/src/screens/Settings/ClaudeCodeLoginCard.test.tsx,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
@@ -214,9 +216,10 @@ export interface BuilderLoginState {
 
 const builderLoginsKey = ['builders', 'logins'] as const
 
-/** `GET /builders/logins` — read from the recorded verifications; never calls a model. */
-export function useBuilderLogins(): UseQueryResult<{ items: BuilderLoginState[] }, ApiError> {
-  return useQuery({ queryKey: builderLoginsKey, queryFn: () => api<{ items: BuilderLoginState[] }>('/builders/logins') })
+/** `GET /builders/logins` — read from the recorded verifications; never calls a model.
+ *  `enabled` lets the run dialog read it only while a builder that needs a login is chosen. */
+export function useBuilderLogins(enabled = true): UseQueryResult<{ items: BuilderLoginState[] }, ApiError> {
+  return useQuery({ queryKey: builderLoginsKey, queryFn: () => api<{ items: BuilderLoginState[] }>('/builders/logins'), enabled })
 }
 
 /** `POST /builders/{builder}/login/verify?auth=` — one no-tool Haiku turn for that auth mode,

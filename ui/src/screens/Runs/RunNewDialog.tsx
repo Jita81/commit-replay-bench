@@ -13,6 +13,8 @@
  *               the tier every ledger row is stamped with), the run-level caps (only the
  *               typed ones are sent; blank = the builder's default shown), and a validated
  *               builder-config JSON with a one-click "Use my Claude Code login (dev)" toggle.
+ *               For claude_code it reads `GET /builders/logins` and, when the login the run
+ *               would use is missing or invalid, shows a notice linking to the Settings card.
  *               A non-build kind hides all of that. The executor default shown is the
  *               server's `sandbox_mode` when the viewer may read `/settings`. "Only these
  *               tasks" sends `task_ids` for any kind; a hand-off (Learn's re-qualify and
@@ -26,7 +28,8 @@
  *               run.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
- * Works with:   ui/src/api/hooks.ts (`useCreateRun`, `useSettings`), ui/src/api/types.ts
+ * Works with:   ui/src/api/hooks.ts (`useCreateRun`, `useSettings`),
+ *               ui/src/screens/Settings/claudeCodeLogin.ts (`useBuilderLogins`), ui/src/api/types.ts
  *               (`RunCreateRequest`, `LadderRung`, `RunBudget`), ui/src/lib/jsonObject.ts
  *               (the builder-config rules), ui/src/lib/amount.ts (the numeric fields),
  *               src/crb/server/schemas.py (`RunCreateRequest`
@@ -43,6 +46,7 @@
  *               first).
  */
 import { useEffect, useState, type FormEvent } from 'react'
+import { Link } from 'react-router'
 import { useAllRepos, useCreateRun, useRepoPosture, useSettings } from '../../api/hooks'
 import { RUN_KINDS, type GradeMode, type LadderEntry, type LadderRung, type Run, type RunBudget, type RunCreateRequest, type RunKind } from '../../api/types'
 import { Button } from '../../components/Button'
@@ -53,6 +57,7 @@ import { Hint } from '../../components/Hint'
 import { readAmount, type AmountRule } from '../../lib/amount'
 import { useAuth } from '../../lib/auth'
 import { formatJsonObject, parseBuilderConfig } from '../../lib/jsonObject'
+import { useBuilderLogins } from '../Settings/claudeCodeLogin'
 
 /** `crb.builders._REGISTRY` — the builder names a rung may name. (`/settings.builders` lists
  * CREDENTIAL probes — anthropic, cerebras, claude_code_cli … — not these names.) */
@@ -262,6 +267,18 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
   const serverExecutor = settings.data?.sandbox_mode || ''
   const builders = settings.data?.builders ?? []
   const cliLogin = cfg.ok && cfg.value.auth === 'cli'
+  // The login this run would use (P: builder login reachable from the dialog): the config's
+  // `auth`, else the server's default mode. Missing = the list loaded and that mode has no
+  // credential, or its last check failed. A failed read shows nothing — the run's own refusal
+  // still names the fix.
+  const logins = useBuilderLogins(open && needsBuilder && isClaudeCode)
+  const loginItems = logins.isError ? [] : (logins.data?.items ?? []).filter((b) => b.builder === 'claude_code')
+  const explicitAuth = cfg.ok && typeof cfg.value.auth === 'string' ? cfg.value.auth : undefined
+  const loginAuth = explicitAuth ?? loginItems.find((b) => b.default)?.auth
+  const login = loginAuth === undefined ? undefined : loginItems.find((b) => b.auth === loginAuth)
+  const loginMissing =
+    needsBuilder && isClaudeCode && logins.isSuccess && loginAuth !== undefined &&
+    (login === undefined || !login.present || login.state === 'invalid')
 
   /** One click: `{"auth": "cli"}` in the builder config (merged with whatever else is there). */
   const toggleCliLogin = (on: boolean) => {
@@ -410,6 +427,12 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
                 <label htmlFor="crb-cli-login" className="text-xs text-on-surface-body">
                   <span className="font-semibold">Use my Claude Code login (dev)</span> — sets <code>{'{"auth": "cli"}'}</code>: the worker runs <code>claude</code> without <code>--bare</code> on the operator’s own subscription login instead of <code>ANTHROPIC_API_KEY</code>. Developer / evaluation only — the target repo’s CLAUDE.md is auto-discovered in this mode (its project settings and hooks are still excluded).
                 </label>
+              </Hint>
+            )}
+            {loginMissing && (
+              <Hint as="p" id="text.run_new.login_missing" data-testid="run-new-login-missing" role="status" className="rounded-[var(--radius-control)] border border-border bg-surface-container px-3 py-2 text-xs text-on-surface-body sm:col-span-2">
+                The Claude Code login this run would use ({loginAuth}) is {login === undefined || !login.present ? 'missing' : 'invalid'} — the run would be refused.{' '}
+                <Hint as={Link} id="link.run_new.login_settings" to="/settings#claude-code-login" className="font-semibold underline" data-testid="run-new-login-link">Open the Claude Code login in Settings</Hint>
               </Hint>
             )}
 

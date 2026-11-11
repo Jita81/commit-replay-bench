@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **A Baseline summary line and a login notice in the run dialog**
+  ([PR](https://github.com/Jita81/commit-replay-bench/pulls?q=is%3Apr+head%3Afeat%2Fui-summary-line-builder-login)).
+  The Baseline screen opens with one plain line per apparatus the map reads: how many measured
+  cells earn `deliver` under the published rule, the posture, and a link to the routes card that
+  carries n. A failed map read says "Unavailable". The "Start run" dialog reads
+  `GET /builders/logins` for a `claude_code` run and, when the login it would use is missing or
+  invalid, shows a notice linking to the Claude Code login card in Settings. UI only; no API change.
+
 - **The Wave 4 registration**
   ([#117](https://github.com/Jita81/commit-replay-bench/pull/117)). A new record,
   `docs/reviews/2026-11-10-wave-4-registration.md`, registers Wave 4 before any run: the blind

@@ -33,7 +33,10 @@
  *               that the economics tiles carry the known n, the served interval, the
  *               apparatus and the posture class (F35), the About block describes them as
  *               served, and the throughput callout names what it lacks without denying the
- *               merge outcomes the factory records, which cover delivered pull requests only.
+ *               merge outcomes the factory records, which cover delivered pull requests only;
+ *               and that the summary line counts deliver cells against measured cells, one
+ *               line per apparatus, with n one click away, and reads "Unavailable" when the
+ *               map read fails.
  * How:          `mockApi` + `renderApp` at `/results?repo=alpha`; `qc.refetchQueries()` for a
  *               refetch; the page's own source as `?raw` text for the `currentData` ratchet.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -116,6 +119,37 @@ describe('ResultsPage', () => {
     expect(within(screen.getByTestId('cell-bug.fix-XS')).getByRole('link', { name: 'sign-off due' })).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.queryByText(/A measurement is running/)).toBeNull()
+  })
+
+  it('the summary line counts deliver cells against measured cells, with n one click away', async () => {
+    mockApi(ROUTES)
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('results-summary-line')).toHaveTextContent('1 of 2 cells earn deliver'))
+    const line = screen.getByTestId('results-summary-line')
+    expect(line).toHaveTextContent('measured cells only')
+    expect(line).toHaveTextContent('apparatus 2.2')
+    expect(within(line).getByTestId('results-summary-n')).toHaveTextContent('n = 22')
+    expect(within(line).getByTestId('results-summary-n')).toHaveAttribute('href', '#baseline-routes')
+    expect(document.getElementById('baseline-routes')).not.toBeNull()
+    expect(screen.getByTestId('results-summary')).toHaveAttribute('data-hint', 'stat.results.summary')
+  })
+
+  it('the summary line never pools apparatus versions: one line per version', async () => {
+    const OLD = { ...HUMAN, capability_class: 'docs', size: 'XS', route: 'deliver', apparatus_versions: ['2.1'] }
+    mockApi({ ...ROUTES, 'GET /capability-map': { ...MAP, cells: [CELL, HUMAN, OLD] } })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getAllByTestId('results-summary-line')).toHaveLength(2))
+    const [a, b] = screen.getAllByTestId('results-summary-line')
+    expect(a).toHaveTextContent('1 of 1 cell earns deliver')
+    expect(a).toHaveTextContent('apparatus 2.1')
+    expect(b).toHaveTextContent('1 of 2 cells earn deliver')
+    expect(b).toHaveTextContent('apparatus 2.2')
+  })
+
+  it('the summary line reads "Unavailable" when the map read fails', async () => {
+    mockApi({ ...ROUTES, 'GET /capability-map': () => envelope(500, 'internal', 'boom') })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('results-summary-line')).toHaveTextContent('Unavailable'))
   })
 
   it('every instrument tile carries n, an interval or an honest "95% CI —" with the reason, and the apparatus from the data', async () => {

@@ -19,7 +19,10 @@
  *               docs/PREVENTION.md P-003), for a rung naming a provider the endpoint is not
  *               (`builder_provider_mismatch`, P-284) or on a login that does not work
  *               (`builder_login_invalid` with its link to the Settings login card — pilot D1)
- *               shows the refusal with its fix and creates nothing.
+ *               shows the refusal with its fix and creates nothing; and that before submit a
+ *               claude_code run whose login `GET /builders/logins` reports missing or invalid
+ *               shows a notice linking to the Settings login card (and a verified login, a
+ *               failed read or another builder shows none).
  * How:          `mockApi` records the POST body; `userEvent` drives the form; assertions on
  *               the body and the field errors.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -510,5 +513,67 @@ describe('RunNewDialog — posture (ADR-0019)', () => {
     await user.click(screen.getByRole('button', { name: 'Queue run' }))
     const body = await postedBody(api.calls)
     expect('qualify_first' in body).toBe(false)
+  })
+
+  describe('builder login notice', () => {
+    const login = (over: Record<string, unknown>) => ({
+      builder: 'claude_code', auth: 'api_key', state: 'unverified', status: 'unverified', present: true, default: true,
+      checked_at: null, age_s: null, ttl_s: 3600, reason: '', ...over,
+    })
+    function setupLogins(items: Record<string, unknown>[] | null) {
+      mockApi({
+        'GET /auth/me': PRINCIPAL,
+        'GET /repos': REPOS,
+        ...(items ? { 'GET /builders/logins': { items } } : {}),
+      })
+      renderApp(<RunNewDialog open onClose={() => {}} repo="httpx" />)
+    }
+
+    it('links a claude_code run on a missing default login to the Settings card', async () => {
+      const user = userEvent.setup()
+      setupLogins([login({ present: false })])
+      await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')
+      const notice = await screen.findByTestId('run-new-login-missing')
+      expect(notice).toHaveTextContent('(api_key) is missing')
+      expect(within(notice).getByRole('link', { name: 'Open the Claude Code login in Settings' })).toHaveAttribute('href', '/settings#claude-code-login')
+    })
+
+    it('follows the config auth: an invalid cli login shows, a verified default does not hide it', async () => {
+      const user = userEvent.setup()
+      setupLogins([login({ state: 'verified' }), login({ auth: 'cli', default: false, state: 'invalid' })])
+      await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')
+      await waitFor(() => expect(screen.getByLabelText(/Use my Claude Code login/)).toBeEnabled())
+      expect(screen.queryByTestId('run-new-login-missing')).toBeNull()
+      await user.click(screen.getByLabelText(/Use my Claude Code login/))
+      expect(await screen.findByTestId('run-new-login-missing')).toHaveTextContent('(cli) is invalid')
+    })
+
+    it('shows nothing for a verified login', async () => {
+      const user = userEvent.setup()
+      setupLogins([login({ state: 'verified' })])
+      await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')
+      await screen.findByLabelText(/Use my Claude Code login/)
+      await new Promise((r) => setTimeout(r, 50))
+      expect(screen.queryByTestId('run-new-login-missing')).toBeNull()
+    })
+
+    it('shows nothing when the logins read fails', async () => {
+      const user = userEvent.setup()
+      setupLogins(null)
+      await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')
+      await screen.findByLabelText(/Use my Claude Code login/)
+      await new Promise((r) => setTimeout(r, 50))
+      expect(screen.queryByTestId('run-new-login-missing')).toBeNull()
+    })
+
+    it('does not read logins for another builder', async () => {
+      const user = userEvent.setup()
+      const { calls } = mockApi({ 'GET /auth/me': PRINCIPAL, 'GET /repos': REPOS, 'GET /builders/logins': { items: [login({ present: false })] } })
+      renderApp(<RunNewDialog open onClose={() => {}} repo="httpx" />)
+      await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'editblock')
+      await new Promise((r) => setTimeout(r, 50))
+      expect(screen.queryByTestId('run-new-login-missing')).toBeNull()
+      expect(calls.some((c) => c.path === '/builders/logins')).toBe(false)
+    })
   })
 })

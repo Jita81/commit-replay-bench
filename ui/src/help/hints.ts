@@ -423,6 +423,8 @@ export const HINTS = {
   // ── /results — Baseline (screens/Results/ResultsPage.tsx + MapTable.tsx)
   'field.shared.repo_picker':
     'The repository every number on this screen is about. A cell says nothing about a repository it was not measured on. The choice is kept in the address so the page can be shared.',
+  'stat.results.summary':
+    'How many measured cells route deliver out of every measured cell, one line per apparatus the map reads, in the posture shown. The link opens the routes below, where each route carries n, the attempts inside its cells.',
   'banner.results.replay_running':
     'A replay is still grading attempts for this repository, so every number below moves as each row lands. Open the run to watch it.',
   'stat.results.controls':
@@ -1432,6 +1434,10 @@ export const HINTS = {
     'The inference provider, when the builder supports more than one. Stamped on every row.',
   'field.run_new.ladder':
     'Comma-separated rung labels; each rung is one attempt, and the next runs only if the previous was not clean. Object rungs below are appended in order.',
+  'text.run_new.login_missing':
+    'The Claude Code login this run would use has no credential on the server, or its last check failed, so the run would be refused before any attempt. Fix it on the Settings login card, then start the run.',
+  'link.run_new.login_settings':
+    'Opens the Claude Code login card in Settings, where an operator saves the token or verifies the login this run needs. The run is not started; come back and start it once the login is fixed.',
   'field.run_new.cli_login':
     'Run the builder on the operator’s own subscription login instead of an API key. Developer and evaluation use only; the repository’s CLAUDE.md is auto-discovered in this mode.',
   'field.run_new.spend_cap':
