@@ -174,6 +174,9 @@ the builder; the test author's own budget is separate and is left at the product
    to its first `k` commits. `k`, the turn limit, the campaign id, every batch's seeded order and
    the power of the test on the cut lists (the same simulation, rerun) are appended in a second
    amendment **before the first wave run**. Nothing is added or removed after that.
+   The wave starts only if the cut lists hold at least one commit from each repository. If
+   the pilot and the cap leave either repository with none, no wave run is started and the
+   design is reported as infeasible, because the claim of part 6 is about both together **[aspiration — this registration's design; nothing is run yet]**.
 
 All four steps are design **[aspiration — this registration's design; nothing is run yet]**.
 
@@ -350,7 +353,11 @@ Every item below is a rule for rows that do not exist yet **[aspiration — this
 4. **What each outcome may be called.** *Cleared*: p below 0.05 with `S1` ahead, and both sensitivity results of item 3 also below 0.05 with `S1` ahead. *No 15-point
    effect*: p not below 0.05, both sensitivity results of item 3 also not below 0.05, the
    interval's upper end below 15 points, and at least six batches with a summed difference
-   that is not zero. *Inconclusive*: anything else **[aspiration — this registration's design; nothing is run yet]**.
+   that is not zero, and a usable test from the author for at least nine in ten of the wave's
+   `S1` rows. *Inconclusive*: anything else **[aspiration — this registration's design; nothing is run yet]**.
+   The nine-in-ten condition covers author failures that item 3 does not see: a failure that
+   takes two commits out of every batch makes no batch author-hit, yet it can hide an effect
+   the author would show when it works. Such a wave is inconclusive, not a null **[aspiration — this registration's design; nothing is run yet]**.
    The six-batch guard is there because the interval is approximate (item 2): it refuses the
    call when too few batches moved for the spread between batches to mean anything. With the
    guard, the largest share of simulated waves in which the interval's upper end fell below the

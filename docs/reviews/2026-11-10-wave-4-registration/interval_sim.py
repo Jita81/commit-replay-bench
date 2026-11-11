@@ -66,6 +66,10 @@ def realistic(mean: float, rho: float, eff: float, sd: float):
 
 
 def main() -> None:
+    print(
+        f"[hypothesis] simulated by interval_sim.py, seed {SEED}, {REPS} waves a setting; "
+        "a simulation, not a measurement of the product"
+    )
     print("mean rho eff sd | truth | missed either side | upper end below truth | same, guarded")
     worst_miss = worst_low = worst_guarded = 0.0
     for mean in (0.3, 0.5, 0.7, 0.9):

@@ -1,3 +1,4 @@
+[hypothesis] simulated by interval_sim.py, seed 20261111, 4000 waves a setting; a simulation, not a measurement of the product
 mean rho eff sd | truth | missed either side | upper end below truth | same, guarded
 0.3 0.0 0.0 0.0 | -0.000 | 0.051 | 0.027 | 0.027
 0.3 0.0 0.0 0.05 | -0.001 | 0.049 | 0.021 | 0.021
