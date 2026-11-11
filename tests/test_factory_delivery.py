@@ -1047,6 +1047,250 @@ def test_the_pull_request_title_escapes_the_ticket_titles_markdown(harness: Harn
     assert title.endswith("[I-1]")
 
 
+# --- the cell that licensed the delivery (the claims policy on the PR body) ----------
+
+#: A decision as the worker's route lookup hands it over: ``RouteDecision.to_dict()`` of the
+#: class × size map (``*`` in the non-projected fields) plus ``apparatus_versions``.
+SERVED_ROUTE: dict[str, Any] = {
+    "route": "deliver",
+    "reason": "n=14 point=0.929 ci_low=0.69 false_q1=0",
+    "reason_code": "deliver",
+    "policy_version": "routing.v2",
+    "cell": {"capability_class": "bug.fix", "size": "XS", "builder": "*", "model": "*"},
+    "n": 14,
+    "point": 0.9286,
+    "ci_low": 0.6853,
+    "ci_high": 0.9873,
+    "apparatus_version": "2.5",
+    "apparatus_versions": ["2.5"],
+    "context_arm": "S3",
+}
+LICENCE_CELL = {
+    "capability_class": "bug.fix",
+    "size": "XS",
+    "builder": "claude-code",
+    "model": "claude-sonnet-5",
+    "provider": "anthropic",
+    "arm": "S2",
+}
+
+
+def _cell_block(body: str) -> str:
+    head = "### The cell that licensed this delivery"
+    assert body.count(head) == 1
+    return body.split(head, 1)[1].split("\n###", 1)[0]
+
+
+def test_the_pr_body_names_the_licensing_cell_with_every_claim_element(harness: Harness) -> None:
+    """A rate on the customer's pull request carries its n, Wilson interval, mode,
+    builder+model and apparatus, beside the route, the ledger head and the task — and the
+    body says that ``clean`` / ``deliver`` are mechanical results under human review."""
+    item = multiply_item()
+    build = _clean_build(harness)
+    try:
+        body = dv.pr_body(item, build, route_decision=SERVED_ROUTE, licence_cell=LICENCE_CELL)
+    finally:
+        build.close()
+    block = _cell_block(body)
+    assert f"- cell: (`{item.capability_class}`, `XS`) — route **deliver**" in block
+    assert "- clean rate: 0.929 per attempt, n = 14, Wilson 95% interval [0.685, 0.987]" in block
+    assert "- mode: `sighted`" in block  # the S3 arm's rows are written sighted
+    assert "- rate measured on: builder `*`, model `*`, provider unavailable (`*` is every" in block
+    assert (
+        "- licence read on: builder `claude-code`, model `claude-sonnet-5`, provider "
+        "`anthropic`, arm `S2`, size `XS`" in block
+    )
+    assert "- apparatus (rate): `2.5`" in block
+    assert "- ledger head: unavailable (" in block
+    assert f"- task: `{build.task.task_id}` for backlog item `i-1`" in block
+    assert dv.MECHANICAL_RESULT_NOTE in block
+    assert "not proof of semantic correctness" in body and "under human review" in body
+
+
+def test_a_datum_the_call_site_does_not_hold_reads_unavailable(harness: Harness) -> None:
+    """No route and no licence cell (a direct call): every element is still named, as
+    ``unavailable`` — never dropped, never guessed."""
+    item = multiply_item()
+    build = _clean_build(harness)
+    try:
+        body = dv.pr_body(item, build)
+        partial = dv.pr_body(
+            item,
+            build,
+            route_decision={
+                "route": "deliver",
+                "n": 12,
+                "point": 1.0,
+                "ci_low": 0.76,  # no ci_high, no cell, no arm
+                "apparatus_versions": ["2.4", "2.5"],
+            },
+        )
+    finally:
+        build.close()
+    block = _cell_block(body)
+    assert "- cell: (`bug.fix`, `XS`) — route unavailable" in block
+    assert (
+        "- clean rate: unavailable per attempt, n = unavailable, Wilson 95% interval "
+        "[unavailable, unavailable]" in block
+    )
+    assert "- mode: unavailable" in block
+    assert "- rate measured on: builder unavailable, model unavailable, provider unavailable\n" in (
+        block
+    )
+    assert (
+        "- licence read on: builder unavailable, model unavailable, provider unavailable, "
+        "arm unavailable, size unavailable" in block
+    )
+    assert "- apparatus (rate): unavailable" in block
+    assert dv.MECHANICAL_RESULT_NOTE in block
+    part = _cell_block(partial)
+    assert "- mode: unavailable" in part  # no arm named: the mode is not guessed
+    one = _cell_block(
+        dv.pr_body(
+            item,
+            build,
+            route_decision={"route": "deliver", "n": 12, "point": 1.0, "ci_low": 0.76},
+        )
+    )
+    assert "- clean rate: 1.000 per attempt, n = 12, Wilson 95% interval [0.760, unavailable]" in (
+        one
+    )
+
+
+def test_a_rate_spanning_apparatus_versions_is_never_shown_pooled(harness: Harness) -> None:
+    """Rows from different apparatus versions are never blended: a decision that carries no
+    single ``apparatus_version`` but rows of two versions shows no rate, n or interval."""
+    build = _clean_build(harness)
+    try:
+        body = dv.pr_body(
+            multiply_item(),
+            build,
+            route_decision={
+                "route": "deliver",
+                "n": 12,
+                "point": 1.0,
+                "ci_low": 0.76,
+                "ci_high": 1.0,
+                "apparatus_versions": ["2.4", "2.5", "2.4"],
+            },
+        )
+    finally:
+        build.close()
+    block = _cell_block(body)
+    assert "- clean rate: unavailable (rows span apparatus 2.4, 2.5; never pooled)\n" in block
+    assert "n = 12" not in block and "1.000" not in block
+    assert "- apparatus (rate): `2.4, 2.5`" in block
+
+
+@pytest.mark.parametrize(("estimate", "measured_route"), [("S", "XS"), ("XS", "XS")])
+def test_the_cell_named_is_the_cell_whose_rate_is_shown(
+    harness: Harness, estimate: str, measured_route: str
+) -> None:
+    """GOV-2 in either direction: the loop reads the route at the size DELIVERED, so a change
+    estimated ``S`` that measures ``XS`` carries the ``XS`` cell's n and interval — the block
+    names the ``XS`` cell, never the estimate's, and the licence line names its size."""
+    build = _clean_build(harness)
+    assert build.task.size == "XS"
+    route = {**SERVED_ROUTE, "cell": {**SERVED_ROUTE["cell"], "size": measured_route}}
+    try:
+        body = dv.pr_body(
+            multiply_item(size_estimate=estimate),
+            build,
+            route_decision=route,
+            licence_cell={**LICENCE_CELL, "size": "XS"},
+        )
+    finally:
+        build.close()
+    block = _cell_block(body)
+    assert "- cell: (`bug.fix`, `XS`) — route **deliver**" in block
+    assert "n = 14, Wilson 95% interval [0.685, 0.987]" in block
+    assert "arm `S2`, size `XS`" in block
+
+
+def test_a_larger_change_names_the_measured_cell(harness: Harness) -> None:
+    """Estimated ``XS``, measured larger: the route read for the larger cell names it."""
+    build = _clean_build(harness)
+    route = {**SERVED_ROUTE, "cell": {**SERVED_ROUTE["cell"], "size": "M"}}
+    try:
+        body = dv.pr_body(
+            multiply_item(size_estimate="XS"),
+            build,
+            route_decision=route,
+            licence_cell={**LICENCE_CELL, "size": "M"},
+        )
+    finally:
+        build.close()
+    block = _cell_block(body)
+    assert "- cell: (`bug.fix`, `M`) — route **deliver**" in block
+    assert "n = 14" in block and "size `M`" in block
+
+
+def test_a_rate_read_on_another_cell_than_the_licence_is_withheld(harness: Harness) -> None:
+    """A route of one size beside a licence of another: the rate is not shown under the
+    licence, it reads ``unavailable`` and says which two cells disagree."""
+    build = _clean_build(harness)
+    try:
+        body = dv.pr_body(
+            multiply_item(size_estimate="S"),
+            build,
+            route_decision={**SERVED_ROUTE, "cell": {**SERVED_ROUTE["cell"], "size": "S"}},
+            licence_cell={**LICENCE_CELL, "size": "XS"},
+        )
+    finally:
+        build.close()
+    block = _cell_block(body)
+    assert "- cell: (`bug.fix`, `S`) — route **deliver**" in block
+    assert (
+        "- clean rate: unavailable (the rate is the `S` cell's, the licence was read on `XS`)"
+        in block
+    )
+    assert "n = 14" not in block
+
+
+@pytest.mark.parametrize(
+    ("arm", "mode"),
+    [
+        ("S3", "`sighted`"),
+        ("A0", "`blind`"),
+        ("S1@claude-opus-5", "`blind`"),
+        ("S2", "unavailable"),
+    ],
+)
+def test_the_mode_is_read_from_the_arm_the_decision_names(
+    harness: Harness, arm: str, mode: str
+) -> None:
+    build = _clean_build(harness)
+    try:
+        body = dv.pr_body(
+            multiply_item(), build, route_decision={**SERVED_ROUTE, "context_arm": arm}
+        )
+    finally:
+        build.close()
+    assert f"- mode: {mode}\n" in _cell_block(body)
+
+
+def test_deliver_hands_the_licence_cell_to_the_pr_body(harness: Harness) -> None:
+    build = _clean_build(harness)
+    seams = Seams()
+    try:
+        dv.deliver(
+            harness.repo.repo,
+            multiply_item(),
+            build,
+            creds=dv.StaticProvider(_creds()),
+            push_fn=seams.push,
+            open_pr_fn=seams.open_pr,
+            target_default_branch="main",
+            route_decision=SERVED_ROUTE,
+            licence_cell=LICENCE_CELL,
+            verdict="accept",
+        )
+    finally:
+        build.close()
+    block = _cell_block(seams.prs[0]["body"])
+    assert "builder `claude-code`, model `claude-sonnet-5`" in block and "n = 14" in block
+
+
 @pytest.mark.parametrize(
     "item_id",
     ["I-1", "fake-4711.r2", "A..B", "x.lock", "UPPER_case-9"],

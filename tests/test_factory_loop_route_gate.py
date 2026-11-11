@@ -294,6 +294,13 @@ def test_route_is_read_once_per_item_at_readiness_before_any_build(
     assert kinds.index(fe.EV_ROUTE) < kinds.index(fe.EV_RED_PROOF) < kinds.index(fe.EV_BUILD)
     # the PR body quotes that reading
     assert "route: **deliver** — n=12 point=1.000 ci_low=0.76 false_q1=0" in rig.prs[0]["body"]
+    # ... and names the cell that licensed it: the rate with its n and interval, and the
+    # delivered change's own cell the licence was read on (never ``unavailable`` here)
+    body = rig.prs[0]["body"]
+    assert "- clean rate: 1.000 per attempt, n = 12, Wilson 95% interval [0.760, " in body
+    assert "- apparatus (rate): `2.2`" in body
+    (licence,) = [ln for ln in body.splitlines() if ln.startswith("- licence read on: ")]
+    assert "builder `" in licence and "model `" in licence and "builder unavailable" not in licence
     emitted = [e for e in rig.sink.events if e.action == "route.decided"]
     assert len(emitted) == 1 and emitted[0].payload["cell_route"]["n"] == 12
 

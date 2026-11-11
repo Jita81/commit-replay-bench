@@ -19,8 +19,11 @@ the token as a one-shot ``http.extraheader`` in the child's environment
 DevOps seam plugs in the same way.
 
 The PR body is the evidence summary — belts, pack hash, apparatus, route
-decision, RED proof — and a link to the pack. It carries no secrets: every
-string passes through :mod:`crb.core.redact`.
+decision, RED proof — and a link to the pack, with a block naming the cell that licensed
+the delivery: its route, n, Wilson interval, mode, builder+model, apparatus, the ledger head
+and the task, each ``unavailable`` when the call site does not hold it, and the statement
+that ``clean`` / ``deliver`` are mechanical results under human review. It carries no
+secrets: every string passes through :mod:`crb.core.redact`.
 
 A **re-delivery** (an item whose pull request an earlier run opened, accepted again)
 updates that pull request instead of opening a second one: ``deliver`` is given
@@ -97,6 +100,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from crb.core.context_arm import REPLAY_MODE, parse_arm
 from crb.core.evidence import sha256_text, utc_now_iso
 from crb.core.git import GitError, GitRepo, git_config_env
 from crb.core.redact import redact
@@ -331,6 +335,119 @@ def _licensed_size(item: BacklogItem, build: BuildResult) -> str:
     return est
 
 
+UNAVAILABLE = "unavailable"
+
+#: What ``clean`` and ``deliver`` mean, said on every pull request the factory opens — the
+#: product's claims policy in the words the MCP server's instructions use.
+MECHANICAL_RESULT_NOTE = (
+    "`clean` is a mechanical result (the suite passed under the belts), not proof of semantic "
+    "correctness. `deliver` on a cell means the factory MAY open a branch and a pull request "
+    "for that class of change in that repository under human review; it never means safe to "
+    "merge or deploy."
+)
+
+
+def _fmt_rate(value: Any) -> str:
+    """A rate or interval end to three places, or ``unavailable`` — never a guess."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return UNAVAILABLE
+    return f"{float(value):.3f}"
+
+
+def _shown(value: Any) -> str:
+    """A recorded value in a code span, or ``unavailable`` when it is missing or blank."""
+    text = str(value).strip() if value is not None else ""
+    return f"`{text}`" if text else UNAVAILABLE
+
+
+def _rate_mode(route: Mapping[str, Any]) -> str:
+    """The mode (sighted/blind) the cell's rows were written in, read from the arm the
+    decision names (:data:`~crb.core.context_arm.REPLAY_MODE`); ``""`` when the decision
+    names no arm, or one whose mode is not fixed by its base."""
+    arm = str(route.get("context_arm") or "").strip()
+    if not arm:
+        return ""
+    try:
+        return REPLAY_MODE.get(parse_arm(arm).base, "")
+    except ValueError:
+        return ""
+
+
+def _cell_evidence(
+    item: BacklogItem,
+    build: BuildResult,
+    route_decision: Mapping[str, Any] | None,
+    licence_cell: Mapping[str, Any] | None,
+) -> list[str]:
+    """The block naming the cell that licensed this delivery with every element the claims
+    policy requires beside a rate — n, the Wilson interval, the mode, the builder+model and
+    the apparatus — plus the ledger head and the task. A datum the call site does not hold
+    reads ``unavailable``; nothing is omitted silently or guessed."""
+    route = route_decision or {}
+    cell = route.get("cell")
+    cell = cell if isinstance(cell, Mapping) else {}
+    lic = licence_cell or {}
+    n = route.get("n")
+    n_text = str(n) if isinstance(n, int) and not isinstance(n, bool) else UNAVAILABLE
+    apparatus = str(route.get("apparatus_version") or "").strip()
+    withheld = ""
+    if not apparatus:
+        versions = route.get("apparatus_versions")
+        if isinstance(versions, Sequence) and not isinstance(versions, str):
+            distinct = list(dict.fromkeys(str(v).strip() for v in versions if str(v).strip()))
+            apparatus = ", ".join(distinct)
+            if len(distinct) > 1:
+                # rows from different apparatus versions are never blended into one rate
+                withheld = f"rows span apparatus {apparatus}; never pooled"
+    # The cell named is the one the rate was read on: the route's own cell, else the
+    # licence's (the loop reads the route at the size DELIVERED, larger or smaller — GOV-2).
+    route_size = str(cell.get("size") or "").strip()
+    lic_size = str(lic.get("size") or "").strip()
+    size = route_size or lic_size or _licensed_size(item, build)
+    if route_size and lic_size and route_size != lic_size:
+        # one cell's n and interval are never shown under another cell's name
+        withheld = withheld or (
+            f"the rate is the `{route_size}` cell's, the licence was read on `{lic_size}`"
+        )
+    rate_line = (
+        f"- clean rate: {UNAVAILABLE} ({withheld})"
+        if withheld
+        else f"- clean rate: {_fmt_rate(route.get('point'))} per attempt, n = {n_text}, Wilson "
+        f"95% interval [{_fmt_rate(route.get('ci_low'))}, {_fmt_rate(route.get('ci_high'))}]"
+    )
+    measured_by = [cell.get(k) for k in ("builder", "model", "provider")]
+    pooled = any(str(v or "").strip() == "*" for v in measured_by)
+    lines = [
+        "### The cell that licensed this delivery",
+        "",
+        "Read from the capability map as it stood before this run. A rate is shown only with "
+        "its n, its Wilson interval, the mode, the builder+model and the apparatus version.",
+        "",
+        f"- cell: (`{item.capability_class}`, `{size}`) — route "
+        + (f"**{route['route']}**" if str(route.get("route") or "").strip() else UNAVAILABLE),
+        rate_line,
+        f"- mode: {_shown(_rate_mode(route))}",
+        f"- rate measured on: builder {_shown(measured_by[0])}, model {_shown(measured_by[1])}, "
+        f"provider {_shown(measured_by[2])}"
+        + (
+            " (`*` is every value pooled in the map's (class, size) cell; the licence below "
+            "names this build's own cell)"
+            if pooled
+            else ""
+        ),
+        f"- licence read on: builder {_shown(lic.get('builder'))}, model "
+        f"{_shown(lic.get('model'))}, provider {_shown(lic.get('provider'))}, arm "
+        f"{_shown(lic.get('arm'))}, size {_shown(lic_size)}",
+        f"- apparatus (rate): {_shown(apparatus)}",
+        f"- ledger head: {UNAVAILABLE} (the delivery step does not read the chain's head; the "
+        "ledger row above, when there is one, is this build's own row on it)",
+        f"- task: {_shown(build.task.task_id)} for backlog item `{slugify(item.id, max_len=64)}`",
+        "",
+        MECHANICAL_RESULT_NOTE,
+    ]
+    return lines
+
+
 def pr_body(
     item: BacklogItem,
     build: BuildResult,
@@ -339,8 +456,14 @@ def pr_body(
     route_decision: Mapping[str, Any] | None = None,
     waivers: Sequence[str] = (),
     licence_line: str = "",
+    licence_cell: Mapping[str, Any] | None = None,
 ) -> str:
     """The PR description: the evidence summary a reviewer needs, every string redacted.
+
+    ``licence_cell`` — the delivered change's own cell the licence was read on (class, size,
+    builder, model, provider, arm). With ``route_decision`` it fills the block naming the
+    cell that licensed the delivery (:func:`_cell_evidence`); what neither carries reads
+    ``unavailable``.
 
     ``licence_line`` — the sentence naming what licensed this delivery at the entry gate (a
     signed cell, or an approver's per-run override of the sign-off clause; ADR-0018).
@@ -398,6 +521,7 @@ def pr_body(
     # a human attestation of the cell) — as the entry gate decided it (``licence_line``).
     if licence_line:
         lines.append(f"- licence: {licence_line}")
+    lines += ["", *_cell_evidence(item, build, route_decision, licence_cell)]
     if waivers:
         lines += ["", "### Waivers (an approver let this build past a required probe)", ""]
         lines += fenced(list(waivers))
@@ -809,6 +933,7 @@ def deliver(
     verdict: str,
     waivers: Sequence[str] = (),
     licence_line: str = "",
+    licence_cell: Mapping[str, Any] | None = None,
 ) -> DeliveryResult:
     """Deliver a CLEAN, REVIEWED and ACCEPTED build as a new branch + PR. Order of
     refusals is deliberate: invariant first (before any credential is read), then the
@@ -932,6 +1057,7 @@ def deliver(
         route_decision=route_decision,
         waivers=waivers,
         licence_line=licence_line,
+        licence_cell=licence_cell,
     )
     push(repo, branch=branch, refspec=f"{branch}:{branch}", credentials=credentials, expected=None)
     pr_url, pr_number = open_pr(
