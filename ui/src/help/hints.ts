@@ -231,6 +231,10 @@ export const HINTS = {
     'This stack signs in any browser on the same computer as one named account, without a password. It refuses a request from another computer or one a proxy marks as forwarded (the UI dev server on this computer still works), and the server refuses to start with it in production. Sign out still works; reloading the page signs you in again.',
   'nav.version_line':
     'The three versions every claim cites: crb (the software), apparatus (the instrument that graded the rows) and policy (the routing rule). A sign-off made under an older apparatus is stale.',
+  'stat.shell.get_started':
+    'How many of Home’s eight set-up tasks are Completed, read the same way Home reads them. It says unavailable when part of the state could not be read, never a smaller number. Opens Home for the full list.',
+  'button.shell.continue':
+    'Go to the first set-up task you can act on now — the same task Home’s Continue names. Nothing spends money until a run you can see and cancel is queued.',
   'nav.footer_help':
     'The glossary and guides, in words, on every screen.',
   'nav.footer_glossary':
@@ -742,6 +746,8 @@ export const HINTS = {
     'How long this decision has been waiting, from the moment the product first saw it was due. The clock is the server’s and runs whether or not anybody has this page open.',
   'stat.decisions.evidence':
     'On a cell row: the cell’s attempts (n), its clean rate with its 95 % Wilson interval, and the reason code that decided its route, under the apparatus in the kicker. On a re-measurement row: the rows needed to reach the rule’s first look, the estimated cost (or “cost not known” when no row recorded one), and the builder/model@provider it is re-measured on. On a factory or library row: what is missing or waiting.',
+  'link.decisions.empty_map':
+    'The capability map, where every decision starts: a cell due a sign-off, a cell whose tests are too weak to trust or one whose evidence went stale appears here once the map says so.',
   'button.decisions.act':
     'Opens the page where this decision is taken — the sign-off form with the cell chosen, the Factory item, Learn (to strengthen the tests or queue a re-measurement), the Library entry, or the Ledger, depending on the kind. Nothing is recorded until you act there.',
   'button.decisions.read':
@@ -1106,6 +1112,8 @@ export const HINTS = {
     'What this deployment has measured about changes of this kind and size — the cell’s route, how many graded attempts it rests on and the interval around the rate. It is read before any build, never after.',
   'item.intake.item':
     'The backlog item this ticket is, or would be. Nothing is registered until every question a good acceptance test needs is answered on the ticket and an operator registers the draft.',
+  'link.factory.empty_intake':
+    'The board’s watched column for this repository: tickets read there can be registered as backlog items, which is how items arrive here besides typing them. Reading it is a viewer’s act.',
   'link.factory.intake':
     'The watched column on your own team’s board: which tickets the product has read, what it understood, what each one still needs answering, and where the ones it accepted went. Reading it is a viewer’s act; switching the listener on is an operator’s.',
   'item.intake.unclassified':

@@ -17,7 +17,9 @@
  *               label names the Operate path as a hint trigger and every chrome id in
  *               `SHELL_CHROME_HINTS` renders (G-396); and that the ledger health probe's
  *               `false_q1` drives the "Delivery halted" banner — plural, singular, and none
- *               at zero or with no probe (G-564). jsdom applies no CSS, so
+ *               at zero or with no probe (G-564); and Home's "n of 8" with its Continue for
+ *               an operator off Home, "unavailable" on a failed read, never for a viewer.
+ *               jsdom applies no CSS, so
  *               the fold is asserted as the `max-sm:hidden` class; the 375-px walkthrough
  *               (11-screens) asserts what a phone actually shows.
  * How:          Pure calls for the helper; the shell rendered as a layout route with one
@@ -43,7 +45,7 @@ import type { Probe } from '../api/types'
 import { hintText } from '../help/hints'
 import { SHELL_CHROME_HINTS } from '../help/hints-ratchet.shell'
 import { AuthProvider } from '../lib/auth'
-import { PRINCIPAL, mockApi } from '../test/utils'
+import { PRINCIPAL, envelope, mockApi } from '../test/utils'
 import { JOURNEY_STEPS, Layout, SHELL_MENU_IDS, journeyEyebrow } from './Layout'
 
 /** The shell as the app mounts it: a layout route with one child screen. */
@@ -446,5 +448,59 @@ describe('Layout: the phone menu (F26)', () => {
     expect(await screen.findByRole('heading', { name: 'Baseline' })).toBeInTheDocument()
     // the menu was opened on /results, but it was closed by leaving: coming back is not a press
     expect(screen.getByRole('button', { name: 'Menu' })).toHaveAttribute('aria-expanded', 'false')
+  })
+})
+
+describe('Layout: the set-up progress in the header', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  /** An operator on a deployment with no repository: task 2 is the first Continue stops at. */
+  function mockSetup(role: 'viewer' | 'operator' | 'admin', overrides: Record<string, unknown> = {}) {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role },
+      'GET /health': { status: 'ok', probes: [] },
+      'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_enabled: false },
+      'GET /decisions': { total: 0, by_role: {}, errors: [] },
+      'GET /repos': { items: [], total: 0, limit: 100, offset: 0 },
+      'GET /github/app': { configured: false, installations: [] },
+      'GET /two-person-readiness': { ready: false, reason_code: 'single_person', reason: 'only one person', approvers_active: 0, approvers_signed_in: 0, other_active_accounts: 0, accounts_signed_in: 1, invitations_pending: 0 },
+      ...overrides,
+    })
+  }
+
+  it('shows Home\'s "n of 8" and a Continue to the next task for an operator on another screen', async () => {
+    mockSetup('operator')
+    renderShell('/results', '/results', <h1>Baseline</h1>)
+    const progress = await screen.findByTestId('shell-get-started')
+    const count = within(progress).getByRole('link', { name: '0 of 8' })
+    expect(count).toHaveAttribute('href', '/home')
+    expect(count).toHaveAttribute('data-hint', 'stat.shell.get_started')
+    const go = within(progress).getByRole('link', { name: 'Continue to task 2: Choose a repository' })
+    expect(go).toHaveAttribute('href', '/connect')
+    expect(go).toHaveAttribute('data-hint', 'button.shell.continue')
+  })
+
+  it('says "unavailable" when a read the tasks stand on failed — never a count (G-164)', async () => {
+    mockSetup('admin', { 'GET /github/app': () => envelope(500, 'internal', 'boom') })
+    renderShell('/results', '/results', <h1>Baseline</h1>)
+    const progress = await screen.findByTestId('shell-get-started')
+    expect(progress).toHaveTextContent('Get started: unavailable')
+    expect(progress).toHaveAttribute('href', '/home')
+    expect(screen.queryByRole('link', { name: /^Continue to task/ })).toBeNull()
+    expect(screen.queryByText(/ of 8$/)).toBeNull()
+  })
+
+  it('is not shown on Home, where the full list is the page', async () => {
+    mockSetup('operator')
+    renderShell('/home', '/home', <h1>Home</h1>)
+    await waitFor(() => expect(screen.getByTestId('user-chip')).toHaveTextContent('operator'))
+    expect(screen.queryByTestId('shell-get-started')).toBeNull()
+  })
+
+  it('is not shown to a viewer, who reads the tasks on Home as a report, not a to-do list', async () => {
+    mockSetup('viewer')
+    renderShell('/results', '/results', <h1>Baseline</h1>)
+    await waitFor(() => expect(screen.getByTestId('user-chip')).toHaveTextContent('viewer'))
+    expect(screen.queryByTestId('shell-get-started')).toBeNull()
   })
 })
