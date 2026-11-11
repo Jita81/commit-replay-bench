@@ -67,7 +67,8 @@ describe('LedgerPage', () => {
     const described = button.getAttribute('aria-describedby')!.split(' ')
     expect(described[0]).toBe(note.id)
     expect(described).toHaveLength(2)
-    expect(document.getElementById(described[1]!)).toHaveAttribute('role', 'tooltip')
+    // the bubble is portalled once its host is known, a render after the link appears
+    await waitFor(() => expect(document.getElementById(described[1]!)).toHaveAttribute('role', 'tooltip'))
   })
 
   it('a viewer has no abstract export and no note; the filter words are terms that open inline', async () => {
