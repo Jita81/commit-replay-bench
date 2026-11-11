@@ -414,16 +414,29 @@ def test_a_browser_that_starts_is_the_whole_install_and_apt_is_never_run() -> No
 
 def test_a_browser_that_does_not_start_gets_its_system_libraries_next() -> None:
     m = _mod()
-    rc, out, commands, effects = _default_install(["ok", "ok"], [False])
+    rc, out, commands, effects = _default_install(["ok", "ok"], [False, True])
     assert rc == 0
     assert commands == [list(m.BROWSER_ONLY_COMMAND), list(m.DEFAULT_COMMAND)]
     # apt's timeouts are written before the first attempt that can call apt, and the install
-    # with system libraries is not probed again: Playwright has installed what it asks for.
-    assert effects == ["run", "probe", "apt", "run"]
+    # with system libraries is probed too before it is called a success.
+    assert effects == ["run", "probe", "apt", "run", "probe"]
     assert "attempt 1 of 5 downloaded Chromium" in out
     assert "does not start on this image without its system libraries" in out
     assert "attempt 2 of 5 succeeded" in out
     assert "::error" not in out
+
+
+def test_a_browser_that_does_not_start_with_its_libraries_is_not_a_success() -> None:
+    # A cache mounted noexec, say: no library fixes it, and the job after this one would fail.
+    m = _mod()
+    rc, out, commands, effects = _default_install(["ok", "ok", "ok"], [False, False, True])
+    assert rc == 1
+    assert commands == [list(m.BROWSER_ONLY_COMMAND), list(m.DEFAULT_COMMAND)], "no third install"
+    assert effects == ["run", "probe", "apt", "run", "probe"]
+    assert "attempt 2 of 5 installed Chromium and its system libraries" in out
+    assert "the browser still does not start" in out
+    assert "a rerun meets the same error" in out
+    assert "not answering" not in out and "rerun the job" not in out
 
 
 def test_a_failed_browser_download_is_retried_without_apt() -> None:

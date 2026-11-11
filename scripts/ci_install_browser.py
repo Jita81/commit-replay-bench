@@ -126,7 +126,8 @@ HELPER_TIMEOUT_S = 30.0
 class Attempt:
     """How one attempt ended: ``ok``, ``failed`` (with its exit code), ``stalled``,
     ``out-of-budget`` (stopped at the budget's end), ``late`` (ran to its end, but only after
-    the budget had ended) or ``unusable`` (the browser alone installed, and did not start)."""
+    the budget had ended), ``unusable`` (the browser alone installed, and did not start) or
+    ``broken`` (it does not start with its system libraries installed either)."""
 
     outcome: str
     returncode: int | None
@@ -147,6 +148,11 @@ class Attempt:
             return (
                 f"downloaded Chromium in {self.seconds:.0f} s, but it does not start on this "
                 "image without its system libraries"
+            )
+        if self.outcome == "broken":
+            return (
+                f"installed Chromium and its system libraries in {self.seconds:.0f} s, but the "
+                "browser still does not start"
             )
         return f"succeeded in {self.seconds:.0f} s"
 
@@ -322,16 +328,21 @@ def main(
         print(f"::group::browser install, attempt {k} of {args.attempts}", file=sink, flush=True)
         began = clock()
         attempt = run(command, idle_timeout_s=args.idle_timeout, deadline=deadline, out=sink)
-        if attempt.outcome == "ok" and browser_only:
-            # The probe is part of the install, so it runs inside the same budget.
+        if attempt.outcome == "ok" and not custom:
+            # The probe is part of the install, so it runs inside the same budget. The install
+            # with system libraries is probed too: a browser can fail to start for a reason
+            # no library fixes, and the job after this one would meet it.
             left = deadline - clock()
             if left <= 0:
                 # Nothing was stopped: the download ran to its end and left no time to probe.
                 attempt = Attempt("late", attempt.returncode, attempt.seconds)
             elif not probe(min(HELPER_TIMEOUT_S, left)):
-                # Downloaded, but a system library is missing: the next attempt installs them.
-                attempt = Attempt("unusable", attempt.returncode, attempt.seconds)
-                browser_only = False
+                if browser_only:
+                    # Downloaded, but it does not start: the next attempt installs its libraries.
+                    attempt = Attempt("unusable", attempt.returncode, attempt.seconds)
+                    browser_only = False
+                else:
+                    attempt = Attempt("broken", attempt.returncode, attempt.seconds)
             elif clock() > deadline:
                 # The probe passed, but only after the budget ended: the time is spent.
                 attempt = Attempt("late", attempt.returncode, clock() - began)
@@ -348,6 +359,9 @@ def main(
             file=sink,
             flush=True,
         )
+        if attempt.outcome == "broken":
+            # The libraries are in and it still does not start: another install changes nothing.
+            break
         if attempt.outcome == "unusable":
             # Nothing was stopped and no mirror was asked: no apt to clean up, no backoff.
             if k == args.attempts or clock() >= deadline:
@@ -360,7 +374,12 @@ def main(
     # An "unusable" attempt asked no mirror and stopped nothing, so it says nothing about the
     # network: the cause is read from the attempts that ran an install to its end.
     installs = [a for a in tried if a.outcome != "unusable"]
-    if (
+    if tried[-1].outcome == "broken":
+        cause = (
+            "Chromium and its system libraries are installed, but the browser still does not "
+            "start; read the probe's output above before rerunning: a rerun meets the same error"
+        )
+    elif (
         installs
         and tried[-1].outcome != "unusable"
         and all(a.outcome == "failed" for a in installs)
