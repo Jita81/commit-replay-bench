@@ -148,10 +148,12 @@ asked for it as a manual `SELECT` whose result nobody could read from the produc
 
 ## Deferred
 
-- **2026-11-11: the unsigned file anchor is shipped** (`crb ledger anchor`,
-  `crb ledger verify --anchor`, docs/LEDGER-ANCHORS.md). It records both heads in a file the
-  operator moves off the machine; the comparison above is now a command, though keeping the
-  file elsewhere is still the operator's act. Signing it (HMAC, or a public transparency log)
+- **2026-11-11: the unsigned file anchor is shipped** (`crb ledger anchor --store` and
+  `crb ledger verify --store --anchor` for the database, docs/LEDGER-ANCHORS.md). With
+  `--store` it records the database's two heads, grades and events, in a file the operator
+  moves off the machine; without `--store` the same commands anchor the JSONL ledger, whose
+  anchor records the `grades` head only. The comparison above is now a command, though
+  keeping the file elsewhere is still the operator's act. Signing it (HMAC, or a public transparency log)
   stays deferred, as below; the file's `signed` field is where a signature would be recorded.
 - **A signed (HMAC) anchor of the ledger's tail, and binding each clean row to its pack in
   the JSONL ledger** (ADR-0025 draft, item 11, "the tail is anchored" and "packs are

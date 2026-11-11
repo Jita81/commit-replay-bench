@@ -18,10 +18,10 @@ cut.
 ## 2. Writing and checking anchors
 
 ```bash
-crb ledger anchor --out ~/anchors/my-deployment                 # the JSONL ledger
-crb ledger anchor --store --out ~/anchors/my-deployment         # the database: grades + events
-crb ledger verify --store --anchor ~/anchors/my-deployment      # every anchor in the directory
-crb ledger verify --anchor ~/anchors/my-deployment/anchor-g00000003-….json   # one anchor
+crb ledger anchor --store --out ~/anchors/my-store        # the database: grades + events
+crb ledger verify --store --anchor ~/anchors/my-store     # every anchor in the directory
+crb ledger anchor --out ~/anchors/my-jsonl                # the JSONL ledger: grades only
+crb ledger verify --anchor ~/anchors/my-jsonl/anchor-g00000003-….json   # one anchor
 ```
 
 `crb ledger anchor`:
@@ -52,8 +52,21 @@ crb ledger verify --anchor ~/anchors/my-deployment/anchor-g00000003-….json   #
 
 `crb ledger verify --anchor <file-or-directory>` runs the normal verification and also checks
 that the ledger still extends each anchor. For a directory it also checks the anchors' own chain.
-Any failure is exit 1, a line beginning `ANCHOR BROKEN`, and the name of the first anchor that
-no longer holds. Without `--anchor`, `verify` prints and returns exactly what it did before.
+Verify an anchor against the ledger it was taken of: an anchor written with `--store` is checked
+with `crb ledger verify --store --anchor <dir>`. Without `--store`, `verify` reads the JSONL
+ledger, and each database anchor fails with a line that says it was taken of a `sqlite` (or
+`postgresql`) ledger and is checked against a `jsonl` ledger.
+
+Either kind of failure exits 1, and each prints differently:
+
+- **An anchor no longer holds.** One line per fault, `ANCHOR BROKEN — <file>: <fault>`, then
+  `the first anchor that no longer holds: <file>`.
+- **The directory's anchor chain is damaged** (an anchor is missing, was edited, or names no
+  valid predecessor; or the directory holds no anchor files). One line per fault,
+  `ANCHOR CHAIN BROKEN — <fault>`. When every anchor still holds, no first anchor is named and
+  `first_broken` in the `--json` output is `null`.
+
+Without `--anchor`, `verify` prints and returns exactly what it did before.
 
 ## 3. Custody: where anchors live and who holds them
 
