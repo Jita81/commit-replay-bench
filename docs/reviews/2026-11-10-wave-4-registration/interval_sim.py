@@ -56,12 +56,14 @@ rng = np.random.default_rng(SEED)
 
 
 def interval(sums: np.ndarray) -> tuple[float, float]:
+    """The registration's 95% t interval for the mean per-commit difference, from batch sums."""
     d = sums.sum() / N
     se = sqrt(B / (B - 1) * ((sums - SIZES * d) ** 2).sum()) / N
     return d - T975 * se, d + T975 * se
 
 
 def errors(draw, truth: float, reps: int = REPS) -> tuple[float, float, float]:
+    """Shares of simulated waves whose interval missed ``truth``, sat below it, and the same guarded."""
     miss = low = guarded = 0
     for _ in range(reps):
         sums = np.array([draw(int(n)).sum() for n in SIZES])
@@ -73,7 +75,10 @@ def errors(draw, truth: float, reps: int = REPS) -> tuple[float, float, float]:
 
 
 def realistic(mean: float, rho: float, eff: float, sd: float):
+    """A draw function for one batch's per-commit differences under the model of the docstring."""
+
     def draw(n: int) -> np.ndarray:
+        """The S1 minus A0 rate of each of ``n`` commits in one batch."""
         if rho > 0:
             k = (1 - rho) / rho
             p = rng.beta(mean * k, (1 - mean) * k, n)
@@ -88,6 +93,7 @@ def realistic(mean: float, rho: float, eff: float, sd: float):
 
 
 def main() -> None:
+    """Print the grid, the breaking distributions and the distribution-free bound."""
     print(
         f"[hypothesis] simulated by interval_sim.py, seed {SEED}, {REPS} waves a setting; "
         "a simulation, not a measurement of the product"

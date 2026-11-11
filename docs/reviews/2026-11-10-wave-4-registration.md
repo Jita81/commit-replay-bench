@@ -151,7 +151,7 @@ cannot drift).
 | `S1` | the same, plus `arm: "S1"` and `test_author` set to the Cerebras `gpt-oss-120b` rung |
 | `S3` | `kind: "replay"`, with the same learning, transcript and budget fields |
 
-Transcripts need both transcript fields: either one alone keeps nothing, silently **[hypothesis — read from the code, not shown by a run: `src/crb/server/worker.py` gives the builder a transcript directory only when `retain.transcripts` is set, and `src/crb/builders/claude_code.py` keeps the stream's events only when `keep_transcript` is set]**. `learning:
+Transcripts need both transcript fields: either one alone keeps nothing, silently **[hypothesis — read from the code, not shown by a run: `src/crb/server/worker.py` gives the builder a transcript directory only when `retain.transcripts` or the older `keep_transcripts` field is set (the registered run bodies send only the first), and `src/crb/builders/claude_code.py` keeps the stream's events only when `keep_transcript` is set]**. `learning:
 "off"` is sent on every run even though the repository switch is also off. The turn limit covers
 the builder; the test author's own budget is separate and is left at the product default.
 
