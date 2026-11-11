@@ -327,6 +327,9 @@ def main(
                 # Downloaded, but a system library is missing: the next attempt installs them.
                 attempt = Attempt("unusable", attempt.returncode, attempt.seconds)
                 browser_only = False
+            elif clock() > deadline:
+                # The probe passed, but only after the budget ended: the time is spent.
+                attempt = Attempt("out-of-budget", attempt.returncode, attempt.seconds)
         tried.append(attempt)
         print("::endgroup::", file=sink, flush=True)
         if attempt.outcome == "ok":

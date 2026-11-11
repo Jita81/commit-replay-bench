@@ -453,9 +453,11 @@ def test_a_system_library_install_that_fails_every_time_is_not_called_a_network_
     assert "not answering" not in out
 
 
-def _timed_install(download_s: float, budget: float) -> tuple[int, str, list[float]]:
-    """Run the default install with a clock the download advances by ``download_s``; returns
-    the exit code, the output and the time each probe was given."""
+def _timed_install(
+    download_s: float, budget: float, probe_s: float = 0.0
+) -> tuple[int, str, list[float]]:
+    """Run the default install with a clock the download advances by ``download_s`` and each
+    probe by ``probe_s``; returns the exit code, the output and the time each probe was given."""
     m = _mod()
     now = [1000.0]
     given: list[float] = []
@@ -463,6 +465,11 @@ def _timed_install(download_s: float, budget: float) -> tuple[int, str, list[flo
     def run(_cmd: list[str], **_kw: object) -> object:
         now[0] += download_s
         return m.Attempt("ok", 0, download_s)
+
+    def probe(left: float) -> bool:
+        given.append(left)
+        now[0] += probe_s
+        return True
 
     out = io.StringIO()
     rc = m.main(
@@ -474,7 +481,7 @@ def _timed_install(download_s: float, budget: float) -> tuple[int, str, list[flo
         clock=lambda: now[0],
         out=out,
         record=lambda _seconds, _budget: None,
-        probe=lambda left: given.append(left) is None,
+        probe=probe,
     )
     return rc, out.getvalue(), given
 
@@ -491,6 +498,16 @@ def test_a_download_that_used_the_whole_budget_is_not_probed_and_is_not_a_succes
     rc, out, given = _timed_install(download_s=100.0, budget=100.0)
     assert rc == 1 and given == []
     assert "the install budget ran out" in out
+
+
+def test_a_probe_that_passes_after_the_budget_ended_is_not_a_success() -> None:
+    # The probe's timeout bounds the browser, not the time around it: the clock is read again.
+    rc, out, given = _timed_install(download_s=95.0, budget=100.0, probe_s=6.0)
+    assert rc == 1 and given == [5.0]
+    assert "the install budget ran out" in out
+    # A probe that ends exactly on the deadline is still inside the budget.
+    rc, _out, _given = _timed_install(download_s=95.0, budget=100.0, probe_s=5.0)
+    assert rc == 0
 
 
 def test_a_command_of_its_own_is_run_as_written_and_never_probed() -> None:
