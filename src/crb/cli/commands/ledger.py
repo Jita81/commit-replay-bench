@@ -18,7 +18,8 @@ What it does: Imports the June-2026 census with honest classification (needs the
               present; exports rows; ``anchor`` writes the chain heads to a file meant to
               leave the machine, and ``verify --anchor`` checks the ledger still extends it.
 How:          ``JsonlLedger`` reads; ``crb.core.legacy`` importers; ``group_by_cell`` +
-              ``cell_stats`` for ``stats``; every command prints JSON or a plain table.
+              ``cell_stats`` for ``stats``; ``verify --store --anchor`` reads every anchored
+              row in one ordered pass per chain; every command prints JSON or a plain table.
 Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0007-abstract-cell-export-only.md,
@@ -49,7 +50,7 @@ import json
 import os
 import sys
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -466,8 +467,9 @@ def _verify_store(args: argparse.Namespace) -> int:
             and events.ok
         )
         if getattr(args, "anchor", ""):
+            reader = _store_hash_at(factory)
             out["anchors"] = _anchor_report(
-                args.anchor, engine.dialect.name, _store_hash_at(factory)
+                args.anchor, engine.dialect.name, reader, reader.prefetch
             )
             out["ok"] = out["ok"] and out["anchors"]["ok"]
     finally:
@@ -523,33 +525,76 @@ def _jsonl_hash_at(path: Path) -> HashAt:
     return at
 
 
-def _store_hash_at(factory: Any) -> HashAt:
+class _StoreHashAt:
     """``hash_at`` over the database: the n-th row of ``grades`` by ``seq`` or of ``events``
-    by ``id`` — one indexed read each, no write."""
-    from sqlalchemy import select  # noqa: PLC0415
+    by ``id``. :meth:`prefetch` reads every requested position of a chain in one ordered pass
+    (stopping at the highest), so checking many anchors costs one read per chain, not one per
+    anchor; a position not prefetched is read the same way on first use. No write."""
 
-    from crb.store.models import Event, Grade  # noqa: PLC0415
+    CHAINS = ("grades", "events")
 
-    def at(chain: str, n: int) -> str | None:
-        if n <= 0:
+    def __init__(self, factory: Any) -> None:
+        self._factory = factory
+        self._cache: dict[tuple[str, int], str | None] = {}
+
+    def prefetch(self, wanted: Mapping[str, Iterable[int]]) -> None:
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from crb.store.models import Event, Grade  # noqa: PLC0415
+
+        for chain, positions in wanted.items():
+            todo = {n for n in positions if n > 0 and (chain, n) not in self._cache}
+            if chain not in self.CHAINS or not todo:
+                continue
+            q = (
+                select(Grade.row_hash).order_by(Grade.seq)
+                if chain == "grades"
+                else select(Event.row_hash).order_by(Event.id)
+            )
+            found: dict[int, str] = {}
+            with self._factory() as s:
+                rows = s.execute(q.limit(max(todo)).execution_options(yield_per=1000))
+                for i, h in enumerate(rows.scalars(), start=1):
+                    if i in todo:
+                        found[i] = str(h)
+            for n in todo:
+                self._cache[(chain, n)] = found.get(n)  # None: past the end of the chain
+
+    def __call__(self, chain: str, n: int) -> str | None:
+        if n <= 0 or chain not in self.CHAINS:
             return None
-        if chain == "grades":
-            q = select(Grade.row_hash).order_by(Grade.seq)
-        elif chain == "events":
-            q = select(Event.row_hash).order_by(Event.id)
-        else:
-            return None
-        with factory() as s:
-            found = s.execute(q.offset(n - 1).limit(1)).scalar_one_or_none()
-        return None if found is None else str(found)
-
-    return at
+        if (chain, n) not in self._cache:
+            self.prefetch({chain: [n]})
+        return self._cache[(chain, n)]
 
 
-def _anchor_report(target_arg: str, source: str, hash_at: HashAt) -> dict[str, Any]:
+def _store_hash_at(factory: Any) -> _StoreHashAt:
+    """The database's ``hash_at`` (:class:`_StoreHashAt`)."""
+    return _StoreHashAt(factory)
+
+
+def _wanted_positions(anchors: Iterable[LoadedAnchor], source: str) -> dict[str, set[int]]:
+    """Every (chain, row count) the anchors of ``source`` will ask ``hash_at`` for."""
+    wanted: dict[str, set[int]] = {}
+    for la in anchors:
+        if la.anchor.get("source") != source:
+            continue  # check_anchor reports the mismatch without reading a row
+        for name, head in la.anchor["chains"].items():
+            if head["rows"] > 0:
+                wanted.setdefault(name, set()).add(head["rows"])
+    return wanted
+
+
+def _anchor_report(
+    target_arg: str,
+    source: str,
+    hash_at: HashAt,
+    prefetch: Callable[[Mapping[str, Iterable[int]]], None] | None = None,
+) -> dict[str, Any]:
     """Check one anchor file, or every anchor in a directory (and that directory's anchor
     chain), against today's ledger. ``first_broken`` names the oldest anchor that no longer
-    holds."""
+    holds. ``prefetch``, when given, is handed every position the anchors will read first,
+    so the reader can fetch them together."""
     target = Path(target_arg).expanduser()
     try:
         if target.is_dir():
@@ -561,6 +606,8 @@ def _anchor_report(target_arg: str, source: str, hash_at: HashAt) -> dict[str, A
             raise CliError(f"--anchor {target} is neither an anchor file nor a directory")
     except AnchorError as e:
         raise CliError(str(e)) from e
+    if prefetch is not None:
+        prefetch(_wanted_positions(anchors, source))
     results = []
     for la in anchors:
         faults = check_anchor(la.anchor, source=source, hash_at=hash_at)

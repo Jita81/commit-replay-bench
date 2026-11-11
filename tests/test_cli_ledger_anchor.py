@@ -9,7 +9,10 @@ What it does: Pins the round trip on a JSONL ledger and on a SQLite store (both 
               directory is refused; that an anchor is never overwritten; that two anchors
               chain and a directory is checked as a whole; that a new anchor is refused when
               the ledger no longer extends the directory's last one; and that the command
-              writes nothing to the ledger and no URL to the file.
+              writes nothing to the ledger and no URL to the file; that the store reader
+              returns the same hashes as a per-row read in one ordered pass per chain,
+              however many anchors, and still checks anchors when a chain is broken; and
+              that a malformed predecessor link is an anchor-chain fault.
 How:          ``main(argv)`` in-process on ``tmp_path``: a JSONL ledger built with
               ``JsonlLedger``; a SQLite store built with ``crb migrate`` and ``DbLedger``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -394,3 +397,133 @@ def test_a_missing_sqlite_file_is_refused_not_created(
     )
     assert code == 2 and "no SQLite database" in capsys.readouterr().err
     assert not db_path.parent.exists()
+
+
+# --- the store reader: one ordered pass per chain, however many anchors ------------------
+
+
+def _store_hashes(url: str) -> tuple[list[str], list[str]]:
+    from sqlalchemy import text as sql
+
+    engine = make_engine(url)
+    with engine.connect() as c:
+        grades = [r[0] for r in c.execute(sql("SELECT row_hash FROM grades ORDER BY seq"))]
+        events = [r[0] for r in c.execute(sql("SELECT row_hash FROM events ORDER BY id"))]
+    engine.dispose()
+    return grades, events
+
+
+def _anchor_dir(out: Path, heads: Sequence[tuple[int, str, int, str]]) -> None:
+    """Chained anchors of a SQLite store, one per ``(grades rows, head, events rows, head)``."""
+    from crb.core.anchor import ChainHead, build_anchor, load_anchor, write_anchor
+
+    previous = None
+    for g, gh, e, eh in heads:
+        a = build_anchor(
+            source="sqlite",
+            chains={"grades": ChainHead(g, gh), "events": ChainHead(e, eh)},
+            apparatus="2.5",
+            crb_version="x",
+            created_at=T1,
+            previous=previous,
+        )
+        path, _ = write_anchor(out, a)
+        previous = (path.name, load_anchor(path).sha256)
+
+
+def test_the_store_reader_matches_a_per_row_read_at_every_position(
+    db: tuple[str, Path], tmp_path: Path
+) -> None:
+    """Prefetched or read on first use, the reader returns the hash at each position, and
+    ``None`` at 0, past the end and on an empty chain."""
+    from crb.cli.commands.ledger import _store_hash_at
+
+    url, _ = db
+    grades, events = _store_hashes(url)
+    engine = make_engine(url)
+    factory = make_session_factory(engine)
+    expected = {
+        (chain, n): (hashes[n - 1] if 0 < n <= len(hashes) else None)
+        for chain, hashes in (("grades", grades), ("events", events))
+        for n in range(0, len(hashes) + 3)
+    }
+    lazy = _store_hash_at(factory)
+    assert {k: lazy(*k) for k in expected} == expected
+    eager = _store_hash_at(factory)
+    eager.prefetch({"grades": range(0, 6), "events": range(0, 8), "other": [1]})
+    assert {k: eager(*k) for k in expected} == expected
+    assert eager("other", 1) is None
+    engine.dispose()
+    empty_url = f"sqlite:///{tmp_path / 'empty' / 'crb.db'}"
+    assert main(["migrate", "--database-url", empty_url]) == 0
+    engine = make_engine(empty_url)
+    reader = _store_hash_at(make_session_factory(engine))
+    reader.prefetch({"grades": [1, 2], "events": [1]})
+    assert [reader("grades", 1), reader("grades", 2), reader("events", 1)] == [None] * 3
+    engine.dispose()
+
+
+def test_checking_more_anchors_does_not_issue_more_queries(
+    db: tuple[str, Path], tmp_path: Path
+) -> None:
+    from sqlalchemy import event
+
+    from crb.cli.commands.ledger import _anchor_report, _store_hash_at
+
+    url, _ = db
+    g, e = _store_hashes(url)
+    few, many = tmp_path / "few", tmp_path / "many"
+    _anchor_dir(few, [(3, g[2], 5, e[4])])
+    _anchor_dir(
+        many,
+        [(1, g[0], 1, e[0]), (2, g[1], 3, e[2]), (3, g[2], 4, e[3]), (3, g[2], 5, e[4])],
+    )
+    engine = make_engine(url)
+    factory = make_session_factory(engine)
+    selects: list[str] = []
+
+    def count(conn, cursor, statement, *rest) -> None:  # type: ignore[no-untyped-def]
+        if statement.lstrip().upper().startswith("SELECT"):
+            selects.append(statement)
+
+    event.listen(engine, "before_cursor_execute", count)
+    reports = {}
+    queries = {}
+    for name, d in (("few", few), ("many", many)):
+        selects.clear()
+        reader = _store_hash_at(factory)
+        reports[name] = _anchor_report(str(d), "sqlite", reader, reader.prefetch)
+        queries[name] = len(selects)
+    engine.dispose()
+    assert reports["few"]["ok"] and reports["many"]["ok"] and reports["many"]["checked"] == 4
+    assert queries["few"] == queries["many"] == 2  # one ordered pass per chain
+
+
+def test_store_anchors_are_still_checked_when_a_chain_is_broken(
+    db: tuple[str, Path], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Several anchors, one past the end of the grades chain, against a store whose events
+    chain was edited: the chain fault and every anchor's result are both reported."""
+    from sqlalchemy import text as sql
+
+    url, _ = db
+    g, e = _store_hashes(url)
+    out = tmp_path / "anchors"
+    _anchor_dir(out, [(1, g[0], 2, e[1]), (3, g[2], 5, e[4]), (9, "f" * 64, 5, e[4])])
+    engine = make_engine(url)
+    with engine.begin() as c:
+        c.execute(sql("DROP TRIGGER IF EXISTS events_no_update"))
+        c.execute(
+            sql("UPDATE events SET action = 'edited' WHERE id = (SELECT MIN(id) FROM events)")
+        )
+    engine.dispose()
+    code, text = _run(
+        ["ledger", "verify", "--store", "--database-url", url, "--anchor", str(out), "--json"],
+        capsys,
+    )
+    d = json.loads(text)
+    assert code == 1 and d["events"]["chain_ok"] is False
+    rep = d["anchors"]
+    assert rep["checked"] == 3 and [r["holds"] for r in rep["results"]] == [True, True, False]
+    assert "fewer than 9 rows" in rep["results"][2]["faults"][0]
+    assert rep["first_broken"] == rep["results"][2]["file"]
