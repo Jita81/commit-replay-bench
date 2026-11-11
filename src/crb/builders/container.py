@@ -745,8 +745,13 @@ def builder_run_args(
         "--security-opt",
         "no-new-privileges",
         "--read-only",
+        # ``exec`` is stated: Docker mounts a tmpfs ``noexec`` unless told, and ``go test``
+        # execs the test binaries it builds under ``$TMPDIR`` (``/tmp`` here), so a Go builder
+        # moved its toolchain scratch (``.gocache``, ``.gotmp``, ``.tmp``) into ``/work``,
+        # where belt 1b read the cached test output as forged events (ADR-0005's 2026-09-21
+        # follow-up). The bind-mounted ``/work`` is exec already, so this adds no capability.
         "--tmpfs",
-        f"/tmp:rw,nosuid,nodev,size={s.tmp_size}",
+        f"/tmp:rw,exec,nosuid,nodev,size={s.tmp_size}",
         "--mount",
         f"type=bind,src={checkout},dst={WORKDIR}",
     ]

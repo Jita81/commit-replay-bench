@@ -363,7 +363,7 @@ docker run -d --name crb-proxy-<task>-<id> --network=<EGRESS_NETWORK> --read-onl
 docker network connect --alias proxy crb-b-<task>-<id> crb-proxy-<task>-<id>     # wait for READY
 docker run --rm --name crb-build-<task>-<id> --init --network=crb-b-<task>-<id> \
   --memory=4g --cpus=2 --pids-limit=1024 --user <uid:gid> --cap-drop=ALL \
-  --security-opt no-new-privileges --read-only --tmpfs /tmp:rw,nosuid,nodev,size=1g \
+  --security-opt no-new-privileges --read-only --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g \
   --mount type=bind,src=<sealed checkout>,dst=/work \
   --env ANTHROPIC_API_KEY --env CLAUDE_CODE_OAUTH_TOKEN         # names only; values from the client env \
   --env HTTPS_PROXY=http://proxy:3128 --env HOME=/tmp --env CI=1 … \
