@@ -85,7 +85,12 @@ def ev_init(model: str = "claude-opus-5") -> str:
 
 
 def ev_assistant(
-    *blocks: dict[str, Any], tin: int = 100, tout: int = 30, cached: int = 0, msg_id: str = ""
+    *blocks: dict[str, Any],
+    tin: int = 100,
+    tout: int = 30,
+    cached: int = 0,
+    msg_id: str = "",
+    model: str = "",
 ) -> str:
     """One ``assistant`` line carrying ``blocks`` and a usage record (input / output / cached
     tokens); ``msg_id`` sets ``message.id``, which the real CLI repeats on each content-block
@@ -102,6 +107,8 @@ def ev_assistant(
     }
     if msg_id:
         message["id"] = msg_id
+    if model:
+        message["model"] = model
     return json.dumps({"type": "assistant", "message": message, "session_id": "s1"})
 
 
@@ -971,6 +978,60 @@ def test_an_unpriced_model_without_a_cli_figure_is_unknown(
     _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
     assert out.cost_usd == 0.0 and not out.cost_known
     assert out.extra["cost_source"] == "unknown" and "cli_cost_usd" not in out.extra
+    ws.remove()
+
+
+def test_a_message_another_model_answered_is_priced_at_that_models_rate(tmp_path: Path) -> None:
+    """A sub-agent or a fallback: the session's totals do not say which model spent what,
+    so pricing all of them at the builder's rate would under-count an opus message in a
+    sonnet build. Each message is priced at the rate of the model that answered it."""
+    lines = [
+        ev_init("claude-sonnet-5"),
+        ev_assistant(text("a"), tin=1_000, tout=100, msg_id="m1", model="claude-sonnet-5"),
+        ev_assistant(text("b"), tin=2_000, tout=200, msg_id="m2", model="claude-opus-5"),
+        _priced_result(cost=9.99, tin=3_000, tout=300),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    expected = 1_000 * 2e-6 + 100 * 10e-6 + 2_000 * 5e-6 + 200 * 25e-6
+    assert out.cost_usd == pytest.approx(expected) and out.cost_known
+    assert out.cost_usd > 3_000 * 2e-6 + 300 * 10e-6  # more than the builder's rate gives
+    assert out.extra["cost_source"] == "price_table"
+    assert out.extra["other_models"] == ["claude-opus-5"]
+    ws.remove()
+
+
+def test_a_message_from_a_model_the_table_lacks_makes_the_cost_unknown(tmp_path: Path) -> None:
+    lines = [
+        ev_init("claude-sonnet-5"),
+        ev_assistant(text("a"), tin=1_000, tout=100, msg_id="m1", model="claude-sonnet-5"),
+        ev_assistant(text("b"), tin=2_000, tout=200, msg_id="m2", model="mystery-model-9"),
+        _priced_result(cost=9.99, tin=3_000, tout=300),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == 0.0 and not out.cost_known  # a capped run stops
+    assert out.extra["cost_source"] == "unknown"
+    assert out.extra["other_models"] == ["mystery-model-9"]
+    assert out.tokens_in == 3_000 and out.tokens_out == 300  # the tokens are still metered
+    ws.remove()
+
+
+def test_the_builders_own_model_under_another_spelling_is_not_another_model(
+    tmp_path: Path,
+) -> None:
+    """A dated id of the builder's model, the id the init event resolved it to, the CLI's
+    own ``<synthetic>`` error message and a message with nothing spent are not a second
+    model: the session's totals are priced at the builder's rate as before."""
+    lines = [
+        ev_init("claude-sonnet-5-20261001"),
+        ev_assistant(text("a"), tin=1_000, tout=100, msg_id="m1", model="claude-sonnet-5"),
+        ev_assistant(text("b"), tin=500, tout=50, msg_id="m2", model="claude-sonnet-5-20261001"),
+        ev_assistant(text("c"), tin=0, tout=0, msg_id="m3", model="<synthetic>"),
+        ev_assistant(text("d"), tin=0, tout=0, msg_id="m4", model="claude-opus-5"),
+        _priced_result(cost=9.99, tin=1_500, tout=150),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == pytest.approx(1_500 * 2e-6 + 150 * 10e-6) and out.cost_known
+    assert out.extra["cost_source"] == "price_table" and "other_models" not in out.extra
     ws.remove()
 
 

@@ -136,7 +136,7 @@ import tempfile
 import threading
 import time
 import warnings
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -159,6 +159,8 @@ from crb.builders.base import (
     nested_model_call_input,
 )
 from crb.builders.budget import (
+    COST_SOURCE_TABLE,
+    COST_SOURCE_UNKNOWN,
     EXTRA_PRICING_ERROR,
     CostMeter,
     Pricing,
@@ -556,6 +558,13 @@ def subprocess_spawn(
 # ---------------------------------------------------------------------------
 
 
+#: ``message.model`` of the assistant messages the CLI writes itself (an API error shown
+#: as a message): no model answered them
+SYNTHETIC_MODEL = "<synthetic>"
+#: ``BuildOutcome.extra`` key: the models other than the builder's that answered messages
+EXTRA_OTHER_MODELS = "other_models"
+
+
 def _one_hour_writes(usage: Mapping[str, Any], written: int) -> int:
     """The 1-hour-TTL part of a usage block's ``written`` cache-write tokens, from
     ``usage.cache_creation.ephemeral_1h_input_tokens`` (the split the CLI's session
@@ -602,6 +611,9 @@ class StreamStats:
         #: the 1-hour-TTL part of each message's cache writes (same keys), when the CLI
         #: reports the split (``usage.cache_creation.ephemeral_1h_input_tokens``)
         self.cache_writes_1h_by_message: dict[str, int] = {}
+        #: the model that answered each message (same keys), as the API reports it in
+        #: ``message.model``; absent where the event gave none
+        self.model_by_message: dict[str, str] = {}
         self.result: dict[str, Any] | None = None
         self.init: dict[str, Any] = {}
         self.last_text = ""
@@ -647,7 +659,7 @@ class StreamStats:
                 self.auth_failed = True
         elif kind == "assistant":
             msg = ev.get("message") or {}
-            self._usage(msg.get("id"), msg.get("usage"))
+            self._usage(msg.get("id"), msg.get("usage"), msg.get("model"))
             names: list[str] = []
             for block in msg.get("content") or []:
                 if not isinstance(block, dict):
@@ -694,7 +706,7 @@ class StreamStats:
         self.events.append(summary)
         return summary
 
-    def _usage(self, msg_id: Any, usage: Any) -> None:
+    def _usage(self, msg_id: Any, usage: Any, model: Any = None) -> None:
         """Record one assistant event's ``usage`` block under its ``message.id`` (the last
         event of a message replaces the earlier ones); an event with no id gets a key of
         its own, so it is summed as before. A block that is not a mapping records the
@@ -714,6 +726,49 @@ class StreamStats:
         )
         self.cache_writes_by_message[key] = written
         self.cache_writes_1h_by_message[key] = _one_hour_writes(usage, written)
+        if isinstance(model, str) and model:
+            self.model_by_message[key] = model
+
+    def other_models(self, own: Iterable[str]) -> list[str]:
+        """The models, other than the builder's ``own`` (its configured id and the one the
+        CLI's init event resolved it to), that answered a message with tokens spent: a
+        sub-agent or a fallback. The CLI's ``<synthetic>`` error messages are not a model."""
+        mine = [m for m in own if m]
+        out: set[str] = set()
+        for key, model in self.model_by_message.items():
+            if model == SYNTHETIC_MODEL or not any(self.usage_by_message.get(key, ())):
+                continue
+            if not any(model.startswith(m) or m.startswith(model) for m in mine):
+                out.add(model)
+        return sorted(out)
+
+    def cost_by_message(
+        self, pricing: Pricing, table: Mapping[str, Pricing], own: Iterable[str]
+    ) -> tuple[float, bool]:
+        """``(cost_usd, known)`` with every message priced at the rate of the model that
+        answered it (``pricing`` for the builder's own and for a message that named none):
+        what a session that used more than one model is costed from. Unknown, ``0.0``, as
+        soon as one of the other models is not in the table."""
+        other = set(self.other_models(own))
+        total = 0.0
+        for key, (tin, tout, cached) in self.usage_by_message.items():
+            model = self.model_by_message.get(key, "")
+            rate = pricing
+            if model in other:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")  # recorded as an unknown cost instead
+                    rate = price_for(model, table)
+            if not rate.known:
+                return 0.0, False
+            hour = self.cache_writes_1h_by_message.get(key, 0)
+            total += rate.cost(
+                tin + cached,
+                tout,
+                cached_in=cached,
+                cache_write_in=self.cache_writes_by_message.get(key, 0) - hour,
+                cache_write_1h_in=hour,
+            )
+        return total, True
 
     def host_view(self, text: str) -> str:
         """``text`` with the container alias replaced by the guard's host root (only
@@ -1083,6 +1138,14 @@ class ClaudeCodeBuilder:
                 cache_write_1h_in=stats.cache_write_1h_tokens(),
                 reported_cost=None if pricing_error else cli_cost,
             )
+            # a sub-agent or a fallback answered some messages: the session's totals do
+            # not say which model spent what, so each message is priced at its own
+            # model's rate, and the cost is unknown when the table lacks one of them
+            own = (self.model, str(stats.init.get("model") or ""))
+            others = stats.other_models(own)
+            if others and source == COST_SOURCE_TABLE:
+                cost, known = stats.cost_by_message(pricing, table, own)
+                source = COST_SOURCE_TABLE if known else COST_SOURCE_UNKNOWN
             return BuildOutcome(
                 builder=self.name,
                 model=self.model,
@@ -1105,6 +1168,7 @@ class ClaudeCodeBuilder:
                 extra={
                     **extra,
                     **cost_provenance(source, cli_cost),
+                    **({EXTRA_OTHER_MODELS: others} if others else {}),
                     **({EXTRA_PRICING_ERROR: pricing_error} if pricing_error else {}),
                 },
             )
