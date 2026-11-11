@@ -925,6 +925,24 @@ def test_guard_git_c_root_given_through_a_symlink(tmp_path: Path) -> None:
         assert _GIT_C_MSG in g.check_shell(f"git -C {path} status"), path
 
 
+def test_guard_git_c_relative_with_the_directory_unknown(tmp_path: Path) -> None:
+    """After ``popd`` the guard no longer knows where the shell is, so a relative ``-C``
+    passed unchecked: ``pushd src && popd && git -C out status`` reached the tree ``out``
+    links to, and ``-C gitlink`` reached ``.git``. With the root known and the directory
+    unknown a relative ``-C`` is now refused (``.`` and the empty value are no-ops and
+    still pass, as does an absolute path under the root); with no root, as before."""
+    root = _c_tree(tmp_path)
+    g = base.GitArchaeologyGuard(cwd=root)
+    for target in ("out", "gitlink", "src", "in"):
+        cmd = f"pushd src && popd && git -C {target} status"
+        assert _GIT_C_MSG in g.check_shell(cmd), cmd
+    for target in (".", "./", "''", str(root), f"{root}/src"):
+        cmd = f"pushd src && popd && git -C {target} status"
+        assert g.check_shell(cmd) == "", cmd
+    blind = base.GitArchaeologyGuard()
+    assert blind.check_shell("pushd src && popd && git -C src status") == ""
+
+
 def test_guard_git_diff_and_grep_reject_branch_names(tmp_path: Path) -> None:
     """``git diff main`` compared against the branch that holds the gold commit and
     passed the old guard (only shas and ``~``/``^``/``@{`` forms were caught)."""

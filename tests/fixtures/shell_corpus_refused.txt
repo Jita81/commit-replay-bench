@@ -431,6 +431,7 @@ git-log	archaeology:
 git -C /Users/me/repo log	archaeology:
 git --git-dir=/Users/me/repo/.git log	archaeology:
 git -C .. diff HEAD	archaeology:
+pushd src && popd && git -C out grep needle	archaeology:
 git -c core.worktree=/Users/me/repo status	archaeology:
 GIT_DIR=/Users/me/repo/.git git diff HEAD	archaeology:
 GIT_DIR=/Users/me/repo/.git git status	archaeology:
