@@ -31,11 +31,16 @@ crb ledger verify --anchor ~/anchors/my-deployment/anchor-g00000003-….json   #
   `anchor-g00000412-1f3a…-e00009311-77c0….json`. It never overwrites a file. Running it again
   on an unchanged ledger writes nothing and says so.
 - records the previous anchor in the directory and the sha256 of that file, so the anchors in a
-  directory form a chain of their own. A deleted or edited anchor shows up.
+  directory form a chain of their own. A deleted or edited anchor shows up **if a later
+  anchor follows it**. Nothing in the directory records the newest anchor, so the newest one
+  is protected only by where the directory is kept: the history of the repository that holds
+  it, off this machine. Deleting the newest anchor and cutting the ledger back to the one
+  before it passes `verify --anchor` on the directory alone.
 - refuses to write when the ledger no longer extends the directory's last anchor (exit 1). An
   anchor written over a rewritten history would hide the rewrite.
 - **refuses** an `--out` directory inside the ledger's own data directory: the folder that
-  holds `ledger.jsonl`, or the folder that holds the SQLite file. An anchor beside the data it
+  holds `ledger.jsonl`, or the folder that holds the SQLite file (the folder named on the command line and, when the
+  file is a symlink, the folder of its target). An anchor beside the data it
   anchors proves nothing.
 - **warns** when `--out` is on the same filesystem as the ledger. The anchor proves nothing
   until it is copied off the machine. For PostgreSQL the command cannot tell where the data

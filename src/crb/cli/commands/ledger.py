@@ -609,6 +609,7 @@ class _Anchored:
     heads: dict[str, ChainHead]
     hash_at: HashAt
     faults: list[str] = field(default_factory=list)
+    named_dir: Path | None = None  # the folder named on the command line, when the file is a link
 
 
 @contextlib.contextmanager
@@ -626,7 +627,12 @@ def _open_for_anchor(args: argparse.Namespace) -> Iterator[_Anchored]:
             n, faults = 0, [f"grades: CHAIN BROKEN — {e}"]
         head = (hash_at("grades", n) or "") if n else ""
         yield _Anchored(
-            "jsonl", ledger.path.resolve().parent, {"grades": ChainHead(n, head)}, hash_at, faults
+            "jsonl",
+            ledger.path.resolve().parent,
+            {"grades": ChainHead(n, head)},
+            hash_at,
+            faults,
+            ledger.path.absolute().parent,
         )
         return
     from sqlalchemy.engine import make_url  # noqa: PLC0415
@@ -638,11 +644,13 @@ def _open_for_anchor(args: argparse.Namespace) -> Iterator[_Anchored]:
     url = database_url(getattr(args, "database_url", None))
     parsed = make_url(url)
     data_dir: Path | None = None
+    named_dir: Path | None = None
     if parsed.get_backend_name() == "sqlite":
         db = parsed.database or ""
         if not db or db == ":memory:" or not Path(db).is_file():
             raise CliError(f"no SQLite database at {db or '(memory)'}; nothing to anchor")
         data_dir = Path(db).resolve().parent
+        named_dir = Path(db).absolute().parent
     engine = make_engine(url)
     try:
         factory = make_session_factory(engine)
@@ -666,7 +674,7 @@ def _open_for_anchor(args: argparse.Namespace) -> Iterator[_Anchored]:
             "grades": ChainHead(grades_n, grades_head),
             "events": ChainHead(events.rows, events.head if events.rows else ""),
         }
-        yield _Anchored(engine.dialect.name, data_dir, heads, store_hash_at, faults)
+        yield _Anchored(engine.dialect.name, data_dir, heads, store_hash_at, faults, named_dir)
     finally:
         engine.dispose()
 
@@ -700,9 +708,13 @@ def cmd_anchor(args: argparse.Namespace) -> int:
     out_dir = Path(args.out).expanduser()
     created_at = _created_at(args.created_at)
     with _open_for_anchor(args) as led:
-        if led.data_dir is not None and is_inside(out_dir, led.data_dir):
+        inside = next(
+            (d for d in (led.data_dir, led.named_dir) if d is not None and is_inside(out_dir, d)),
+            None,
+        )
+        if inside is not None:
             raise CliError(
-                f"--out {out_dir} is inside the ledger's data directory {led.data_dir}: an "
+                f"--out {out_dir} is inside the ledger's data directory {inside}: an "
                 "anchor kept beside the data it anchors proves nothing. Name a directory "
                 "elsewhere, ideally a clone of a repository held off this machine "
                 "(docs/LEDGER-ANCHORS.md)."

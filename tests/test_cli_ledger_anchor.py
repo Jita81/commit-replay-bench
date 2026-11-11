@@ -156,6 +156,37 @@ def test_out_inside_the_data_directory_is_refused(
     assert not (ledger.parent / "anchors").exists() and not (ledger.parent / "y").exists()
 
 
+def test_out_beside_a_symlinked_ledger_is_refused(
+    ledger: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The folder that holds a link to the ledger is its data directory too, as is the
+    folder of the link's target."""
+    wd = tmp_path / "wd"
+    wd.mkdir()
+    link = wd / "ledger.jsonl"
+    link.symlink_to(ledger)
+    for out in (wd / "anchors", ledger.parent / "anchors"):
+        code = main(["ledger", "anchor", "--path", str(link), "--out", str(out)])
+        assert code == 2 and "inside the ledger's data directory" in capsys.readouterr().err
+        assert not out.exists()
+
+
+def test_deleting_the_newest_anchor_is_not_seen_from_the_directory(
+    ledger: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The limit docs/LEDGER-ANCHORS.md states: the newest anchor has no successor to name
+    it, so only the directory's own custody protects it."""
+    out = tmp_path / "anchors"
+    _anchor(ledger, out, capsys)
+    kept = ledger.read_text()
+    _jsonl(ledger, 2, start=3)
+    _, second = _anchor(ledger, out, capsys, at=T2)
+    Path(second["anchor"]).unlink()
+    ledger.write_text(kept)
+    code, v = _verify(ledger, out, capsys)
+    assert code == 0 and v["ok"] is True
+
+
 def test_same_filesystem_is_a_warning_not_a_refusal(
     ledger: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

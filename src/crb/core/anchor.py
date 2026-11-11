@@ -30,7 +30,9 @@ Invariants
   state, through a hard link that fails if the name exists. The same state again is a no-op;
   a different state under an existing name is refused.
 * **Anchors chain.** Each new anchor names the previous anchor in its directory and the
-  sha256 of that file's bytes, so a deleted or edited anchor is visible in the directory.
+  sha256 of that file's bytes, so a deleted or edited anchor that has a successor is visible
+  in the directory. The newest anchor has none: only the directory's own custody (a
+  repository held off the machine) protects it.
 * **No network, no git.** A transparency-log signature (Sigstore / Rekor) is the seam
   ``signed`` leaves open; it is not built and is off by default.
 
