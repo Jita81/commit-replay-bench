@@ -22,6 +22,13 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `0909129d`; apparatus 2.5]**. `.github/workflows/scorecard.yml` runs the OpenSSF Scorecard
   weekly and on push to `main`, uploading SARIF to code scanning.
 
+- **Wave 4 amendment 1: the four ordered lists**
+  ([#120](https://github.com/Jita81/commit-replay-bench/pull/120)). The registration's first
+  amendment, appended before the pilot. It records the two qualify runs at apparatus 2.5 and
+  their postures, each cell's key string, pool size, full seeded order and sha256, and strikes
+  the pilot's six click commits. The orders were checked against
+  `crb.core.reading.seeded_order`. Docs only; nothing is spent.
+
 - **The Wave 4 registration**
   ([#117](https://github.com/Jita81/commit-replay-bench/pull/117)). A new record,
   `docs/reviews/2026-11-10-wave-4-registration.md`, registers Wave 4 before any run: the blind

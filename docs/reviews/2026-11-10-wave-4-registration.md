@@ -4,6 +4,10 @@
 Decision R-1 is taken: option B, the combined test. No Wave 4 run is filed until the fixes of
 part 4 are deployed. Paul's yes to the spends is recorded under Authority.
 
+**Amendment 1 (2026-11-11).** The fixes are deployed, both repositories are re-qualified at
+apparatus 2.5 and the ordered lists are appended at the end of this page. Still nothing is
+spent **[hypothesis — the detail and its evidence are in Amendment 1 below]**.
+
 **Authority.** Paul's "yes to all four, go ahead" of 2026-11-10 (the Wave 3 closure; this design
 with a money line of $60 for stage 1 and $35 for stage 2, in real dollars; apparatus 2.5 with a
 short ADR; `gpt-oss-120b` on Cerebras as the test author), and his "Yes" of the same day to three
@@ -435,3 +439,183 @@ Harness².
 | If a pilot gate fails | A yes or a no to a repeat pilot. Nothing is spent until then. |
 | Before cobra | Cobra builds in the Go builder image, so its stage needs the image switch in `env.sh` and a second restart. Paul's yes covered one restart, so cobra waits for Paul's word on the second. |
 | During the report | Check five sampled patches per repository. |
+
+## Amendment 1 — the four lists, before the pilot — 2026-11-11
+
+This is the first amendment of part 2, step 3. It is appended before the pilot and before any
+Wave 4 run is filed. No model money has been spent: both qualify runs cost $0
+**[measured — n = 2 qualify runs, method: the cost field of each run record read from the served API, apparatus 2.5]**.
+
+**Where the lists come from.** Each repository was re-qualified at apparatus 2.5 with one
+`qualify` run on the served stack, in the sealed docker posture the wave runs use
+**[measured — n = 212 click commits and n = 86 cobra commits, method: one `qualify` run per repository read back from its `qualify.task` events, apparatus 2.5]**.
+
+| Repository | Qualify run | Posture | Qualified |
+|---|---|---|---|
+| click | `bc2f187d4e7b41b2a578025e8e6deca7` | `pst_376b10f54191926ee83a0b50` | 93 of 212 |
+| cobra | `6b8f2378095e4ace9fc838b0f4ff160f` | `pst_a308788d88899137d5fae9c7` | 74 of 86 |
+
+**How each list was built.** A cell's pool is the commits whose `qualify.task` event in that run
+reads `qualified` and whose task row is `bug.fix`, of the cell's size, of the repository's
+language and in the `standard` pool. The order is `crb.core.reading.seeded_order` over that pool
+with the key string shown. The orders were computed twice, once in the browser from the served
+API and once with the product's own function, and the two agree
+**[measured — n = 4 lists, method: the browser result from the served API compared with `seeded_order` commit by commit, apparatus 2.5]**.
+Each sha256 is over the list as
+written below: one commit per line, each line ended by a newline.
+
+**One thing not checked.** The product's pool rule also requires the qualified record's projected
+class and size to match the task row. That projection is not served by the API, so these pools
+were grouped by the task row alone. If the product's own pool for a cell differs from the list
+here when the first run is filed, the difference is reported and nothing is run on that cell
+until it is explained.
+
+| Cell | Key string | Pool size | sha256 of the full list |
+|---|---|---|---|
+| click XS | `replay|bug.fix|XS|python|claude_code|claude-sonnet-5|anthropic` | 31 | `d91102a0de8e342c09b31c746670af156ee0861ca8b3b4577780acd166c2baf7` |
+| click S | `replay|bug.fix|S|python|claude_code|claude-sonnet-5|anthropic` | 39 | `2b9426b2354440db523ad93fa85bcba04a8df66a75598a41399ee29ac3e2d36f` |
+| cobra XS | `replay|bug.fix|XS|go|claude_code|claude-sonnet-5|anthropic` | 17 | `e0debbc332169853f04e18f2fd20c389cad3b15fcf364c74be79854803755386` |
+| cobra S | `replay|bug.fix|S|go|claude_code|claude-sonnet-5|anthropic` | 27 | `056057184df2b721c7802325ce05efd7fe9585dcb4d903d62fc4b321e24dad68` |
+
+**Struck for the pilot.** The last three commits of each click list are the pilot's six commits.
+They are marked `struck` below. From here on "the list" for a click cell means the list without
+them **[aspiration — the pilot is not yet run; this fixes which commits it will use]**.
+
+| Cell | Size after striking | sha256 after striking |
+|---|---|---|
+| click XS | 28 | `d8e785c53fb769dbfb952220a657c1279b9b2c824fa73e2a6958aebc2f4fe254` |
+| click S | 36 | `b383348c0292803bc8aba70b36831410ef40016b6bfe439bf4579103fedb3978` |
+
+### click XS — `replay|bug.fix|XS|python|claude_code|claude-sonnet-5|anthropic`
+
+```text
+ 1  b5464b7e065bdfd952b1532880941f1be07e4e2b
+ 2  0de3704747c1399d019f1d94caeefe20123b6ef0
+ 3  c326df95e9e3da0425360e030413f6a3ee25fdee
+ 4  3f91d2154ebc47651f0cd9798250a03821473521
+ 5  589ca314ae8d200ff55263a2c49c8ae6341866f3
+ 6  1b0e19f50595a07957bd96a600c37cd44b7e0cc3
+ 7  71f2bafa541e7f798834e74076786ff4281ac83e
+ 8  762c97eef7c1b3779678992f26a553a2a8c80793
+ 9  1a4d8c1bb1e8f8e214ede7223bd2c05dc2ce006a
+10  f316d5cb3aa89b57c14aee54da6ac9062ac5bec4
+11  32ae2acd3474a57d2450ea849545b2e1258bf76a
+12  d340b0c1202284a1b9d0ca892549208527d586ce
+13  4fd2fea0db423d242aedcae0a5f664efe0a93484
+14  ac6a2acfdb4550c35ce69ce54db502ba96c96324
+15  a3321c9ca14ddb951f04ac981f275b0de2f46208
+16  f3a4363d1e8383df496adb31f2a6ed037f85380c
+17  f58ca3e81424a35626c8a475eb59ab95589008ce
+18  a2ac5839f29f61cf7f3f229c67b97d07988e479b
+19  a6e0d2936891030f5092c9869c7391104f6721d9
+20  f2ae679984c3dfaa0c7639686cd793f59eb4d9b8
+21  6f85d26dcd50c1745e81040ed4f2b61f8bf293cf
+22  61f8101f4e0d02cb902ef17853fa35ad88185265
+23  701b313160be12752e49b3f7cea32402c0969a69
+24  3a3e0350b6a2ea3e799440d48e779acabcf44de9
+25  1f9cd54f686eb343cec714230ad825ce972739ab
+26  bf1e8be90c46428f8bf8b45f295af80cfaf2e188
+27  665736bc85a19a7a2357c071394b4a545617faa3
+28  422e211018e9ef8ff9a840878464d35c4c6519ac
+29  7ed114f89a5997736c372faa0fa3b12d2bba377a  struck (pilot)
+30  1241abaed4e441582a21f4bf90c8482de02b92df  struck (pilot)
+31  82f377c547e1867d073f02bb8f476214d07e245b  struck (pilot)
+```
+
+### click S — `replay|bug.fix|S|python|claude_code|claude-sonnet-5|anthropic`
+
+```text
+ 1  91de59c6c8abc8251e7af551cd4546cc964288af
+ 2  7d05a59b9d46a415d85937630d1d812cf477f60a
+ 3  c653ec820093ed1dda41aae8d35bff7834b0344a
+ 4  becbde5cf416441627f779e8dd34e57738ee1c1f
+ 5  149683755e07b62de7480b3a60a714f0a8b6618f
+ 6  ecb99836a44367bad62960045d586e31e4a95766
+ 7  546f2851f414b07413777ebcae89b2c21a685252
+ 8  1b524bb30d0bd39528369c7029b9296e7663cf19
+ 9  380008389b32ca2b7de7c73f670a9eee1562004e
+10  f25f697a439acc2b0d84aa8f5413330f4e2e75cf
+11  2468b70997a6ec27ced4b4867954c90da3f92075
+12  b36e3ede781b388ae8135af61e83269e211acdf1
+13  6de212151893e4072ca21779b7b6f4cb82452f51
+14  1c20dc6e724cd5625faaa17b715ba928d44c08bf
+15  5fc3423ae54990cec5a8b41d2c7b489da41475b0
+16  607316f9dea85ee81f8a215f5d5ae20f7f4fff71
+17  a1235aacb1be55dc66ddcfefbf64dec44b6ab54d
+18  8ee83ddbf5a7a4c2eac5308c9599c5ee67ee005e
+19  1787497713fa389435ed732c9b26274c3cdc458d
+20  fbdd434028fe07ecf35084c945b43b938dfd639f
+21  70c673d37eb91ba42a129be9037caf3ebed62f3e
+22  437e1e3295c7ec979fc1bf285bb402ca20d847e7
+23  051725fa7e0c69effc9107066d8791c5b99242c3
+24  bec59289d8cf9b9b4010642b2fee483e5f8eeefc
+25  4271fe283dc9365563aebb369ada8d20eee015a8
+26  d8763b93021c416549b5f8b4b5497234619410db
+27  93ba0075f4881b858b61f89a753c7c10e330027e
+28  029bbeda76aa824149f110408d56de7b402a87ed
+29  c3535905c77a29afc84861b29d3ad366ce5451bd
+30  aaf99a3ee6935f321f755bc7c5717a91d321cd39
+31  93c6966eb3a575c2b600434d1cc9f4b3aee505ac
+32  b7e5fd4cc7de70280eccd39f2bb956df617e5519
+33  05f6fd0df4ecbd104eb7a229f9f185c2484dee69
+34  18d29196c508b249ef1111f1f29c9133e0a8b097
+35  88328fc8743d43566081d9f17acad5f5552f5a87
+36  4e4c7a69b7953ccb8c14e92368ca65d9525f1d2b
+37  fcd85032cff78aa536a6d2b455fb83bfcc02b228  struck (pilot)
+38  812b8000f79c1fbb747a2de5114fc74515558857  struck (pilot)
+39  047adef258fc25566163ffc3efd14effc0ef7352  struck (pilot)
+```
+
+### cobra XS — `replay|bug.fix|XS|go|claude_code|claude-sonnet-5|anthropic`
+
+```text
+ 1  a73b9c391a9489d20f5ee1480e75d3b99fc8c7e2
+ 2  7ce08e227e8c9db9b243dfef1e792af31d19cdd0
+ 3  8822449c0fb9575f1d2453e80cd3e55ab8fc2844
+ 4  5155946348eed0f79a76f7743407c0c933e3b5f0
+ 5  8a63648dd905e5c96bee06e6851a894fc75aa058
+ 6  22b617914c8890ba20db7ceafcdc2ef4ca4817d3
+ 7  e392f3204db0445f1f4ad47448b04d8c8ad04c2a
+ 8  ed7b60e2987d2cd54d6a391379e33effdacdadf9
+ 9  7790bf97fd40e285913066cf65387ad281cd6c2e
+10  6f84ef48750fe6355a267117837ba6ee3da254e7
+11  b9ca5949e2f58373e8e4c3823c213401f7d9d0e3
+12  fdee73b4a0d0be3e233b968ab038866b7cd99772
+13  b4f979ae352828a0153281b590771ce9588d67f8
+14  95f2f73ed97e57387762620175ccdc277a8597a0
+15  a97f9fd47b290016526c8af2dac0531fea5cd773
+16  746ef07158728502482cea9f880a6f4b21ef29a9
+17  1995054b003053cc1e404bccfbf6d168e8731509
+```
+
+### cobra S — `replay|bug.fix|S|go|claude_code|claude-sonnet-5|anthropic`
+
+```text
+ 1  b711e8760b73c6aa1b4aa1bef3a26da5926f175d
+ 2  2d94892a8bec681d65a129e0a94b2e0d87e52cb9
+ 3  02a0d2fbc9e61d26f8e5979749f6030964a55a3e
+ 4  df12a0a24975e4c9f278e62927ca08d000b9be71
+ 5  23a6174c7f9d0c64a48e634054bdf6886fb7fbba
+ 6  04318720db1743b8488c86b2f7dca6d9663cb2f2
+ 7  a15d0990180cf0d99905ad41201211f8ac3cab53
+ 8  890302a35f578311404a462b3cdd404f34db3720
+ 9  675ae5f5a98cc705a6d54f4c487ab81230604137
+10  9054739e08187aab9294b7a773d54c92fabc23d3
+11  212ea4078323771dc49b6f25a41d84efbaac3a4c
+12  e0fefb2b76210bd9833a12d47b2a3cf83b9f47ab
+13  c3573e220c93941b06812483ee96ceaf5fa5e5cc
+14  5bef9d8d87ad1a1c73e74361bad9e38b3469a58e
+15  45e521ea93e2270ef7333487f0a87e3887de2da9
+16  9334a46bd6b3887f3561d705440038ec93b7f62e
+17  50f385938e098a69ec93b3490ff68442ec3d6524
+18  0da06874266c88228b8f14615396a1f6bfc90ed7
+19  6607e6b8603f56adb027298ee6695e06ffb3a819
+20  0745e5576205cd05fada5bb2e01500d97e1a04be
+21  b6357260812dd09c49dc7d55042f0c795b419f6b
+22  40d34bca1bffe2f5e84b18d7fd94d5b3c02275a6
+23  10cf7be9972ee5b5994cf760ecba642309ac8685
+24  f0508c8e7665e581c7880c232466fe77b7a8964b
+25  6d00909120c77b54b0c9974a4e20ffc540901b98
+26  a0a6ae020bb3899ff0276067863e50523f897370
+27  df547f5fc6ee86071f73c36c16afd885bb4e3f28
+```
