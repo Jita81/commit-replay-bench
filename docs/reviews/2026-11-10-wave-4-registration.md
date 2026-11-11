@@ -722,6 +722,18 @@ turns and the wave runs at 50, so a wave attempt may cost more than `c`; the rul
 from the pilot and it is not adjusted. The campaign's ceiling and each run's own cap are what
 hold the line **[aspiration — the wave's settings; no wave run is filed yet]**.
 
+**Where `c` comes from.** Part 3 takes `c` from "the pilot whose gates passed". This pilot
+failed two of its gates and there is no other pilot, so that condition of part 3 is not met.
+`c` is taken from this pilot all the same, as a stated deviation that follows from Paul's
+decision to proceed without a repeat pilot. `c` rests on the product's own cost, which the
+failed cost gate says may understate what the provider bills: the CLI's own total for the same
+builds was about 2.5 times the product's. So the cut is a cut in the product's dollars. The
+money line, the campaign's ceiling and each run's `max_cost_usd` are all counted from the
+product's price table (part 3), and the provider's bill for the wave may exceed $95 by as much
+as the product understates it. The cut sets how many commits the wave holds; it does not change
+how a row is graded or how the test is read, and if the money line stops the wave the primary
+is not read (part 3) **[hypothesis — the CLI totals are in the kept transcripts on the served stack, not in this repository; the deviation follows Paul's words quoted above]**.
+
 ### The batches and their orders
 
 Twelve batches of five commits, six in each repository, filed in this order. The coin is the
@@ -762,14 +774,35 @@ patterns. Across the 27 settings
 **[hypothesis — `docs/reviews/2026-11-10-wave-4-registration/power_sim.py` and its output `power_sim.out.txt` beside it, seed 20261112, 2,000 waves a setting; a simulation, not a measurement of the product]**:
 
 - the test rejected a true null in 2.5% to 3.9% of waves;
-- it detected a 15-point effect in 42% to 74% of waves;
-- it detected a 20-point effect in 62% to 94% of waves, and a 25-point effect in 82% to 100%.
+- with 15 points of added chance it rejected in 42% to 74% of waves;
+- with 20 points added it rejected in 62% to 94% of waves, and with 25 points in 82% to 100%.
 
-A wave of 60 commits has less power than the one R-1 simulated: R-1 gave 58% to 89% for a
-15-point effect on about 81 commits in 18 batches, the pools as they stood before apparatus 2.5. A wave of this size is more likely than not to detect a 20-point effect and
-may well miss a 15-point one. The outcome rules of part 6 are unchanged, and a result that is
+The added chance is what `S1` adds to a commit's chance before the chance is clipped to
+[0, 1]; it labels the figures and is not the true effect. Where chances run near 1 (a high
+mean with a within-commit correlation above 0, or the larger shocks), clipping makes the
+realised mean difference between the arms smaller than its label: 9.4 to 15.0 points for 15
+points added, 11.8 to 20.0 for 20 and 14.0 to 25.0 for 25, over the 27 settings
+**[hypothesis — `docs/reviews/2026-11-10-wave-4-registration/power_sim.py` and its output `power_sim.out.txt` beside it, seed 20261112, 2,000 waves a setting; a simulation, not a measurement of the product]**. Each share
+above therefore belongs to a realised effect at or below its label; the script prints the
+realised effect of every setting beside its shares.
+
+A wave of 60 commits has less power than the one R-1 simulated: R-1 gave 58% to 89% at 15
+points on about 81 commits in 18 batches, the pools as they stood before apparatus 2.5. A wave
+of this size is more likely than not to detect 20 points added and may well miss 15. The
+outcome rules of part 6 are unchanged, and a result that is
 neither *Cleared* nor *No 15-point effect* is reported as inconclusive
 **[hypothesis — `docs/reviews/2026-11-10-wave-4-registration/power_sim.py` and its output `power_sim.out.txt` beside it, seed 20261112, 2,000 waves a setting; a simulation, not a measurement of the product]**.
 
 From here nothing is added to or removed from the lists, and any change to the served code
 stops the wave (part 6, item 9).
+
+**Note, 2026-11-11, after review, before any wave run.** After review of this amendment, and
+before any wave run was filed, three things were reworded or added: the paragraph *Where `c`
+comes from*, which says that part 3's condition for `c` is not met; the labels of the power
+figures, which are the chance added before clipping, with the realised effect beside them; and
+the `Touch when` line of `power_sim.py`. The script now also prints the realised effect,
+computed from draws it already made; its rerun reproduces every rejection share of the first
+output byte for byte. No number, list or order changed: the turn limit of 50, `c`, `N`, `k`,
+the cut lists and their sha256s, the 12 batch orders, the seed and every rejection share are
+as first put on record in commit `ca90419a`
+**[hypothesis — `power_sim.out.txt` rerun and compared with its first recording; a simulation, not a measurement of the product]**.
