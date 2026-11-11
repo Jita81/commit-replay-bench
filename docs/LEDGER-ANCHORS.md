@@ -28,6 +28,8 @@ crb ledger verify --anchor ~/anchors/my-jsonl/anchor-g00000003-….json   # one 
 
 - reads the ledger and verifies its chain first. A broken chain writes no anchor (exit 1). A
   line that is not a readable row (not JSON, not an object) counts as a broken chain.
+- refuses an empty ledger (exit 2): an anchor with no row attests nothing. A store with an
+  audit trail but no grade yet is anchored, with `grades` at 0 rows.
 - writes one file named from the row counts and heads, for example
   `anchor-g00000412-1f3a…-e00009311-77c0….json`. It never overwrites a file. Running it again
   on an unchanged ledger writes nothing and says so.
@@ -134,5 +136,7 @@ The worker log is a second, independent copy: every worker start writes both hea
 ```
 
 The field names are a contract: a later signed attestation will reference `head_row_hash`.
-A JSONL ledger has only the `grades` chain. The code is `src/crb/core/anchor.py` and
+A JSONL ledger has only the `grades` chain; a store anchor has both. `verify --anchor` refuses
+a file (exit 2) whose chains are not those of its `source`, or whose every chain has 0 rows: it
+would check as holding while attesting nothing. The code is `src/crb/core/anchor.py` and
 `src/crb/cli/commands/ledger.py`.

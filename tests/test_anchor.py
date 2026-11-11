@@ -7,7 +7,8 @@ What it does: Pins the file's shape and its determinism, the deterministic name,
               that passes on growth and fails on a rewritten or shortened chain, the
               directory's anchor chain (a deleted or edited anchor is named, a malformed
               predecessor link is a fault, not an exception), and the create-only write
-              that never overwrites.
+              that never overwrites; an anchor without its source's chains or any row is
+              refused on read and never built.
 How:          Dict-built anchors, a ``hash_at`` over plain lists, ``tmp_path`` for the files.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0029-the-audit-trail-is-hash-chained.md
@@ -100,6 +101,55 @@ def test_unreadable_anchors_are_refused() -> None:
     for data in (b"not json", b'{"schema": "other"}', json.dumps({"schema": ANCHOR_SCHEMA})):
         with pytest.raises(AnchorError):
             parse_anchor(data if isinstance(data, bytes) else data.encode(), "f")
+
+
+def _file(source: str, chains: dict) -> bytes:  # type: ignore[type-arg]
+    a = _anchor(3)
+    a.update(source=source, chains=chains)
+    return anchor_bytes(a)
+
+
+ATTESTS_NOTHING = (
+    ("jsonl", {"events": {"rows": 0, "head_row_hash": ""}}),  # not the JSONL chain
+    ("jsonl", {"grades": {"rows": 0, "head_row_hash": ""}}),  # no row
+    (
+        "jsonl",
+        {"grades": {"rows": 3, "head_row_hash": H[2]}, "events": {"rows": 0, "head_row_hash": ""}},
+    ),
+    ("sqlite", {"grades": {"rows": 3, "head_row_hash": H[2]}}),  # a store anchor lacks events
+    (
+        "sqlite",
+        {"grades": {"rows": 0, "head_row_hash": ""}, "events": {"rows": 0, "head_row_hash": ""}},
+    ),
+    ("jsonl", {"grades": {"rows": 3, "head_row_hash": ""}}),  # rows without a head
+    ("jsonl", {"grades": {"rows": 0, "head_row_hash": H[0]}}),  # a head without rows
+)
+
+
+@pytest.mark.parametrize(("source", "chains"), ATTESTS_NOTHING)
+def test_an_anchor_without_its_sources_chains_or_any_row_is_refused(
+    source: str,
+    chains: dict,  # type: ignore[type-arg]
+) -> None:
+    """A file whose chains are not its source's, or whose every chain is empty, would check
+    as holding while attesting nothing: refused on read, and never built."""
+    with pytest.raises(AnchorError):
+        parse_anchor(_file(source, chains), "f")
+    heads = {k: ChainHead(v["rows"], v["head_row_hash"]) for k, v in chains.items()}
+    with pytest.raises(AnchorError):
+        build_anchor(source=source, chains=heads, apparatus="2.5", crb_version="x", created_at="T")
+
+
+def test_a_store_anchor_of_events_only_is_a_real_anchor() -> None:
+    """A store with no grade yet but an audit trail anchors its events: accepted both ways."""
+    a = build_anchor(
+        source="sqlite",
+        chains={"grades": ChainHead(0, ""), "events": ChainHead(5, H[4])},
+        apparatus="2.5",
+        crb_version="x",
+        created_at="T",
+    )
+    assert parse_anchor(anchor_bytes(a), "x") == a
 
 
 def test_write_never_overwrites_and_a_same_state_rewrite_is_a_no_op(tmp_path: Path) -> None:

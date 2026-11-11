@@ -13,7 +13,9 @@ What it does: Pins the round trip on a JSONL ledger and on a SQLite store (both 
               returns the same hashes as a per-row read in one ordered pass per chain,
               however many anchors, and still checks anchors when a chain is broken; and
               that a malformed predecessor link is an anchor-chain fault; and that a ledger
-              line that is not a readable row is a broken chain, never a parse error.
+              line that is not a readable row is a broken chain, never a parse error; that an
+              anchor attesting no row is refused, an empty ledger is not anchored and a store
+              with events but no grade is.
 How:          ``main(argv)`` in-process on ``tmp_path``: a JSONL ledger built with
               ``JsonlLedger``; a SQLite store built with ``crb migrate`` and ``DbLedger``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -307,6 +309,40 @@ def test_an_unreadable_row_is_a_chain_fault_not_an_error(
     assert code == 1 and v["chain_ok"] is False and v["anchors"]["first_broken"]
 
 
+def test_an_anchor_that_attests_no_jsonl_row_is_refused_not_passed(
+    ledger: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A ``jsonl`` anchor holding only an empty ``events`` chain used to be skipped chain by
+    chain and pass ``verify --anchor`` whatever the grade ledger held."""
+    _, d = _anchor(ledger, tmp_path / "anchors", capsys)
+    forged = json.loads(Path(d["anchor"]).read_text())
+    forged["chains"] = {"events": {"rows": 0, "head_row_hash": ""}}
+    path = tmp_path / "forged" / "anchor-forged.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(forged))
+    code = main(["ledger", "verify", "--path", str(ledger), "--anchor", str(path), "--json"])
+    assert code == 2 and "records the chains ['grades']" in capsys.readouterr().err
+    forged["chains"] = {"grades": {"rows": 0, "head_row_hash": ""}}
+    path.write_text(json.dumps(forged))
+    code = main(["ledger", "verify", "--path", str(ledger), "--anchor", str(path)])
+    assert code == 2 and "attests nothing" in capsys.readouterr().err
+
+
+def test_an_empty_ledger_is_not_anchored(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An empty JSONL ledger, absent or blank, writes no anchor (exit 2): an anchor of no
+    row would attest nothing, and the reader refuses one."""
+    path = tmp_path / "data" / "ledger.jsonl"
+    path.parent.mkdir()
+    for content in (None, "\n"):
+        if content is not None:
+            path.write_text(content)
+        code = main(["ledger", "anchor", "--path", str(path), "--out", str(tmp_path / "a")])
+        assert code == 2 and "nothing to anchor" in capsys.readouterr().err
+        assert not (tmp_path / "a").exists()
+
+
 def test_verify_without_anchor_is_unchanged(
     ledger: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -382,6 +418,30 @@ def test_round_trip_on_the_store_anchors_both_chains(
         ]
     )
     assert code == 2 and "inside the ledger's data directory" in capsys.readouterr().err
+
+
+def test_a_store_with_events_and_no_grade_is_anchored_and_holds(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A store with an audit trail but no grade yet writes an anchor of its events, with
+    ``grades`` at 0 rows, and the reader accepts it."""
+    url = f"sqlite:///{tmp_path / 'home' / 'crb.db'}"
+    assert main(["migrate", "--database-url", url]) == 0
+    sink = DbEventSink(make_session_factory(make_engine(url)))
+    sink.emit(StepEvent(trace_id="t", stage="system", action="user.login", seq=1))
+    out = tmp_path / "anchors"
+    code, text = _run(
+        ["ledger", "anchor", "--store", "--database-url", url, "--out", str(out), "--json"],
+        capsys,
+    )
+    d = json.loads(text)
+    assert code == 0 and d["written"] is True and d["chains"]["grades"]["rows"] == 0
+    assert d["chains"]["events"]["rows"] >= 1
+    code, text = _run(
+        ["ledger", "verify", "--store", "--database-url", url, "--anchor", str(out), "--json"],
+        capsys,
+    )
+    assert code == 0 and json.loads(text)["anchors"]["ok"] is True
 
 
 def test_a_store_whose_events_were_cut_fails_its_anchor(

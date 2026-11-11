@@ -26,6 +26,9 @@ Invariants
 ----------
 * **Read-only.** Nothing here writes a ledger, a row or a hash input; an anchor is derived
   from heads the caller has already read.
+* **An anchor attests something.** Its chains are exactly its source's (``grades`` for
+  JSONL; ``grades`` and ``events`` for a store) and at least one has a row; the writer and
+  the reader apply the same rule (:func:`check_chains`).
 * **No overwrite.** :func:`write_anchor` creates a file under a name derived from the chain
   state, through a hard link that fails if the name exists. The same state again is a no-op;
   a different state under an existing name is refused.
@@ -39,6 +42,7 @@ Invariants
 Navigation
 ----------
 What it is:   The anchor format and its checks — ``build_anchor``, ``anchor_name``,
+              ``check_chains`` (the chains a source's anchor must record, one with a row),
               ``check_anchor`` (does today's ledger still extend this anchor?),
               ``check_anchor_links`` (is the directory's anchor chain whole?),
               ``previous_link`` (the one validated read of a predecessor link), the loaders
@@ -117,11 +121,7 @@ def build_anchor(
     """The anchor dict. ``previous`` is ``(file name, sha256 of its bytes)`` of the anchor
     this one follows in its directory. ``created_at`` is passed in: nothing here reads a
     clock."""
-    if not chains:
-        raise AnchorError("an anchor needs at least one chain")
-    for name, head in chains.items():
-        if head.rows < 0 or (head.rows > 0) != bool(head.head_row_hash):
-            raise AnchorError(f"chain {name!r}: {head.rows} rows with head {head.head_row_hash!r}")
+    check_chains(source, chains, "anchor")
     return {
         "schema": ANCHOR_SCHEMA,
         "created_at": created_at,
@@ -152,6 +152,32 @@ def anchor_name(chains: Mapping[str, Any]) -> str:
     return ANCHOR_PREFIX + "-".join(parts) + ANCHOR_SUFFIX
 
 
+def expected_chains(source: str) -> frozenset[str]:
+    """The chains an anchor of ``source`` records: a JSONL ledger has only ``grades``; a
+    store (``sqlite``, ``postgresql``) has ``grades`` and ``events``."""
+    return frozenset({"grades"}) if source == "jsonl" else frozenset({"grades", "events"})
+
+
+def check_chains(source: str, chains: Mapping[str, ChainHead], where: str) -> None:
+    """:class:`AnchorError` naming ``where`` unless ``chains`` are exactly the chains of
+    ``source``, each head is consistent (rows > 0 exactly when it has a head) and at least
+    one chain has a row: an anchor that attests nothing would check as holding. The one
+    rule, shared by :func:`build_anchor` and :func:`parse_anchor`, so the writer never
+    produces a file the reader refuses."""
+    want = expected_chains(source)
+    if set(chains) != want:
+        raise AnchorError(
+            f"{where}: a {source} anchor records the chains {sorted(want)}, not {sorted(chains)}"
+        )
+    for name, head in chains.items():
+        if head.rows < 0 or (head.rows > 0) != bool(head.head_row_hash):
+            raise AnchorError(
+                f"{where}: chain {name!r}: {head.rows} rows with head {head.head_row_hash!r}"
+            )
+    if not any(head.rows > 0 for head in chains.values()):
+        raise AnchorError(f"{where}: every chain has 0 rows; the anchor attests nothing")
+
+
 def _head(value: Any) -> ChainHead:
     if isinstance(value, ChainHead):
         return value
@@ -179,6 +205,7 @@ def parse_anchor(data: bytes, where: str) -> dict[str, Any]:
             raise AnchorError(f"{where}: chain {name!r} is not {{rows, head_row_hash}}")
     if not isinstance(d.get("source"), str):
         raise AnchorError(f"{where}: no source")
+    check_chains(d["source"], {name: _head(head) for name, head in chains.items()}, where)
     return d
 
 
@@ -343,6 +370,8 @@ __all__ = [
     "build_anchor",
     "check_anchor",
     "check_anchor_links",
+    "check_chains",
+    "expected_chains",
     "is_inside",
     "load_anchor",
     "load_anchor_dir",
