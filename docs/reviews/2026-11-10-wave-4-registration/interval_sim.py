@@ -1,6 +1,8 @@
 """Coverage of the Wave 4 registration's batch-level t interval (part 6, item 2).
 
-Run: ``uv run --no-project --with numpy python interval_sim.py``. Prints, for each setting,
+Run from the repository root:
+``uv run --no-project --with numpy python docs/reviews/2026-11-10-wave-4-registration/interval_sim.py``.
+Prints, for each setting,
 the true mean per-commit difference, the share of simulated waves whose 95% interval
 missed it on either side, the share whose UPPER end fell below it, and that last share
 again counting only waves in which at least ``MIN_NONZERO`` batches had a non-zero sum

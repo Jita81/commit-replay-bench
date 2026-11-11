@@ -299,7 +299,13 @@ Every item below is a rule for rows that do not exist yet **[aspiration — this
    every one of the 2^(number of batches) sign patterns is counted. The p-value is the share of
    those patterns, the observed one included, whose summed difference is at least as far from
    zero as the observed sum. The commits of a batch share
-   the same four runs, so they are not treated as independent; batches are. Smallest effect of
+   the same four runs, so they are not treated as independent; batches are. The hypothesis
+   this test rejects is that the two arms are interchangeable within every batch, so that
+   swapping their labels in a batch, which changes the sign of its summed difference, leaves
+   its distribution as it was. The test is exact for that hypothesis and for no weaker one:
+   it is not an exact test of a zero mean, because batch differences that are skewed around
+   a zero mean can reject too often. A rejection therefore says that the arms differ; the
+   direction and size are read from the estimate of item 2, and the report words it so. Smallest effect of
    interest: 15 points. This is the only p-value in the
    wave. It is read once, when every batch has been filed (and re-filed where the row rule says
    so). Until then no comparison between the arms is computed, on click or anywhere; rows are
@@ -347,11 +353,13 @@ Every item below is a rule for rows that do not exist yet **[aspiration — this
    that is not zero. *Inconclusive*: anything else **[aspiration — this registration's design; nothing is run yet]**.
    The six-batch guard is there because the interval is approximate (item 2): it refuses the
    call when too few batches moved for the spread between batches to mean anything. With the
-   guard, the share of simulated waves in which the upper end fell below the true mean was at
-   most 5.1% over the 108 settings, and 0.0% to 1.9% under the distributions built to break
-   the interval **[hypothesis — `docs/reviews/2026-11-10-wave-4-registration/interval_sim.py` and its output `interval_sim.out.txt` beside it, seed 20261111, 4,000 waves a setting; a simulation, not a measurement of the product]**.
-   So *No 15-point effect* is an approximate call with roughly that error rate if the true
-   effect is 15 points, not a guaranteed one, and the report says so beside it **[aspiration — this registration's design; nothing is run yet]**. Under option B the claim is about the average over the listed commits of both
+   guard, the largest share of simulated waves in which the interval's upper end fell below the
+   true mean was 5.1% over the 108 settings, at a true mean of about 10 points, and 0.0% to
+   1.9% under the distributions built to break the interval **[hypothesis — `docs/reviews/2026-11-10-wave-4-registration/interval_sim.py` and its output `interval_sim.out.txt` beside it, seed 20261111, 4,000 waves a setting; a simulation, not a measurement of the product]**.
+   Those figures are for the guarded interval alone in the simulated models. They are not an
+   error rate for the whole *No 15-point effect* rule, they do not establish one for other
+   distributions of batch sums, and the guard does not give guaranteed coverage. No error
+   rate is quoted for the call, and the report states this beside it **[aspiration — this registration's design; nothing is run yet]**. Under option B the claim is about the average over the listed commits of both
    repositories together; nothing is claimed for either repository alone.
 5. **Every row is a miss unless clean.** Disqualified rows, missing rows, outages, turn-limit
    endings and an author that produced no usable test all count as misses, under both arms. The
