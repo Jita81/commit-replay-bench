@@ -123,7 +123,20 @@ ATTESTS_NOTHING = (
     ),
     ("jsonl", {"grades": {"rows": 3, "head_row_hash": ""}}),  # rows without a head
     ("jsonl", {"grades": {"rows": 0, "head_row_hash": H[0]}}),  # a head without rows
+    (  # not a source an anchor can be of
+        "bogus",
+        {
+            "grades": {"rows": 3, "head_row_hash": H[2]},
+            "events": {"rows": 1, "head_row_hash": H[0]},
+        },
+    ),
 )
+
+
+def test_a_boolean_row_count_is_refused() -> None:
+    """JSON ``true`` is an ``int`` to Python; it is not a row count."""
+    with pytest.raises(AnchorError, match="rows, head_row_hash"):
+        parse_anchor(_file("jsonl", {"grades": {"rows": True, "head_row_hash": H[0]}}), "f")
 
 
 @pytest.mark.parametrize(("source", "chains"), ATTESTS_NOTHING)

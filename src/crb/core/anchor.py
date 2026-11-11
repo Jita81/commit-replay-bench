@@ -152,6 +152,10 @@ def anchor_name(chains: Mapping[str, Any]) -> str:
     return ANCHOR_PREFIX + "-".join(parts) + ANCHOR_SUFFIX
 
 
+SOURCES = ("jsonl", "sqlite", "postgresql")
+"""The ledgers an anchor can be of: the JSONL file, or a store on one of its two backends."""
+
+
 def expected_chains(source: str) -> frozenset[str]:
     """The chains an anchor of ``source`` records: a JSONL ledger has only ``grades``; a
     store (``sqlite``, ``postgresql``) has ``grades`` and ``events``."""
@@ -159,11 +163,14 @@ def expected_chains(source: str) -> frozenset[str]:
 
 
 def check_chains(source: str, chains: Mapping[str, ChainHead], where: str) -> None:
-    """:class:`AnchorError` naming ``where`` unless ``chains`` are exactly the chains of
-    ``source``, each head is consistent (rows > 0 exactly when it has a head) and at least
-    one chain has a row: an anchor that attests nothing would check as holding. The one
+    """:class:`AnchorError` naming ``where`` unless ``source`` is one of :data:`SOURCES`,
+    ``chains`` are exactly its chains, each head is consistent (rows > 0 exactly when it has
+    a head) and at least one chain has a row: an anchor that attests nothing would check as
+    holding. The one
     rule, shared by :func:`build_anchor` and :func:`parse_anchor`, so the writer never
     produces a file the reader refuses."""
+    if source not in SOURCES:
+        raise AnchorError(f"{where}: source {source!r} is not one of {list(SOURCES)}")
     want = expected_chains(source)
     if set(chains) != want:
         raise AnchorError(
@@ -199,6 +206,7 @@ def parse_anchor(data: bytes, where: str) -> dict[str, Any]:
         if (
             not isinstance(head, dict)
             or not isinstance(head.get("rows"), int)
+            or isinstance(head["rows"], bool)  # JSON true is not a row count
             or head["rows"] < 0
             or not isinstance(head.get("head_row_hash"), str)
         ):
@@ -361,6 +369,7 @@ def is_inside(path: Path, parent: Path) -> bool:
 __all__ = [
     "ANCHOR_NOTE",
     "ANCHOR_SCHEMA",
+    "SOURCES",
     "AnchorError",
     "ChainHead",
     "HashAt",
