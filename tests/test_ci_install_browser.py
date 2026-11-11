@@ -467,7 +467,7 @@ def test_a_system_library_install_that_fails_every_time_is_not_called_a_network_
 
 
 def _timed_install(
-    download_s: float, budget: float, probe_s: float = 0.0
+    download_s: float, budget: float, probe_s: float = 0.0, starts: bool = True
 ) -> tuple[int, str, list[float]]:
     """Run the default install with a clock the download advances by ``download_s`` and each
     probe by ``probe_s``; returns the exit code, the output and the time each probe was given."""
@@ -482,7 +482,7 @@ def _timed_install(
     def probe(left: float) -> bool:
         given.append(left)
         now[0] += probe_s
-        return True
+        return starts
 
     out = io.StringIO()
     rc = m.main(
@@ -525,6 +525,17 @@ def test_a_probe_that_passes_after_the_budget_ended_is_not_a_success() -> None:
     # A probe that ends exactly on the deadline is still inside the budget.
     rc, _out, _given = _timed_install(download_s=95.0, budget=100.0, probe_s=5.0)
     assert rc == 0
+
+
+def test_a_probe_that_fails_as_the_budget_ends_is_out_of_time_not_a_broken_browser() -> None:
+    # One second left gives the probe a one-second timeout; its expiry says "slow", no more.
+    rc, out, given = _timed_install(download_s=99.0, budget=100.0, probe_s=1.0, starts=False)
+    assert rc == 1 and given == [1.0]
+    assert "completed, but only after the install budget ran out, at 100 s" in out
+    assert "does not start" not in out and "a rerun meets the same error" not in out
+    # The same failure with time to spare is the browser's own, and is reported as that.
+    rc, out, _given = _timed_install(download_s=10.0, budget=100.0, probe_s=1.0, starts=False)
+    assert rc == 1 and "does not start" in out
 
 
 def test_a_command_of_its_own_is_run_as_written_and_never_probed() -> None:

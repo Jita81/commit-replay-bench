@@ -337,7 +337,11 @@ def main(
                 # Nothing was stopped: the download ran to its end and left no time to probe.
                 attempt = Attempt("late", attempt.returncode, attempt.seconds)
             elif not probe(min(HELPER_TIMEOUT_S, left)):
-                if browser_only:
+                if clock() >= deadline:
+                    # The probe ran out of the budget: that shows a slow start, not a broken
+                    # browser, so neither the libraries nor "broken" is the answer.
+                    attempt = Attempt("late", attempt.returncode, clock() - began)
+                elif browser_only:
                     # Downloaded, but it does not start: the next attempt installs its libraries.
                     attempt = Attempt("unusable", attempt.returncode, attempt.seconds)
                     browser_only = False
