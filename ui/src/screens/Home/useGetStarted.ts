@@ -118,8 +118,14 @@ export function factoryStatusFor(input: { measured: boolean; deliverCells: boole
 /** The repository a repository-scoped page names in its path, if the page is one. */
 export function routeRepo(pathname: string): string | null {
   for (const pattern of ['/connect/:repo/*', '/repos/:repo/*', '/library/:repo/*', '/tasks/:repo/*']) {
-    const hit = matchPath(pattern, pathname)
-    if (hit?.params.repo) return hit.params.repo
+    const raw = matchPath(pattern, pathname)?.params.repo
+    if (!raw) continue
+    // matchPath does not decode a pathname the way the router does for the page (/library/%62eta)
+    try {
+      return decodeURIComponent(raw)
+    } catch {
+      return raw
+    }
   }
   return null
 }

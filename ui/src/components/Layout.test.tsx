@@ -486,6 +486,7 @@ describe('Layout: the set-up progress in the header', () => {
     ['?repo=', '/results?repo=beta', '/results'],
     ['path (a repository-scoped page)', '/connect/beta/measure', '/connect/:name/measure'],
     ['path (the task page)', '/tasks/beta/abc123', '/tasks/:repo/:taskId'],
+    ['encoded path, over a conflicting ?repo=,', '/library/%62eta?repo=alpha', '/library/:repo'],
   ])("counts the page's %s repository and links Home to it, so the two show the same count", async (_how, route, path) => {
     const repo = (name: string, updated: string) => ({ name, language: 'python', runner: 'pytest', url: `https://github.com/acme/${name}`, clone_path: '', probe: { status: 'ok', run_id: 'r1', checked: 'x', detail: 'pytest 8' }, task_counts: { total: 0, standard: 0, hard: 0, gold_clean: 0, gold_failed: 0, unchecked: 0 }, last_run: null, created: updated, updated, config: {} })
     const { calls } = mockApi({
