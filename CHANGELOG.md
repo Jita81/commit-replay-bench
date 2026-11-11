@@ -12,6 +12,13 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Set-up progress in the header; one action on each empty list**
+  ([#122](https://github.com/Jita81/commit-replay-bench/pull/122)). Off /home, an operator now
+  sees "n of 8" with a Continue link to the next Get-started task. It comes from a `useGetStarted`
+  hook lifted out of HomePage, so the two cannot drift. A failed read shows "Get started:
+  unavailable", and the indicator hides at 8 of 8. The empty Factory items list now links to
+  intake, and the empty Decisions queue links to the capability map. UI only; nothing is deployed.
+
 - **The Wave 4 registration**
   ([#117](https://github.com/Jita81/commit-replay-bench/pull/117)). A new record,
   `docs/reviews/2026-11-10-wave-4-registration.md`, registers Wave 4 before any run: the blind
