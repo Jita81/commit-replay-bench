@@ -18,6 +18,28 @@ correlation ``rho``). Each batch has four runs (two per arm); each run shifts ev
 commit's chance by one normal draw with standard deviation ``sd``; ``S1`` adds ``eff``;
 chances are clipped to [0, 1]. A commit's difference is its S1 rate minus its A0 rate
 over the two attempts per arm.
+
+Navigation
+----------
+What it is:   The Wave 4 registration's simulation of its batch-level t interval — a model
+              of the wave's layout, with no builder, no model and no product code.
+What it does: Simulates waves under a grid of settings and under distributions chosen to
+              break the interval, and prints how often the interval missed the true mean,
+              how often its upper end fell below it, the same under the six-batch guard,
+              and the half-width of Hoeffding's bound. It spends nothing and writes nothing.
+How:          ``realistic`` (or a breaking distribution) draws the batch sums with a fixed
+              seed → ``interval`` (the t interval on 17 degrees of freedom) → ``errors``
+              (shares over the simulated waves) → one printed line per setting.
+Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
+ADRs:         none
+Works with:   docs/reviews/2026-11-10-wave-4-registration.md (the registration that cites
+              its figures, part 6 items 2 and 4),
+              docs/reviews/2026-11-10-wave-4-registration/interval_sim.out.txt (its
+              recorded output)
+Tested by:    untested — a one-off simulation; its output is committed beside it and is
+              reproduced exactly by the command above
+Touch when:   never — it is the record of a registration; a new simulation is a new file
+              beside a new review.
 """
 
 from math import log, sqrt

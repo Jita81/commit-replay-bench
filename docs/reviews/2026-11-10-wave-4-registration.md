@@ -151,7 +151,7 @@ cannot drift).
 | `S1` | the same, plus `arm: "S1"` and `test_author` set to the Cerebras `gpt-oss-120b` rung |
 | `S3` | `kind: "replay"`, with the same learning, transcript and budget fields |
 
-Transcripts need both transcript fields: either one alone keeps nothing, silently. `learning:
+Transcripts need both transcript fields: either one alone keeps nothing, silently **[hypothesis — read from the code, not shown by a run: `src/crb/server/worker.py` gives the builder a transcript directory only when `retain.transcripts` is set, and `src/crb/builders/claude_code.py` keeps the stream's events only when `keep_transcript` is set]**. `learning:
 "off"` is sent on every run even though the repository switch is also off. The turn limit covers
 the builder; the test author's own budget is separate and is left at the product default.
 
@@ -352,9 +352,12 @@ Every item below is a rule for rows that do not exist yet **[aspiration — this
    degrees of freedom **[aspiration — this registration's design; nothing is run yet]**.
 4. **What each outcome may be called.** *Cleared*: p below 0.05 with `S1` ahead, and both sensitivity results of item 3 also below 0.05 with `S1` ahead. *No 15-point
    effect*: p not below 0.05, both sensitivity results of item 3 also not below 0.05, the
-   interval's upper end below 15 points, and at least six batches with a summed difference
-   that is not zero, and a usable test from the author for at least nine in ten of the wave's
+   upper end below 15 points of the primary interval and of both recomputed intervals of
+   item 3, and at least six batches with a summed difference that is not zero, and a usable test from the author for at least nine in ten of the wave's
    `S1` rows. *Inconclusive*: anything else **[aspiration — this registration's design; nothing is run yet]**.
+   The recomputed intervals are held to the same 15 points because a run of author-hit
+   batches can leave the primary interval just under it while the interval that treats them
+   as one block reaches past it; that wave is inconclusive **[aspiration — this registration's design; nothing is run yet]**.
    The nine-in-ten condition covers author failures that item 3 does not see: a failure that
    takes two commits out of every batch makes no batch author-hit, yet it can hide an effect
    the author would show when it works. Such a wave is inconclusive, not a null **[aspiration — this registration's design; nothing is run yet]**.
