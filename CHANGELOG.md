@@ -17,8 +17,8 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `scripts/check_ui_types_drift.py`, builds the OpenAPI document offline from the app (no
   server, no network, no secret) and compares each interface in the hand-written
   `ui/src/api/types.ts` that maps to a schema component: a field the component does not have,
-  or a field it requires that the interface leaves out, is drift. CI's `types` job and the
-  fresh-clone gates run it with `--check`, which fails on drift not in the reviewed
+  or a field it requires that the interface leaves out, is drift. CI's fresh-clone gates run it
+  with `--check` (and the `test` job through its unit test), which fails on drift not in the reviewed
   `scripts/ui_types_drift_allowlist.txt` and on a listed entry that no longer drifts, so the
   list only shrinks. On `main` today every finding is a required field the server sends and
   the UI does not declare; none is a field the UI reads that the server does not send

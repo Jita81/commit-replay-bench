@@ -11,15 +11,16 @@ What it does: Pins that the parser reads each exported interface's own depth-1 f
               a missing required field are each a finding and an inherited field is not
               missing; that ``--check`` fails on new drift, on a stale allowlist entry and on
               an entry with no reason, and passes when the list matches; and that this tree's
-              types.ts and schema pass ``--check`` against the committed allowlist, and CI runs
-              it.
+              types.ts and schema pass ``--check`` against the committed allowlist, and CI's
+              fresh-clone gates run it.
 How:          Calls the parser and ``compare`` on small inline sources and schemas; drives
               ``main`` with injected text; one test builds the real schema from the app.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   scripts/check_ui_types_drift.py (the code under test),
-              scripts/ui_types_drift_allowlist.txt (the reviewed drift), ui/src/api/types.ts,
-              .github/workflows/ci.yml (the ``types`` job step)
+              scripts/ui_types_drift_allowlist.txt (the reviewed drift),
+              ui/src/api/types.ts (the real types the tree-level test parses),
+              .github/workflows/ci.yml (the ``fresh-clone-gates`` line that runs ``--check``)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository; the check learns a new mapping rule or finding kind
               (add its case here in the same change).
@@ -170,12 +171,10 @@ def test_this_tree_passes_against_the_committed_allowlist(
     assert m.read_allowlist(m.ALLOWLIST.read_text("utf-8"))  # the list is not empty by accident
 
 
-def test_ci_runs_the_check_in_the_types_job_and_the_fresh_clone_gates() -> None:
+def test_ci_runs_the_check_in_the_fresh_clone_gates() -> None:
     import yaml
 
     ci = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text("utf-8"))
     cmd = ".venv/bin/python scripts/check_ui_types_drift.py --check"
-    runs = [str(s.get("run", "")) for s in ci["jobs"]["types"]["steps"]]
-    assert any(cmd in r for r in runs)
     fresh = [str(s.get("run", "")) for s in ci["jobs"]["fresh-clone-gates"]["steps"]]
     assert any(cmd in r for r in fresh)

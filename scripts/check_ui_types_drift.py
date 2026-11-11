@@ -29,7 +29,8 @@ longer drifts (so the list only shrinks, like ``scripts/code_map_onboarding_base
 Navigation
 ----------
 What it is:   The drift check between the UI's hand-written wire types and the API's OpenAPI
-              schema (CI's ``types`` job and the ``fresh-clone`` gates run ``--check``).
+              schema (CI's ``fresh-clone`` gates run ``--check``; so does the ``test`` job,
+              through its unit test).
 What it does: Parses each exported interface (and object-literal type alias) of
               ui/src/api/types.ts into its field names, maps it to an OpenAPI schema component,
               reports fields the component lacks and required fields types.ts lacks, and in
@@ -42,7 +43,7 @@ Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   ui/src/api/types.ts (the types it reads), src/crb/server/app.py (``create_app``,
               whose ``.openapi()`` it compares against), scripts/ui_types_drift_allowlist.txt
-              (the reviewed drift), .github/workflows/ci.yml (the ``types`` job step)
+              (the reviewed drift), .github/workflows/ci.yml (the ``fresh-clone-gates`` line)
 Tested by:    tests/test_check_ui_types_drift.py
 Touch when:   never for a new repository (it compares this repository's own UI and API); a
               response model is renamed so an interface stops mapping (add it to ``ALIASES``);

@@ -3,8 +3,7 @@
 #
 # Jobs:
 #   lint      ruff check + ruff format --check
-#   types     mypy --strict over src/crb; ui/src/api/types.ts against the app's OpenAPI schema
-#             (scripts/check_ui_types_drift.py: no drift beyond its reviewed allowlist)
+#   types     mypy --strict over src/crb
 #   code-map  every source file carries a valid Navigation header; docs/CODE-MAP.md current
 #   dod       every page/journey/stream + the product carry a definition of done; docs/dod/GAP-ANALYSIS.md current
 #   claims    every quantified sentence on an allowlisted public page carries a permitted tag,
@@ -29,7 +28,11 @@
 #             an aggregator over `fresh-clone-gates` (every gate but the suite) and the N
 #             `fresh-clone-shard` jobs (the suite, split as `test-shard` is), which proves the
 #             partition like `test`. On main's required-checks list since 2026-10-07
-#             (DL-101)
+#             (DL-101). Its gates include scripts/check_ui_types_drift.py --check:
+#             ui/src/api/types.ts against the OpenAPI schema the app builds offline, failing
+#             on drift beyond the reviewed scripts/ui_types_drift_allowlist.txt (no job of its
+#             own; the `test` job runs the same check through
+#             tests/test_check_ui_types_drift.py)
 #   ui-unit   the UI's own gates: `npm ci`, `npm run typecheck` (tsc -b) and `npx vitest run`.
 #             The hint ratchet, the native-`title=` allowlist and every screen suite run
 #             there, so a hint-registry, a copy or a type regression fails a build instead of
@@ -169,12 +172,6 @@ jobs:
           uv sync -q --locked --python 3.12 --extra server --extra postgres --extra mcp --extra dev
       - name: mypy
         run: .venv/bin/mypy
-      # ui/src/api/types.ts is hand-written; this compares its field names with the OpenAPI
-      # schema the app builds offline (no server, no network) and fails on drift that is not
-      # in the reviewed scripts/ui_types_drift_allowlist.txt, or on an entry that no longer
-      # drifts. Here because this job already installs the server extras the app needs.
-      - name: UI types match the API's OpenAPI schema (no new drift)
-        run: .venv/bin/python scripts/check_ui_types_drift.py --check
 
   code-map:
     name: code-map (every file has a valid header; docs/CODE-MAP.md is current)
