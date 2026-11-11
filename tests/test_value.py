@@ -426,6 +426,44 @@ def test_the_scorecard_reads_one_posture_class_and_refuses_to_reduce_two() -> No
     assert (unrecorded["posture"], unrecorded["posture_class"]) == ("all", "")
 
 
+def test_an_unjoined_review_reads_the_posture_of_its_graded_row_or_none() -> None:
+    """ADR-0019 §8 (P-135): an exported review names no row hash, so it is placed by the rows
+    graded on its task. One of another class lends a host reading nothing, down to the
+    every-repository fallback; one whose task's rows span two classes, or that no row holds
+    in an input of two classes, is in no precision and is counted ``posture_unplaced``.
+    Over an input of one class, every review reads that class, as before."""
+    host, sealed = "local/inplace/host-env", "docker/copy/sealed"
+    beta = range(10, 10 + MIN_REVIEWS_FOR_REVIEW_BASIS)
+    rows = [
+        *(dataclasses.replace(vr(i, kind=FAILURE_CLEAN), posture_class=host) for i in (1, 2)),
+        *(
+            dataclasses.replace(vr(i, kind=FAILURE_CLEAN, repo="beta"), posture_class=sealed)
+            for i in beta
+        ),
+    ]
+    sealed_reviews = [verdict(i, mergeable=True, repo="beta") for i in beta]
+    one = value_report(rows, sealed_reviews, repo="alpha", posture=host).to_dict()
+    assert one["north_star"]["precision_basis"] == BASIS_PROXY
+    assert one["precision"]["review"]["posture_unplaced"] == 0
+    assert value_report(rows, sealed_reviews, repo="beta").to_dict()["precision"]["basis"] == (
+        BASIS_REVIEW
+    )
+    # alpha's own reviews: t1 is host; t2 was graded on both classes; t99 has no row at all
+    both = [*rows, dataclasses.replace(vr(2, kind=FAILURE_CLEAN), posture_class=sealed)]
+    mine = [verdict(i, mergeable=True) for i in (1, 2, 99)]
+    rep = value_report(both, mine, repo="alpha", posture=host).to_dict()
+    assert rep["precision"]["review"]["n"] == 1
+    assert rep["precision"]["review"]["posture_unplaced"] == 2
+    # the pooled call counts every repository's; a repository's counts its own
+    pooled = value_report(both, [*mine, verdict(98, mergeable=True, repo="beta")], posture=host)
+    assert pooled.to_dict()["precision"]["review"]["posture_unplaced"] == 3
+    # one class in the whole input: an unmatched review reads it, as before
+    single = [r for r in rows if r.repo == "alpha"]
+    kept = value_report(single, [verdict(99, mergeable=True)], repo="alpha").to_dict()
+    assert kept["precision"]["review"]["n"] == 1
+    assert kept["precision"]["review"]["posture_unplaced"] == 0
+
+
 # --- process loss -----------------------------------------------------------------------
 
 

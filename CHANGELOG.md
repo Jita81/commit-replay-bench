@@ -17,9 +17,10 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   and counted working changes over every posture class, so a sealed row and a host row shared
   one rate per pound. It now reads the deployment's class by default and another with
   `posture=<class>`; `posture=all` over two classes is refused 422 `posture_pooling_refused`.
-  A pre-2.3 Docker row is counted `unqualified_posture`. `scripts/value_baseline.py` takes
-  `--posture`. The default read changes, so a figure quoted from `/value` before may differ.
-  This ports the October fix held unopened by the feature freeze, which has ended.
+  A pre-2.3 Docker row is counted `unqualified_posture`, an exported review no row places
+  `precision.review.posture_unplaced`, another class's reading `readings_other_posture`.
+  `scripts/value_baseline.py` takes `--posture`. A figure quoted from `/value` before may
+  differ. This ports the October fix held by the feature freeze, which has ended.
 
 - **A Baseline summary line and a login notice in the run dialog**
   ([#121](https://github.com/Jita81/commit-replay-bench/pull/121)).
