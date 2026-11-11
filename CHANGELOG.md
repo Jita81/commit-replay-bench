@@ -20,6 +20,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   backslash, shell expansion (`$`, backticks, globs, braces), `.git`, a link out of the tree,
   an absolute path with no known root and every `-C` that lands outside stay refused. No grading, ledger or apparatus version changes.
 
+- **A Go builder's toolchain scratch stays out of its checkout** ([#113](https://github.com/Jita81/commit-replay-bench/pull/113)). The builder
+  container's `/tmp` tmpfs inherited Docker's `noexec`, so `go test` could not run the binaries
+  it builds there. Twelve Wave 3 cobra builds were disqualified by belt 1b on build-cache and
+  temp paths under `/work` (`.gocache`, `.gotmp`, `.tmp`); that the builders moved their scratch
+  there because of `noexec` is inferred from those paths, as no transcript was kept.
+  `builder_run_args` now states `exec` on that tmpfs (ADR-0005's 2026-09-21 follow-up); `/work`
+  was exec already, so no capability is added. Belt 1b keeps no ignore list: a forged file among
+  the touched files still disqualifies. No grading rule or apparatus version changes.
+
 - **Apparatus 2.5 separates rows graded after the Wave 3 harness fixes**
   ([#116](https://github.com/Jita81/commit-replay-bench/pull/116); DL-417).
   ADR-0049 moves `APPARATUS_VERSION` to 2.5, by Paul's decision of 2026-11-10: the builder's exec

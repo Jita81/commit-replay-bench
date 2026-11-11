@@ -513,6 +513,26 @@ def test_belt_1b_reads_a_touched_go_link_only_when_it_is_a_file(tmp_path: Path) 
         assert flagged == ["calc/events.txt", _GO_EMBED_NOTES]
 
 
+def test_belt_1b_ignores_no_toolchain_scratch_directory_in_the_tree(tmp_path: Path) -> None:
+    """Go toolchain scratch names (``.gocache``, ``.gotmp``, ``.tmp``) inside the tree get no
+    exemption from belt 1b: a ``//go:embed`` or cgo ``#include`` can name a file under any of
+    them, so go-test event text there is still read as a forgery. The builder's scratch is
+    kept out of the tree instead (``builder_run_args`` mounts its ``/tmp`` exec)."""
+    root = tmp_path / "repo"
+    init_repo(root)
+    write_files(root, {"go.mod": f"module {gorepo.MODULE}\n\ngo 1.22\n"})
+    commit_all(root, "initial")
+    write_files(root, {gorepo.SRC_SUB: "package calc\n"})
+    sha = commit_all(root, "feat")
+    scratch = [".gocache/0a/0a1b-d", ".gotmp/go-build1/b001/out", ".tmp/test.log"]
+    with Workspace.create(GitRepo(root), sha, tmp_path / "ws") as ws:
+        for rel in scratch:
+            (ws.root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (ws.root / rel).write_text(_GO_FORGED_NOTES, encoding="utf-8")
+        flagged = infra_tampered(ws, ws.touched_files(), exclude=(), config=gorepo.config())
+        assert flagged == sorted(scratch)
+
+
 # --- Python ----------------------------------------------------------------
 
 PY_SUB = "tests/test_sub.py::test_sub"

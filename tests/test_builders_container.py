@@ -979,7 +979,7 @@ def test_builder_run_args_hardening_and_secret_handling(tmp_path: Path) -> None:
     ):
         assert flag in args, flag
     assert args[args.index("--security-opt") + 1] == "no-new-privileges"
-    assert args[args.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,size=1g"
+    assert args[args.index("--tmpfs") + 1] == "/tmp:rw,exec,nosuid,nodev,size=1g"
     assert f"type=bind,src={tmp_path / 'sealed'},dst={WORKDIR}" in args  # rw, no `readonly`
     assert "type=bind,src=/srv/nm,dst=/srv/nm,readonly" in args
     assert args[args.index("--workdir") + 1] == WORKDIR
@@ -990,6 +990,23 @@ def test_builder_run_args_hardening_and_secret_handling(tmp_path: Path) -> None:
     assert "HOME=/tmp" in envs and "CI=1" in envs and "HTTPS_PROXY=http://proxy:3128" in envs
     assert "verysecret" not in joined and "oat01" not in joined
     assert is_secret_env_name("AZURE_OPENAI_API_KEY") and not is_secret_env_name("HOME")
+
+
+def test_builder_tmp_is_exec_so_go_scratch_stays_out_of_the_checkout(tmp_path: Path) -> None:
+    """``go test`` execs the test binaries it builds under ``$TMPDIR``. Docker mounts a tmpfs
+    ``noexec`` unless ``exec`` is named, and a Go builder whose ``/tmp`` could not run them
+    moved ``GOCACHE``/``GOTMPDIR``/``TMPDIR`` into ``/work``: belt 1b then read the cached
+    test output there as forged go-test events (Wave 3, cobra). The builder's ``/tmp`` is
+    named ``exec`` (``/work`` is a bind mount, exec already), and its ``TMPDIR`` and ``HOME``
+    (``GOCACHE``'s default root) both point at it, outside the checkout."""
+    s = BuilderContainerSettings(image="crb-builder-go:local", user="10001:10001")
+    inside = container_env({"TMPDIR": "/var/host"}, proxy_url="")
+    args = builder_run_args(s, checkout=tmp_path, env=inside, timeout_s=60, network="none")
+    options = args[args.index("--tmpfs") + 1].split(":", 1)[1].split(",")
+    assert "exec" in options and "noexec" not in options
+    assert {"nosuid", "nodev"} <= set(options)
+    for var in ("TMPDIR", "HOME"):
+        assert inside[var] == "/tmp" and not inside[var].startswith(WORKDIR)
 
 
 def test_container_env_and_client_env(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -27,7 +27,7 @@
 #       --memory=4g --cpus=2 --pids-limit=1024
 #       --user=<worker uid>:<gid>              (root refused; the checkout stays writable without chmod)
 #       --cap-drop=ALL --security-opt no-new-privileges --read-only
-#       --tmpfs /tmp:rw,nosuid,nodev,size=1g   (HOME=/tmp: the CLI's config and cache live here and die here)
+#       --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g (HOME=/tmp: the CLI's config and cache live here and die here)
 #       --mount type=bind,src=<sealed checkout>,dst=/work      (rw — the only writable path besides /tmp)
 #       [--mount type=bind,src=<host>,dst=<inside>,readonly …] (toolchain caches; harness symlink targets)
 #       --env ANTHROPIC_API_KEY  --env CLAUDE_CODE_OAUTH_TOKEN (NAME only: the value comes from the
