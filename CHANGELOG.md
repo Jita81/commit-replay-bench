@@ -24,6 +24,32 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   apparatus 2.5]**. `.github/workflows/scorecard.yml` runs OpenSSF Scorecard weekly and on
   push to `main`, with SARIF upload.
 
+- **The factory's pull request names the cell that licensed it**
+  ([#125](https://github.com/Jita81/commit-replay-bench/pull/125)).
+  The body of a pull request the factory opens on a customer's repository now carries a block
+  for the licensing cell: its route, the clean rate with its n and Wilson interval, the mode,
+  the builder and model the rate was measured on, the builder, model, provider and arm the
+  licence was read on, the apparatus, the ledger head and the task. A datum the delivery step
+  does not hold reads `unavailable` (the ledger head always does today). The block says that
+  `clean` and `deliver` are mechanical results under human review, in the MCP server's words.
+  PR text only: no routing, licensing or ledger change.
+
+- **Set-up progress in the header; one action on each empty list**
+  ([#122](https://github.com/Jita81/commit-replay-bench/pull/122)). Off /home, an operator now
+  sees "n of 8" with a Continue link to the next Get-started task. It comes from a `useGetStarted`
+  hook lifted out of HomePage, and the count is for the page's `?repo=` and links to Home with
+  that repository, so the two show the same count. A failed read a task stands on shows "Get
+  started: unavailable", and the indicator hides at 8 of 8. The empty Factory items list now links to
+  intake, and the empty Decisions queue links to the capability map. UI only; nothing is deployed.
+
+- **CI installs the browser without apt when it already starts**
+  ([#127](https://github.com/Jita81/commit-replay-bench/pull/127)).
+  The CI browser install downloads Chromium alone and starts it once. Only when that start
+  fails does it install system libraries with apt. On 2026-11-11 the runners could not resolve
+  the Ubuntu mirrors, and 12 browser jobs spent their whole install budget waiting on font
+  packages while every library Chromium needs was already on the image (P-816). CI only; no
+  product change.
+
 - **A Baseline summary line and a login notice in the run dialog**
   ([#121](https://github.com/Jita81/commit-replay-bench/pull/121)).
   The Baseline screen opens with one plain line per apparatus the map reads: how many measured
