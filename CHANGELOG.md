@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The Wave 4 registration**
+  ([#117](https://github.com/Jita81/commit-replay-bench/pull/117)). A new record,
+  `docs/reviews/2026-11-10-wave-4-registration.md`, registers Wave 4 before any run: the blind
+  baseline against the test-author arm on click and cobra `bug.fix` XS and S, with the sighted
+  replay beside them, at apparatus 2.5 with learning off. It fixes the primary and how it is
+  read, the one money line, the pilot and its gates, the order of runs, the fixes that must be
+  deployed first, and the two amendments still to come (the ordered commit lists; the pilot's
+  outcome). It records Paul's decisions and his yes to the spends. Docs only.
+
 - **A Claude Code build's cost is priced from the product's own table**
   ([#115](https://github.com/Jita81/commit-replay-bench/pull/115)). `cost_usd` was the CLI's `total_cost_usd`, and CLI 2.1.132 prices
   claude-sonnet-5 at $5/$25 against the table's $2/$10, so Wave 3 recorded $52.71 for about $21
