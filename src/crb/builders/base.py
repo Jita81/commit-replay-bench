@@ -1724,8 +1724,10 @@ def _git_c_step(at: Path | None, root: Path | None, path: str) -> tuple[bool, Pa
     sealed container's ``/work`` reaches the guard as the resolved root through
     ``StreamStats.host_view``) and with symlinks resolved, never landing in ``.git``.
     A relative path composes onto ``at`` (repeated ``-C`` compose as git composes them)
-    and gets the same check; with ``at`` or ``root`` unknown it cannot climb, so it
-    passes as before. ``-C ""`` leaves git where it is."""
+    and gets the same check. With ``root`` unknown it cannot climb, so it passes as
+    before; with ``root`` known and ``at`` unknown (after ``popd``, or a ``cd`` the guard
+    could not follow) it could be a link out of the tree or onto ``.git`` that nothing can
+    resolve, so it is refused. ``-C ""`` and ``-C .`` leave git where it is."""
     if path == "":
         return True, at
     if path.startswith("~") or "\\" in path or re.match(r"^[A-Za-z]:", path):
@@ -1743,7 +1745,7 @@ def _git_c_step(at: Path | None, root: Path | None, path: str) -> tuple[bool, Pa
             return False, None
         target = Path(posixpath.normpath(path))
     elif at is None:
-        return True, None
+        return root is None or posixpath.normpath(path) == ".", None
     else:
         target = Path(posixpath.normpath((at / path).as_posix()))
     if root is None:
