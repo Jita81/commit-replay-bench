@@ -12,16 +12,17 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **The UI's wire types are checked against the API's schema, and Scorecard runs weekly**
+- **The UI's wire field names are checked against the API's schema, and Scorecard runs weekly**
   ([#126](https://github.com/Jita81/commit-replay-bench/pull/126)).
-  `scripts/check_ui_types_drift.py` builds the OpenAPI schema offline and compares each
-  `ui/src/api/types.ts` interface that maps to a component; the fresh-clone gates fail on drift
-  not in the reviewed `scripts/ui_types_drift_allowlist.txt`, on a stale entry, or when the
-  committed `scripts/ui_types_mapped.txt` coverage changes. Every finding today is a required
-  field the UI does not declare **[measured — n = 56 findings over the 78 of 172 shapes that
+  `scripts/check_ui_types_drift.py` builds the OpenAPI schema offline and, for each
+  `ui/src/api/types.ts` interface that maps to a component, reports a field the component lacks
+  or a required field the interface lacks; it does not compare types or optionality. The
+  fresh-clone gates fail on a finding not in `scripts/ui_types_drift_allowlist.txt`, a stale
+  entry, or a change to `scripts/ui_types_mapped.txt`. Every finding is a missing
+  required field **[measured — n = 56 findings over the 78 of 172 shapes that
   map to a component; method: this pull request's `check_ui_types_drift.py --list` over main `e1d267c9`'s inputs;
-  apparatus 2.5]**. `.github/workflows/scorecard.yml` runs the OpenSSF Scorecard
-  weekly and on push to `main`, uploading SARIF to code scanning.
+  apparatus 2.5]**. `.github/workflows/scorecard.yml` runs OpenSSF Scorecard weekly and on
+  push to `main`, with SARIF upload.
 
 - **A Baseline summary line and a login notice in the run dialog**
   ([#121](https://github.com/Jita81/commit-replay-bench/pull/121)).
