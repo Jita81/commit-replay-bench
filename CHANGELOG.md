@@ -20,6 +20,31 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   read, the one money line, the pilot and its gates, the order of runs, the fixes that must be
   deployed first, and the two amendments still to come (the ordered commit lists; the pilot's
   outcome). It records Paul's decisions and his yes to the spends. Docs only.
+- **A Claude Code build's cost is priced from the product's own table**
+  ([#115](https://github.com/Jita81/commit-replay-bench/pull/115)). `cost_usd` was the CLI's `total_cost_usd`, and CLI 2.1.132 prices
+  claude-sonnet-5 at $5/$25 against the table's $2/$10, so Wave 3 recorded $52.71 for about $21
+  billed. The CLI's token counts are now priced from `DEFAULT_PRICING` plus `CRB_PRICING_JSON`,
+  with cache reads at the cached rate and cache writes at 1.25x input. The
+  CLI's figure is kept as `cli_cost_usd`, used only for a model the table does not price;
+  an unreadable or non-finite table makes the cost unknown. `cost_source` in the outcome and the
+  pack notes records which figure was used; another model's message is priced at its own rate. Existing rows, their hashes and the schema are
+  unchanged.
+- **The shell guard lets `git -C` name the work tree itself** ([#114](https://github.com/Jita81/commit-replay-bench/pull/114)). Wave 3 builders ran
+  `git -C /work status` in the sealed container and were refused as "leaves the worktree",
+  because any absolute `-C` path counted as outside. `-C` now accepts the worktree root or a
+  directory under it, as written and with links resolved; repeated `-C` compose as git composes
+  them, and the verb rules then check paths from there. A `..` component, `//`, `~`, a
+  backslash, shell expansion (`$`, backticks, globs, braces), `.git`, a link out of the tree,
+  an absolute path with no known root and every `-C` that lands outside stay refused. No grading, ledger or apparatus version changes.
+
+- **A Go builder's toolchain scratch stays out of its checkout** ([#113](https://github.com/Jita81/commit-replay-bench/pull/113)). The builder
+  container's `/tmp` tmpfs inherited Docker's `noexec`, so `go test` could not run the binaries
+  it builds there. Twelve Wave 3 cobra builds were disqualified by belt 1b on build-cache and
+  temp paths under `/work` (`.gocache`, `.gotmp`, `.tmp`); that the builders moved their scratch
+  there because of `noexec` is inferred from those paths, as no transcript was kept.
+  `builder_run_args` now states `exec` on that tmpfs (ADR-0005's 2026-09-21 follow-up); `/work`
+  was exec already, so no capability is added. Belt 1b keeps no ignore list: a forged file among
+  the touched files still disqualifies. No grading rule or apparatus version changes.
 
 - **Apparatus 2.5 separates rows graded after the Wave 3 harness fixes**
   ([#116](https://github.com/Jita81/commit-replay-bench/pull/116); DL-417).
@@ -40,6 +65,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   an unreadable or non-finite table makes the cost unknown. `cost_source` in the outcome and the
   pack notes records which figure was used; another model's message is priced at its own rate. Existing rows, their hashes and the schema are
   unchanged.
+
+- **The shell guard lets `git -C` name the work tree itself** ([#114](https://github.com/Jita81/commit-replay-bench/pull/114)). Wave 3 builders ran
+  `git -C /work status` in the sealed container and were refused as "leaves the worktree",
+  because any absolute `-C` path counted as outside. `-C` now accepts the worktree root or a
+  directory under it, as written and with links resolved; repeated `-C` compose as git composes
+  them, and the verb rules then check paths from there. A `..` component, `//`, `~`, a
+  backslash, shell expansion (`$`, backticks, globs, braces), `.git`, a link out of the tree,
+  an absolute path with no known root and every `-C` that lands outside stay refused. No grading, ledger or apparatus version changes.
 
 - **The Wave 3 decision has no date; it is taken when Wave 3 reports** (DL-415;
   [#108](https://github.com/Jita81/commit-replay-bench/pull/108)). DL-377 set Friday 6 November

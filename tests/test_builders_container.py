@@ -61,6 +61,7 @@ from __future__ import annotations
 import ast
 import http.server
 import importlib
+import json
 import os
 import socket
 import subprocess
@@ -978,7 +979,7 @@ def test_builder_run_args_hardening_and_secret_handling(tmp_path: Path) -> None:
     ):
         assert flag in args, flag
     assert args[args.index("--security-opt") + 1] == "no-new-privileges"
-    assert args[args.index("--tmpfs") + 1] == "/tmp:rw,nosuid,nodev,size=1g"
+    assert args[args.index("--tmpfs") + 1] == "/tmp:rw,exec,nosuid,nodev,size=1g"
     assert f"type=bind,src={tmp_path / 'sealed'},dst={WORKDIR}" in args  # rw, no `readonly`
     assert "type=bind,src=/srv/nm,dst=/srv/nm,readonly" in args
     assert args[args.index("--workdir") + 1] == WORKDIR
@@ -989,6 +990,23 @@ def test_builder_run_args_hardening_and_secret_handling(tmp_path: Path) -> None:
     assert "HOME=/tmp" in envs and "CI=1" in envs and "HTTPS_PROXY=http://proxy:3128" in envs
     assert "verysecret" not in joined and "oat01" not in joined
     assert is_secret_env_name("AZURE_OPENAI_API_KEY") and not is_secret_env_name("HOME")
+
+
+def test_builder_tmp_is_exec_so_go_scratch_stays_out_of_the_checkout(tmp_path: Path) -> None:
+    """``go test`` execs the test binaries it builds under ``$TMPDIR``. Docker mounts a tmpfs
+    ``noexec`` unless ``exec`` is named, and a Go builder whose ``/tmp`` could not run them
+    moved ``GOCACHE``/``GOTMPDIR``/``TMPDIR`` into ``/work``: belt 1b then read the cached
+    test output there as forged go-test events (Wave 3, cobra). The builder's ``/tmp`` is
+    named ``exec`` (``/work`` is a bind mount, exec already), and its ``TMPDIR`` and ``HOME``
+    (``GOCACHE``'s default root) both point at it, outside the checkout."""
+    s = BuilderContainerSettings(image="crb-builder-go:local", user="10001:10001")
+    inside = container_env({"TMPDIR": "/var/host"}, proxy_url="")
+    args = builder_run_args(s, checkout=tmp_path, env=inside, timeout_s=60, network="none")
+    options = args[args.index("--tmpfs") + 1].split(":", 1)[1].split(",")
+    assert "exec" in options and "noexec" not in options
+    assert {"nosuid", "nodev"} <= set(options)
+    for var in ("TMPDIR", "HOME"):
+        assert inside[var] == "/tmp" and not inside[var].startswith(WORKDIR)
 
 
 def test_container_env_and_client_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1065,6 +1083,68 @@ def test_stream_stats_translates_container_paths(trial: Workspace) -> None:
     assert len(stats.violations) == 2 and "archaeology" in stats.violations[1]
     # the transcript keeps what the agent actually ran
     assert stats.bash_commands[0] == "git diff /work/src/calc/__init__.py"
+
+
+def test_stream_stats_git_c_container_workdir(trial: Workspace) -> None:
+    """Wave 3: ``git -C /work status`` names the sealed container's own work tree and was
+    refused as "leaves the worktree". Through the container alias it is the guard's root and
+    is allowed; climbing, doubled-slash and sibling spellings of it stay violations."""
+    guard = base.TestFileGuard(trial.root, pr.default_config(), [pr.TEST_SUBTRACT])
+    stats = StreamStats(GitArchaeologyGuard(cwd=trial.root), guard, workdir_alias=WORKDIR)
+    honest = (
+        f"git -C {WORKDIR} status",
+        f"git -C {WORKDIR}/ status --short",
+        f"git -C {WORKDIR}/src diff",
+        f"cd {WORKDIR} && git -C {WORKDIR} ls-files",
+    )
+    refused = (
+        f"git -C {WORKDIR}/.. status",
+        f"git -C {WORKDIR}/../etc status",
+        f"git -C /{WORKDIR} status",
+        f"git -C {WORKDIR}space status",
+        f"git -C {WORKDIR} log",
+        f"git -C {WORKDIR} -C .. status",
+    )
+    for cmd in (*honest, *refused):
+        stats.feed(
+            '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash",'
+            f'"input":{{"command":{json.dumps(cmd)}}}}}]}}}}',
+            keep=False,
+        )
+    assert len(stats.violations) == len(refused), stats.violations
+    for cmd, violation in zip(refused, stats.violations, strict=True):
+        assert violation.startswith("archaeology:") and cmd[:60] in violation, violation
+
+
+def test_stream_stats_git_c_container_workdir_symlinked_root(
+    trial: Workspace, tmp_path: Path
+) -> None:
+    """The git guard's root is ``Workspace.root`` as given (here reached through a symlink)
+    while ``host_view`` rewrites ``/work`` to ``TestFileGuard.root``, which is resolved:
+    ``git -C /work status`` was refused because the two spellings differ. Expansion,
+    ``.git`` and climbing through the alias stay violations."""
+    link = tmp_path / "linked-trial"
+    link.symlink_to(trial.root, target_is_directory=True)
+    guard = base.TestFileGuard(link, pr.default_config(), [pr.TEST_SUBTRACT])
+    stats = StreamStats(GitArchaeologyGuard(cwd=link), guard, workdir_alias=WORKDIR)
+    assert str(guard.root) != str(link)  # the two spellings really differ
+    honest = (f"git -C {WORKDIR} status", f"git -C {WORKDIR}/src diff")
+    refused = (
+        f"X=..; git -C {WORKDIR}/$X grep foo",
+        f'git -C {WORKDIR}/"$(printf ..)" grep foo',
+        f"git -C {WORKDIR}/.[.] status",
+        f"git -C {WORKDIR}/.git status",
+        f"git -C {WORKDIR}/.. status",
+    )
+    for cmd in (*honest, *refused):
+        stats.feed(
+            '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash",'
+            f'"input":{{"command":{json.dumps(cmd)}}}}}]}}}}',
+            keep=False,
+        )
+    assert len(stats.violations) == len(refused), stats.violations
+    for violation in stats.violations:
+        assert violation.startswith("archaeology:"), violation
 
 
 # ---------------------------------------------------------------------------

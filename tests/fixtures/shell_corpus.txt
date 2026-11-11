@@ -8,6 +8,8 @@
 #
 # Format: one command per line; `#` lines are comments; blank lines are ignored; the two-
 # character sequence `\n` is decoded to a real newline (heredocs, multi-line commands).
+# `@WORKTREE@` is replaced by the absolute worktree root (a container's `/work`, which
+# reaches the guard already mapped to that root).
 # Lines are the exact strings a Claude Code `Bash` tool call carries — realistic, not
 # minimal. If a line here turns out to be genuinely unsafe, MOVE it to
 # shell_corpus_refused.txt with a reason; never weaken a refusal to make a line pass.
@@ -119,6 +121,10 @@ git diff HEAD -- src/click/core.py | head -80
 git --no-pager diff -- lib/application.js
 git -c core.pager=cat diff --stat
 git -C . status --short
+# Wave 3 (2026-11-10): `git -C /work status` was refused as leaving the worktree
+git -C @WORKTREE@ status
+git -C @WORKTREE@ status --short
+git -C @WORKTREE@/src diff --stat
 git diff --exit-code -- src/ || echo "changed"
 git diff --quiet -- pkg && echo clean
 git add src/click/core.py
