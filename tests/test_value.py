@@ -238,7 +238,11 @@ def test_precision_reads_reviews_when_there_are_enough_and_says_so() -> None:
 
 def test_too_few_reviews_in_a_repository_borrow_every_repositorys_before_the_proxy() -> None:
     rows = [vr(i, kind=FAILURE_CLEAN) for i in range(4)]
-    rows += [vr(10 + i, kind=FAILURE_CLEAN, repo="beta") for i in range(4)]
+    # beta's reviews name no row hash: its rows on the same tasks place them (P-135)
+    rows += [
+        vr(i, kind=FAILURE_CLEAN, repo="beta", row_hash=f"{100 + i:064x}")
+        for i in range(MIN_REVIEWS_FOR_REVIEW_BASIS)
+    ]
     vs = [verdict(i, mergeable=i == 0, repo="beta") for i in range(MIN_REVIEWS_FOR_REVIEW_BASIS)]
     rep = value_report(rows, vs, repo="alpha", apparatus="all").to_dict()
     assert rep["precision"]["basis"] == BASIS_REVIEW_POOLED
@@ -430,9 +434,9 @@ def test_the_scorecard_reads_one_posture_class_and_refuses_to_reduce_two() -> No
 def test_an_unjoined_review_reads_the_posture_of_its_graded_row_or_none() -> None:
     """ADR-0019 §8 (P-135): an exported review names no row hash, so it is placed by the rows
     graded on its task. One of another class lends a host reading nothing, down to the
-    every-repository fallback; one whose task's rows span two classes, or that no row holds
-    in an input of two classes, is in no precision and is counted ``posture_unplaced``.
-    Over an input of one class, every review reads that class, as before."""
+    every-repository fallback; one whose task's rows span two classes, or that no row holds,
+    is in no precision and is counted ``posture_unplaced`` — in a repository of one class
+    too, because its other rows establish nothing about a task none of them graded."""
     host, sealed = "local/inplace/host-env", "docker/copy/sealed"
     beta = range(10, 10 + MIN_REVIEWS_FOR_REVIEW_BASIS)
     rows = [
@@ -456,33 +460,53 @@ def test_an_unjoined_review_reads_the_posture_of_its_graded_row_or_none() -> Non
     assert rep["precision"]["review"]["n"] == 1
     assert rep["precision"]["review"]["posture_unplaced"] == 2
     # the pooled call counts every repository's; a repository's counts its own
-    # (beta's t98 has no row; every beta row is sealed, so it reads sealed and is out)
+    # (beta's t98 has no row: every beta row is sealed, and that still places nothing)
     pooled = value_report(both, [*mine, verdict(98, mergeable=True, repo="beta")], posture=host)
-    assert pooled.to_dict()["precision"]["review"]["posture_unplaced"] == 2
-    # one class in the repository: an unmatched review reads it, as before
-    single = [r for r in rows if r.repo == "alpha"]
-    kept = value_report(single, [verdict(99, mergeable=True)], repo="alpha").to_dict()
-    assert kept["precision"]["review"]["n"] == 1
-    assert kept["precision"]["review"]["posture_unplaced"] == 0
+    assert pooled.to_dict()["precision"]["review"]["posture_unplaced"] == 3
     beside = value_report(rows, [verdict(99, mergeable=True)], repo="alpha").to_dict()
-    assert (beside["precision"]["review"]["n"], beside["posture_class"]) == (1, host)
+    assert (beside["precision"]["review"]["n"], beside["posture_class"]) == (0, host)
+    assert beside["precision"]["review"]["posture_unplaced"] == 1
+
+
+def test_a_review_no_row_holds_is_unplaced_in_a_repository_of_one_class() -> None:
+    """P-135 (review of #128): a repository whose rows share one class does not lend that
+    class to a review of a task none of them graded — the review may come from another
+    posture. It is counted ``posture_unplaced`` and is in no precision: not the
+    repository's own, and not the one another repository borrows."""
+    host = "local/inplace/host-env"
+    single = [dataclasses.replace(vr(i, kind=FAILURE_CLEAN), posture_class=host) for i in (1, 2)]
+    stray = [verdict(i, mergeable=True) for i in range(50, 50 + MIN_REVIEWS_FOR_REVIEW_BASIS)]
+    own = value_report(single, [verdict(1, mergeable=True), *stray], repo="alpha").to_dict()
+    assert own["posture_class"] == host
+    assert own["precision"]["review"]["n"] == 1
+    assert own["precision"]["review"]["posture_unplaced"] == MIN_REVIEWS_FOR_REVIEW_BASIS
+    assert own["precision"]["basis"] == BASIS_PROXY
+    # another repository, short of reviews, borrows none of them either
+    rows = [
+        *single,
+        dataclasses.replace(vr(7, kind=FAILURE_CLEAN, repo="beta"), posture_class=host),
+    ]
+    borrowed = value_report(rows, stray, repo="beta").to_dict()
+    assert borrowed["precision"]["basis"] == BASIS_PROXY
+    assert borrowed["precision"]["review"]["n"] == 0
 
 
 def test_an_unjoined_review_is_placed_by_the_rows_of_the_apparatus_scope_only() -> None:
     """P-135: a row of another apparatus version is outside every figure, so it never places
-    a review either. ``posture=all`` over a scope of one class reads an unmatched review as
-    before, though an older version graded another class or the same task."""
+    a review either: a task only an older version graded has no row in the scope, so its
+    review is counted unplaced, and one the scope does hold reads the scope's class though
+    an older version graded the same task in another."""
     host, sealed = "local/inplace/host-env", "docker/copy/sealed"
     rows = [
         *(dataclasses.replace(vr(i, kind=FAILURE_CLEAN), posture_class=host) for i in (1, 2)),
         dataclasses.replace(vr(5, kind=FAILURE_CLEAN, app="0.1"), posture_class=sealed),
         dataclasses.replace(vr(2, kind=FAILURE_CLEAN, app="0.1"), posture_class=sealed),
     ]
-    mine = [verdict(i, mergeable=True) for i in (2, 99)]
+    mine = [verdict(i, mergeable=True) for i in (2, 5, 99)]
     rep = value_report(rows, mine, repo="alpha", apparatus="current").to_dict()
     assert rep["posture_class"] == host
-    assert rep["precision"]["review"]["n"] == 2
-    assert rep["precision"]["review"]["posture_unplaced"] == 0
+    assert rep["precision"]["review"]["n"] == 1
+    assert rep["precision"]["review"]["posture_unplaced"] == 2
 
 
 def test_a_review_placed_only_by_rows_of_no_recorded_posture_is_counted() -> None:

@@ -1155,23 +1155,22 @@ def _place_unjoined(
     """The one place a review meets the posture filter (ADR-0019 §8). ``rows`` are every
     repository's rows in the apparatus scope, of every class. A joined review keeps its row's
     class (``_verdicts_in_scope`` admits it only beside a row of the class read). An unjoined
-    one is placed by the rows on its repository and task: their one class, or — when no row
-    holds the task — the one class its repository's rows hold. It is kept when that class is
-    ``read`` and dropped when it is another. A task graded in two classes, one no row holds in
-    a repository of two, or one placed only in ``""`` (no posture recorded) while a named
-    class is read, places nothing: returned apart, to be counted, never read."""
+    one is placed only by the rows on its own repository and task: their one class. It is
+    kept when that class is ``read`` and dropped when it is another. A task graded in two
+    classes, one no row in the scope holds (its repository's other rows establish nothing
+    about it, though they share one class), or one placed only in ``""`` (no posture
+    recorded) while a named class is read, places nothing: returned apart, to be counted,
+    never read."""
     by_task: dict[tuple[str, str], set[str]] = {}
-    by_repo: dict[str, set[str]] = {}
     for r in rows:
         by_task.setdefault((r.repo, r.task_id), set()).add(r.posture_class)
-        by_repo.setdefault(r.repo, set()).add(r.posture_class)
     kept: list[ReviewVerdict] = []
     unplaced: list[ReviewVerdict] = []
     for v in verdicts:
         if v.grade_row_hash:
             kept.append(v)
             continue
-        classes = by_task.get((v.repo, v.task_id)) or by_repo.get(v.repo, set())
+        classes = by_task.get((v.repo, v.task_id), set())
         placed = next(iter(classes)) if len(classes) == 1 else None
         if placed is None or (placed == "" and read != ""):
             unplaced.append(v)
