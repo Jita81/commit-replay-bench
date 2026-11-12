@@ -1,0 +1,720 @@
+# R5 test (e): where the script reads a run's arm. Ruling of the methodologist, version 2, 2026-11-12
+
+This replaces version 1 (`r5-arm-source-ruling.md`), which the independent checker failed.
+Version 1 never took effect. Nothing in it stands unless it is repeated here.
+
+Fix round, same day. The checker's second report (`r5-arm-source-check-2.md`) found three
+faults and eleven notes in this version. Each is fixed in place. Section 12 lists them.
+
+Written before the primary is read and before any result by arm exists.
+
+## 0. What I read
+
+- The registration with Amendments 1 to 3 at main `6deb8842`: part 2, R5 item 2 tests (a) to
+  (i), R12, Part E and the annex.
+- The checker's report, the two fact sheets of the delivery manager and fact-finder on the arm
+  source, and the fact sheet on the test author's provider.
+- Served code and documents at `7bb03d6c`, with read-only `git show` and `git grep`:
+  `runs.py` 547-597 and 712-792, `schemas.py` 511-519, 596-668, 835-864 and 910-921,
+  `campaigns.py` 455-531, and a `git grep` for the string `editblock:gpt-oss-120b` in `docs`
+  and `src`. In the fix round I ran that `git grep` again and read its seven matching lines,
+  one of them line 1238 of the Wave 3 registration. I read nothing else of that document.
+- I opened no file under `~/wave4`. I read no kept body, no out file, no run record, no event
+  and no row.
+
+**One thing I must report.** While looking for the campaign id I opened the first 30 lines of
+`wave-record-notes.md` in the wave-close folder. They hold the stop (b) note of 2026-11-11.
+That note names the eight run ids of click batches 1 and 2 and gives the error text of nine
+builds, five of them authoring errors, by short run id. That is row-level text by run. It
+shows that three named runs had an author step. I did not look for it. I stopped reading
+there. I joined it to nothing and used it for nothing below. It is not a figure by arm and
+not a comparison. But I do not play it down: it is outcome-level text by run, and it shows
+misses on named runs that had an author step, which are `S1` runs. The delivery manager
+enters it in the deviation log in these words: "the methodologist saw outcome-level text by
+run, namely authoring errors on named `S1` runs, before the read".
+
+## 1. Summary
+
+Settled here as readings, signed:
+
+- "Its body" means the request body as filed (section 2).
+- The bodies are read from the poster's plan file, and from nowhere else (section 3).
+- What the script may open in the plan file and what it must drop (section 5).
+- Field by field, what "not contradicted by the run record" means (section 4).
+- The 49 runs' campaign is read from the body's `campaign_id` (section 8).
+- What the delivery manager records under test (h) for the four run record fields (section 10).
+- Every guard of version 1 section 5, kept, and three added (section 11).
+
+Not settled here. Each goes beyond registered words, so each is Paul's (topology rule 1).
+The rule for each is fixed below so the script can be written, but it is in force only on
+Paul's written yes to Amendment 4:
+
+- **P1.** Reading the run id under each key of the poster's two out files, to tie a body to
+  a run (section 3).
+- **P2.** Reading two fields of the campaign record, `run_id` and `s1`: the first to say
+  which runs are "of the campaign" in tests (a) and (b), the second as a product-side test
+  of the arm (sections 7 and 8).
+- **P3.** Taking the `test_author` literal from two committed documents, because the served
+  code fixes no value. A third committed document records a second spelling, with
+  `:cerebras` at the end. The choice between the two decides test (e) for all 24 `S1`
+  bodies, and it is Paul's (section 6).
+- **P4.** A test, before any row is read, that the test author's calls were stamped
+  `cerebras`, because the literal names no provider (section 6).
+- **P5.** P1, P2 and P4 add three sources to the list in Part E item 5. That is a change to
+  what a Part E condition allows, and it is said as one (section 11a).
+
+Paul is asked one question, and the answer covers P1 to P5 together. Any reply other than a
+plain yes is a no to all of them. No point takes effect alone (section 11b).
+
+The script is not committed until Paul has answered. Part E item 2 already waits for his
+written word, so this adds no wait.
+
+**What a reader must be told plainly.** The served product does not show a run's body. On
+the files that exist, test (e) can show two things. First, that the plan gave each place the
+arm Amendment 2's order gives it. Second, that the poster's record of which run was filed at
+each place agrees with the product's own filing times. It cannot show, from the product,
+that a run at a place ran under that arm. The only served field that can is `runs[].s1`
+(P2). Without P2 the arm of each run rests on the team's own files.
+
+## 2. What "its body" means
+
+It means the request body the run was filed with: the JSON sent to `POST /runs`. This is
+unchanged from version 1, and the checker found the quotes exact.
+
+- R5 item 2: "the script reads run records and run bodies only, and no row". Records and
+  bodies are two things.
+- Part E item 5: "from run bodies and from each run record's status, row count, filing time
+  and end time".
+- Test (e): "It is `A0` when the body carries no `arm` field, or `arm: "A0"`, and no
+  `test_author`." The served code accepts only `"S1"` for `arm` and forbids extra fields, so
+  no stored record could hold `arm: "A0"`. The words describe what was sent.
+- Where the text means the served copy it says so: test (c) reads times "from the run record
+  as the product serves it". Test (e) has no such words.
+
+**The text settles the meaning.** It does not say who holds the body.
+
+Correction to version 1 (checker's note 1). The plan file is not "the only existing copy".
+The product keeps a derived copy in `params_json`: stripped, and holding only the keys that
+were set. No GET serves it. So the plan file is the only copy a script can read.
+
+## 3. The source, and the tie of a body to a run
+
+### 3.1 The facts that broke version 1's condition 1
+
+Version 1 said a body counts only if one file holds the run id next to the body, and that a
+tie made by inference fails. Neither can be met:
+
+- The body and the run id are in two files joined by a key such as `click-1/1`. The plan
+  file `wave-batches.json` holds the body under the key. The out files `click-out.json` and
+  `cobra-out.json` hold the run id under the same key.
+- When a POST timed out, the poster took the newest run it did not already hold whose sorted
+  `task_ids` equal the body's. That tie is by inference. The out file does not say whether
+  a run was taken this way. The terminal text is not kept. The delivery manager does not
+  recall a timeout but cannot prove there was none.
+
+So for every one of the 49 runs, the script cannot show that the tie was made from the POST
+response. I do not pretend it can.
+
+### 3.2 What the script may accept as "its body" (the harder reading)
+
+**A run's body is the `body` value the plan file holds under the key under which an out file
+holds that run's full id.** For run `98fe708c` the out key is `click-3/1#attempt1` and the
+plan key is `click-3/1`. No other suffix key is accepted.
+
+The script does not make or mend a tie by `task_ids`, by times or by file order. It takes
+the poster's key as given and then tests it. Every test below can only fail the check.
+
+- **T1. Files fixed by hash.** The script carries the sha256 of each file it opens, as the
+  second fact sheet gives them: the plan file `ae705b68...fb45a`, its copy from before the
+  `S3` batches were added `a3c592cd...2970fd`, `click-out.json` `27b2747e...4c4170`,
+  `cobra-out.json` `59d7eefc...06e0e1`. It refuses a file whose hash differs. It prints the
+  four paths and hashes.
+- **T2. The two plan copies agree.** For each of the 48 wave keys, the `body` in the plan
+  file and the `body` in the copy from before `S3` must be equal as parsed JSON. The copy is
+  the nearer of the two to the time of filing.
+- **T3. Keys.** The out files together must hold exactly 49 keys: the 48 keys
+  `<repo>-<batch 1 to 6>/<place 1 to 4>` for click and cobra, and `click-3/1#attempt1`. Any
+  other key, a missing key, or a key in the wrong repository's file fails.
+- **T4. Ids.** The 49 `run` values must be 49 different full run ids. The 48 under the
+  plain keys must be exactly the 48 standing ids the script carries. The one under
+  `click-3/1#attempt1` must be the run that test (a) matches to `98fe708c`.
+- **T5. The key agrees with the product.** For each plain key, the run under it must, by
+  its run record, hold the `task_ids` of that repository's batch of that number in
+  Amendment 2, and its place by test (d) must equal the place in the key. For
+  `click-3/1#attempt1`, the run must hold the `task_ids` of click batch 3 and meet the
+  times test (g) gives run `98fe708c`.
+- **T6. The body is not contradicted by the run record** (section 4).
+- **T7. How the place in the key is formed.** Before the script is committed the delivery
+  manager records, from the poster's source text with its sha256 and line, whether the place
+  number in a key is the entry's position in the batch's `runs` list or its `slot` value.
+  The script follows that record. This is a name check of the same kind as test (h).
+
+If any of T1 to T7 fails for any run, test (e) fails and test (i) applies.
+
+### 3.3 The possible inferred tie
+
+What can be checked. If tests (a), (b), (d), (f), T3, T4 and T5 all pass, then each batch has
+exactly four standing blind runs on its commits, each sits under one key of that batch, and
+each key's place equals the run's rank by the product's own filing time. Under those facts a
+tie made by inference cannot have picked a wrong blind run and still pass:
+
+- A run that is not blind, or not on the batch's commits, fails (a) or T5.
+- A second run made by a POST that timed out and was then posted again would be a fifth
+  blind run on the batch's commits. That fails (b).
+- A run of the same batch under the wrong key fails T5, because its filing-time rank would
+  not match the key's place.
+
+So the script does not need to know which ties were inferred. T5 tests every tie the same
+way, against times the product serves.
+
+What cannot be checked, and is taken on trust:
+
+1. That the poster sent the plan's `body` for place `p` as its `p`th POST of the batch, and
+   sent it unchanged. This rests on the poster's source text (`wave4_post.py` line 150,
+   sha256 `b30ca68e...50b105`) and on the delivery manager's statement that the plan file
+   was not rewritten by the poster.
+2. That the four files are as they were at filing time. The hashes were first recorded on
+   2026-11-12, after the wave. The script cannot use file times.
+3. Whether any tie was made by inference. No kept file says.
+4. That `refile.py` filed batch 3 again from the same plan entries.
+5. That the poster source text of item 1, at that sha256, is the text that ran for every
+   batch. The deviation log (annex, D4) records a poster crash before batch 3. No kept file
+   shows which text ran after it. T7 rests on the same text.
+
+**The script prints these five lines in its output, word for word, under the heading "Taken
+on trust".** The report repeats them on the page that states the primary. If the amendment
+is in force the report adds one sentence and no more: "For all 49 runs the product's `s1`
+flag agreed with the `arm` field of the body." The flag is `body.arm is not None` (`runs.py`
+1246). It shows that an `arm` field was sent. It does not show `test_author`, and it does
+not show that the rest of the body was sent unchanged. So trust item 1 still stands, less
+its `arm` field.
+
+I record the plain consequence. With T5 in place, the out files add corroboration, not
+proof. The weight of test (e) on the arm rests on trust item 1. With P2 in force, the `arm`
+field alone is also shown by the product.
+
+### 3.4 Why P1 goes to Paul
+
+The plan file is a file of run bodies. Reading it is inside "run bodies". The out files are
+not run bodies and not run records. They are the poster's log. Reading even one value from
+them adds a source to "run records and run bodies only". The checker held version 1 to that
+test for two other sources, and I hold this one to it too. It also adds a source to Part E
+item 5 (section 11a). On a no, no body can be called a run's body, test (e) fails for all 49
+runs, and test (i) applies.
+
+## 4. "Not contradicted by the run record", field by field (checker's fault 1)
+
+Version 1 said "equal" and no more. Read literally that fails all 49 runs on `retain`, which
+is not a mismatch. The rule is now fixed. The script writer decides nothing.
+
+General rules:
+
+- Only keys the body carries are compared. A key that is absent, or whose value is null, is
+  not carried.
+- JSON numbers are compared as numbers: `6` equals `6.0`. A boolean is not a number and a
+  string is not a number.
+- Strings are compared exactly. Nothing is stripped, folded or repaired.
+
+| Body key | Served field of the run record | Rule |
+|---|---|---|
+| `repo` | `repo` | equal strings |
+| `kind` | `kind` | equal strings, and the value is `blind` |
+| `task_ids` | `task_ids` | same length, same strings, same order |
+| `builder` | `builder` | equal strings |
+| `model` | `model` | equal strings |
+| `provider` | `provider` | equal strings |
+| `max_cost_usd` | `max_cost_usd` | both are numbers and equal as numbers. A served null fails |
+| `budget` | `budget` | take the body's `budget` without its null-valued keys. The served object must have exactly the same keys, each value equal (numbers as numbers) |
+| `builder_config` | `builder_config` | exactly the same keys, each value equal as a JSON value |
+| `retain` | `retain` | a subset test. Each key the body carries must equal the served key. Each served key the body does not carry must be `false` |
+| `campaign_id` | not served | not compared here. It must equal the campaign id (section 8) |
+| `env_stop`, `outage_stop`, `learning` | not served | not compared. The report says so |
+| `arm`, `test_author` | not served | not compared. They are the subject of test (e) |
+
+- **`ladder`.** The registered body sends no `ladder`, and the delivery manager's list of
+  body keys has none. The served `ladder` is the stored default, not something sent. It is
+  not compared and the script drops it. A body that carries `ladder` falls under the next
+  rule.
+- **Any other key.** A body that carries a key outside this table stops the check. The
+  script prints the key name and the run id. This is a failure under test (i). It is not
+  mended in the script.
+
+I checked at `7bb03d6c` that the served code does not rewrite these on the way in or out:
+`task_ids` (`schemas.py` 914-921, `runs.py` 574), `builder_config` (`schemas.py` 835-864,
+`runs.py` 575), `budget` (`schemas.py` 511-513, `runs.py` 567), `max_cost_usd` (`runs.py`
+568, a float), `retain` (`runs.py` 750-751 and 576, `schemas.py` 647-653). I did not trace
+`builder`, `model` and `provider` beyond `new_run` (`runs.py` 732-737). Before the script is
+committed the delivery manager confirms from the served code that none of the ten rows above
+fails a body for a rewrite the code itself makes. If one does, this ruling is revised first.
+The script writer does not choose.
+
+A mismatch on any row means the file is not that run's body. Test (e) fails and test (i)
+applies.
+
+## 5. What the script may read from the poster's files (checker's note 3)
+
+**Plan file and its copy.** For each of the 48 wave keys, the `body` value. If section 3.2
+T7 records that the place comes from `slot`, also `slot`. Nothing else. The script drops
+`arm`, `cell`, `coin` and `order` as it parses. It does not open the `S3` batches. The
+poster's `arm` label is not the body: reading it would break "from its body only". The
+expected arm of each place comes from Amendment 2's orders, which the script carries.
+
+**Out files.** For each of the 49 keys, the `run` value. Nothing else. The script drops
+`arm`, `posted`, `ended` and `clean_end` as it parses, and never stores, logs or prints one.
+
+- `arm` is the poster's label. It is not the body.
+- `posted` and `ended` are times. Test (c): "Nothing else is used as a time".
+- `clean_end` is a status flag. Test (a) reads status "from the run record's own fields".
+
+This is in force only under P1.
+
+**Nothing else from that folder.** No response, poll, log or login file. No seat opens the
+folder to learn an arm. The delivery manager's second fact sheet read key names and the
+`test_author` values. That is recorded in section 6.
+
+**Read as it is.** The script parses the kept JSON and applies test (e) to the `body` as
+written. A field that is absent or null counts as absent. `test_author` is compared with `L`
+by exact equality, with no strip and no case fold.
+
+## 6. The literal `L`, and its missing provider (checker's fault 2)
+
+### 6.1 Does a source that is not the served code meet test (h) as written?
+
+No. Test (h) says the delivery manager "confirms from the served code ... the exact value
+the served code stores in `test_author` for the Cerebras `gpt-oss-120b` rung".
+
+What the served code gives:
+
+- It stores what was sent, stripped (`runs.py` 772-776).
+- It accepts more than one spelling for that model (`adapter.py` 457-479).
+- No catalog maps `gpt-oss-120b` to a provider. The provider comes only from the worker's
+  endpoint settings (`openai_client.py` 560-589, 648-674).
+
+So the served code fixes no value "for the Cerebras `gpt-oss-120b` rung". By (h)'s own words,
+"no such value is confirmed, the check fails". **Read as written, test (h) fails.** Version 1
+was wrong to sign a second source as changing no word.
+
+### 6.2 The source the new facts give
+
+The string `editblock:gpt-oss-120b` stands in documents committed in the served checkout
+`7bb03d6c`, written before the wave. I confirmed these with `git grep` at that commit:
+
+- `docs/DECISION-LOG.md` line 175, DL-378, Paul's decision of 2026-10-11: "The `S1` test
+  author is `editblock:gpt-oss-120b` on Cerebras, checked at registration, never the
+  builder's own model."
+- `docs/OPERATOR.md` line 1432: "Cerebras (`CRB_FACTORY__TEST_AUTHOR=editblock:gpt-oss-120b`)
+  runs." The same lines are 175 and 1445 on main `6deb8842`.
+
+**A second spelling is committed too, and version 2 as first written left it out.** The same
+`git grep` at `7bb03d6c` gives this line:
+
+- `docs/reviews/2026-10-09-wave-3-registration.md` line 1238: "`raw.factory.test_author`
+  reads `editblock:gpt-oss-120b:cerebras`". The checker's report dates that reading
+  2026-11-09. It is the most recent committed record of the deployment's own test author as
+  a rung label, and it names the provider.
+
+So there are two committed spellings of "the Cerebras `gpt-oss-120b` rung":
+
+| | Spelling | Where | What it is |
+|---|---|---|---|
+| A | `editblock:gpt-oss-120b` | DL-378 (line 175); OPERATOR.md lines 1404 and 1432; the Wave 3 registration's own line 200 | Paul's decision of the `S1` test author, and the operator guide's example of the body field and the setting |
+| B | `editblock:gpt-oss-120b:cerebras` | Wave 3 registration line 1238 | a reading of the deployment's factory setting on one day |
+
+**The choice decides the test.** The test is exact equality. The second fact sheet reports
+that the plan file's `S1` bodies hold spelling A and no other. I have not opened them. If
+that is so, `L` = A passes this part for all 24 `S1` bodies, and `L` = B fails all 24. And
+the delivery manager knew what the bodies held before the documents were searched. So `L`
+is being chosen between two committed spellings by seats who know which one the bodies
+hold. That is the weakness, stated plainly. It is why the choice is not mine.
+
+Why I put A to Paul as the preferred source, with B beside it:
+
+- DL-378 is the decision that sets the `S1` test author. Part 2's words, "`test_author` set
+  to the Cerebras `gpt-oss-120b` rung", follow it. A is the label that decision names.
+- A is the form the operator guide gives for the request body field (line 1404). Line 1238
+  records a deployment setting. It is not a rule for what a run body carries. An `S1` run's
+  stored `test_author` is what its body sent (`runs.py` 772-776).
+- The Wave 3 registration itself writes A where it states the author (line 200). B appears
+  only where it reports what one setting read.
+- The provider, which is all B adds, is tested apart and on the product's own stamp (P4).
+  That is a harder test of "Cerebras" than a suffix in a body. By the fact-finder's report
+  the suffix only makes the worker refuse a mismatch. The stamp records the provider that
+  was called.
+
+What counts against A, so Paul has it in view:
+
+- B is the more recent record, and it is the only spelling that names the provider.
+- By the harder reading of "the Cerebras `gpt-oss-120b` rung" as a label, B is the fuller
+  label. If Paul holds that the body itself had to name the provider, the answer is no,
+  the check stops, and test (i) applies. I do not rule that out.
+
+These are documents, not code. "From the served code", by the harder reading, means the
+source code. So this source goes beyond (h)'s words, and both the source and the choice of
+A over B are Paul's (P3). Under P3:
+
+1. `L` is `editblock:gpt-oss-120b`, taken from DL-378 and OPERATOR.md line 1432 at
+   `7bb03d6c`. Spelling B is named in the amendment and in the question to Paul.
+2. `L` is not taken from the plan file, a kept body, a run, an event or a row.
+3. The delivery manager confirms from the served code, and records the lines: the code
+   stores the label as sent with outer whitespace removed (`runs.py` 776); `L` has no outer
+   whitespace, so sent and stored are the same string; `author_from_label` accepts `L` and
+   gives the name `editblock`, the model `gpt-oss-120b` and an empty provider (`author.py`
+   410-421, `adapter.py` 473-478).
+4. The script's test is exact equality with `L`. A body with any other spelling fails,
+   `editblock:gpt-oss-120b:cerebras` included.
+
+Two facts are stated in the report. First, the delivery manager saw the `test_author`
+values in the plan file (second fact sheet, B.2) before the documents were searched. So the
+search was not blind to the value. The documents are older than the wave and are committed,
+so `L` does not come from the bodies. But the delivery manager knew what the bodies held
+when `L` was found. Second, a committed alternative, spelling B, exists and would fail every
+`S1` body, and Paul chose A with B in view. Neither poster script holds the literal, so the
+poster script is not a source.
+
+One served trace of the label exists and is not used. The event `factory/author.configured`
+carries `author` as `name:model` (`worker.py` 4573). It could show, from the product, that
+the label used was `editblock:gpt-oss-120b`. It carries no provider, so it cannot serve P4.
+It sits in the events log, which is barred as a source for the arm (section 11). I do not
+ask Paul for it.
+
+The poster's version is no longer an open point: `L` does not come from it.
+
+### 6.3 `L` names no provider
+
+`L` has no provider part. The fact-finder's report settles what that means:
+
+- The author calls whichever OpenAI-compatible endpoint the worker's environment sets.
+- With no provider in the label nothing is checked. The author takes the endpoint's own
+  provider as its stamp.
+- The code fixes only the fallback, which is Cerebras. Azure wins if `CRB_AZURE_ENDPOINT` is
+  set, and `CRB_OPENAI_BASE_URL` can name any host.
+
+So neither the body nor the code shows that the wave's test author ran on Cerebras. No seat
+may read the worker's environment. **I do not let the deployment's setting, or the code's
+fallback, stand in for the word "Cerebras".** The registered words are "`test_author` set to
+the Cerebras `gpt-oss-120b` rung". On these facts the body test alone cannot carry that
+word.
+
+The product does record the provider, once per author call: the `provider` field of each
+`author.attempt` event (`author.py` 338-348), set from the endpoint (`openai_client.py`
+531-545). For a host under `cerebras.ai` the value is `cerebras`.
+
+The harder course is a test, and a test is an addition, so it is Paul's (P4). Under P4:
+
+1. After the order check passes and before the script reads any row, it reads the events
+   log of each standing run it has read as `S1`. This is the same log R12 already has it
+   read.
+2. It keeps, for this test, only the `provider` value of each `author.attempt` event.
+3. Each such run must hold at least one `author.attempt` event. Every `provider` value must
+   be exactly `cerebras`.
+4. If not, the script stops and prints the words "test author provider not shown as
+   cerebras" and two counts: the number of runs with no `author.attempt` event, and the
+   number of runs with a value that is not `cerebras`. It prints no figure and no run id.
+   It writes the run ids to a file for the deviation log. No signing seat opens that file
+   before the primary is filed and signed. Test (i) applies.
+   - This stop is strict, and I keep it. An author call that raised emits no event
+     (`author.py` 321-331). So an honest `S1` run whose every author call raised fails this
+     test. For such a run Cerebras is not shown.
+   - A run id under the first cause would tell a seat that one `S1` run's author made no
+     call that returned. That bears on R12's count of usable tests, which is an outcome by
+     arm. Hence counts only, and the ids kept from the signing seats.
+   - This test works one way as a second test of `S1`: a run read as `S1` with no author
+     event fails. That is a limited exception to the bar of section 11 on the events log,
+     and it is part of what Paul is asked.
+5. Run `98fe708c` is not tested. It ended at its gold control before any build.
+6. Before the script is committed the delivery manager confirms from the served code the
+   event's action name as served, the payload key `provider`, and the value `cerebras`, and
+   records the lines. This is the same name check as R12 item 5.
+
+P3 and P4 stand or fall together with the rest (section 11b). There is no case of P3
+without P4. I withdraw the mixed case this section set out before the fix round.
+
+## 7. The campaign `s1` flag (P2, second field)
+
+Unchanged in substance from version 1, and still not signed by me. `runs[].s1` in
+`GET /campaigns/{campaign_id}` is set at admission from `body.arm is not None` (`runs.py`
+1246, `campaigns.py` 514). It marks both arms positively and sits beside no clean figure.
+
+It tests the `arm` field only. It does not test `test_author` (section 3.3).
+
+Under P2:
+
+- The arm is still read from the body only.
+- The flag is a second test. For each of the 49 runs, `s1` must be `true` where the body
+  reads `S1` and `false` where it reads `A0`.
+- A disagreement fails the check under test (i). Neither source is picked over the other.
+
+My recommendation is yes. After the second fact sheet it matters more than it did. It is the
+only served evidence of what arm a run was admitted under (section 3.3, trust item 1).
+
+Correction to version 1 (checker's quote point). Version 1 quoted test (i) as "this check
+[is] not changed". The sentence in full is: "The lists and this check are not changed to
+make it pass." That sentence bars a change made to make the check pass. It does not by
+itself bar a stricter addition. The `s1` test still goes to Paul, for a different reason: it
+adds a source to "run records and run bodies only".
+
+## 8. Tests (a) and (b): "of the campaign" (checker's fault 3)
+
+`RunOut` has no campaign field. The checker confirmed it. The campaign id is stored and never
+served on a run record.
+
+**Version 1's note is withdrawn.** It replaced "all blind runs of the campaign" with "every
+blind run that `GET /runs` serves". That changed a registered population and I signed it as
+a reading. It was also unsound: Wave 4 runs "on commits Wave 3 has already used" (part 2),
+so an older blind run on a listed commit could fail (b) for a reason the text does not
+count.
+
+What a reading can settle:
+
+- **The 49 runs.** Each kept body must carry `campaign_id` equal to the campaign id the
+  registration prints, `cmp_88cf9e875edba15371e6d3f7` (Amendment 2, "The pilot": the pilot
+  and the wave share one campaign. The notes beside the deviation log in the annex give
+  "over 52 runs (3 pilot, 49 wave)"). Part 2: "Every run
+  names the Wave 4 campaign". The body is a source the text allows. The script carries the
+  id as a constant. The delivery manager confirms the constant against the registration
+  before the script is committed.
+
+What a reading cannot settle:
+
+- **Test (b)'s population.** "Among all blind runs of the campaign" needs the full set of
+  the campaign's runs. No run record field gives it. Item 2 says: "If any part fails, or a
+  field it needs is absent, it stops". **Read as written, test (b) stops the check.**
+
+The one served source of the campaign's membership is `runs[].run_id` in
+`GET /campaigns/{campaign_id}`. It lists every run admitted under the campaign. It is the
+registered population exactly, neither wider nor narrower. Reading it adds a source, so it
+is Paul's (P2, first field). Under P2:
+
+1. The script reads the campaign record once and keeps `runs[].run_id` and `runs[].s1`.
+2. Each of the 49 run ids must appear in it exactly once. That is test (a)'s "of the Wave 4
+   campaign", now tested against the product as well as the body.
+3. For test (b) the script fetches the run record of every listed run id. Among those with
+   `kind` `blind` whose `task_ids` name any of the 60 listed commits there must be exactly
+   the 48 standing runs and run `98fe708c`.
+
+On a no, test (b) cannot be made, the check stops, and test (i) applies.
+
+## 9. Test (i), in full, and what happens on any failure
+
+> "(i) **If it fails.** A stop here is not the read of item 3: no row was read. The read
+> waits. The failure goes into the deviation log with the run ids and the two times. No run
+> is dropped, no batch is filed again and no row is set aside because of it. The lists and
+> this check are not changed to make it pass. A fault in the script itself is corrected
+> under a new commit and sha256, recorded before any row is read. Only Paul, in writing, can
+> say whether the primary is then read (Part E)."
+
+Every failure named in sections 3 to 8 is a failure under these words. The script stops and
+prints which part failed with the run ids and times. It prints no figure. The failure goes
+into the deviation log. No run is dropped. No source is picked over another. Only Paul, in
+writing, says whether the primary is then read.
+
+Two things follow from "The lists and this check are not changed to make it pass":
+
+- The check has not been run. No part has failed or passed. No comparison by arm is known
+  to me. What I did see is in section 0. P1 to P5 are put to Paul before any run of the
+  script, not after a failure.
+- P1 and P3 are still words without which the check, as written, cannot pass on the served
+  product. Whether adopting them counts as changing the check "to make it pass" is not mine
+  to say. I say only this. P1, P2 and P4 add no way to pass a test that the registered tests
+  would fail on the same facts. But P1 and P2 supply sources without which the check stops
+  for every run, so they turn a certain stop into a check that can pass. P3 is different and I do not claim that for it: under spelling B the same
+  bodies would fail (section 6.2). Amendment 4 puts both to Paul in plain words.
+
+## 10. What the delivery manager records under test (h)
+
+All from the served code at `7bb03d6c`, none from a run. Recorded in the wave record before
+the script is committed. The script prints it.
+
+Run record: `GET /api/v1/runs/{run_id}`, schema `RunOut` (`schemas.py` 601-643), built by
+`run_out` (`runs.py` 547-597).
+
+| Fact | Field | Note |
+|---|---|---|
+| Filing time | `created` | set at enqueue. `started` is the claim time and is not used |
+| End time | `finished` | null until the run ends. Null, or served without a time zone, counts as absent under (c) |
+| Status | `status` | |
+| Row count | `counts.rows` | |
+| Commits | `task_ids` | used by (a), (b) and T5 |
+| Kind | `kind` | must be `blind` |
+
+This part of (h) is met as written. The four fields exist.
+
+Also recorded as facts of the served code:
+
+- `RunOut` carries no `arm`, no `test_author` and no campaign field. `GET /runs` has no arm
+  filter.
+- An `A0` run stores neither `params.arm` nor `params.test_author`. An `S1` run stores
+  `params.arm = "S1"`.
+- The value part of (h): section 6.1 as the finding, and sections 6.2 and 6.3 only if P3 and
+  P4 are in force.
+- The place rule of T7, the body-echo confirmation of section 4, and the campaign id of
+  section 8.
+
+## 11. Outcomes by arm: what each source exposes, and the guards
+
+Every guard of version 1 section 5 is kept. Three are added, marked "new".
+
+- **Kept request bodies (plan file).** They hold no outcome. Guard: section 5. The script
+  opens the `body` values, and `slot` if T7 says so, and nothing else in that folder but the
+  out files' `run` values.
+- **Out files (new).** They hold the poster's `arm` label and the status flag `clean_end`.
+  A status flag by arm is close to an outcome by arm. Guard: the script keeps `run` only,
+  drops the rest as it parses, and never stores, logs or prints one. The tests on made-up
+  files include out entries with `arm` and `clean_end` filled in, and assert that neither
+  reaches any output.
+- **Run record.** It holds outcomes: `counts.clean`, `counts.first_pass_clean`,
+  `counts.disqualified`, `counts.errors` and `error`. On an `S1` run `error` can begin
+  `authoring:`. For the order check the script keeps only `id`, `kind`, `status`,
+  `task_ids`, `created`, `finished`, `counts.rows`, and the echo fields of section 4:
+  `repo`, `builder`, `model`, `provider`, `budget`, `max_cost_usd`, `builder_config`,
+  `retain`. It drops every other key as it parses, and never stores, logs or prints one.
+  The tests on made-up records include records with `counts.clean` and `error` filled in,
+  and assert that neither reaches any output of the order check. This guard covers every
+  run record the script fetches, the other runs of the campaign included.
+- **Status.** All 48 standing runs must be `succeeded`, and `98fe708c` must be `failed` with
+  0 rows. Amendment 3 already states both, so this tells nothing new by arm.
+- **Campaign record, only under P2.** It holds no clean figure. Beside `s1` it holds each
+  run's `status`, `commits_done`, `spent_usd`, `rows_usd` and `authoring_usd`, and the
+  campaign's totals. Spend by arm is a figure by arm. Guard: the script keeps `run_id` and
+  `s1` only, drops the rest as it parses, and prints neither a spend nor a status from that
+  record.
+- **Events log, only under P4 (new).** It holds outcomes: `ledger.append`, `run.done` and
+  `run.finished` carry clean counts, and `author.attempt` carries a `reason`. Guard: for the
+  provider test the script keeps only the `provider` value of `author.attempt` events. It is read after the order check has passed, in the same
+  run of the script that goes on to the read. On a failure it prints two counts and no run
+  id (section 6.3, item 4). Version 1's bar stands otherwise: the events log is not a
+  source for the arm, and no seat reads it. The one exception is the one-way effect of P4
+  that section 6.3 item 4 names.
+- **Sources that must not be used for the arm, even as a second test:** grade rows, row
+  labels, `/ledger/export`, `/runs/{id}/tasks`, `/readings`, the aggregate maps and the
+  events log, `factory/author.configured` included. The only exception is the one-way
+  effect of P4 (section 6.3 item 4).
+- **What the check prints.** On a pass it prints the field names of (h), `L` and its source,
+  the file paths and hashes, the "Taken on trust" lines, and one line saying the order check
+  passed. Then it goes on in the same run. On a failure it prints the failed part with the
+  run ids and the two times, as item 2 says. For a failure of (e) it prints the run id and
+  the words "body does not give the arm its place requires", or the test of section 3, 4, 6,
+  7 or 8 that failed. It prints no table of arms by run.
+- **No seat reads anything by hand.** No seat calls the campaign record, opens a kept body
+  or an out file, or reads the events of a run to learn its arm, before the primary is filed
+  and signed. Part E item 7 stands.
+- **Seat exposure (new).** The disclosure in section 0 is entered in the deviation log, in
+  the words section 0 gives.
+
+With these guards, no chosen source puts an outcome by arm in front of any seat before the
+primary. The exposure of section 0 came from a note, not from a chosen source, and it
+stands as disclosed.
+
+## 11a. Part E item 5 is widened (checker's second report, fault 3)
+
+Part E item 5 reads: "**The filing order is checked by the script**, from run bodies and
+from each run record's status, row count, filing time and end time, as R5 item 2 says".
+
+That is a list of what the script reads for the order check. P1, P2 and P4 add to it:
+
+| Point | Source added to Part E item 5's list | What is read from it |
+|---|---|---|
+| P1 | the poster's two out files | the run id under each key |
+| P2 | the Wave 4 campaign record | `runs[].run_id` and `runs[].s1` |
+| P4 | the events log of each standing `S1` run | the `provider` value of each `author.attempt` event |
+
+P3 adds no source the script reads. It adds two documents the delivery manager reads.
+
+**This is a change to what a Part E condition allows. Only that.** No other word of Part E
+changes: not items 1 to 4, not items 6 and 7, not the last sentence of item 5 ("If the check
+fails the primary is not read, nothing is dropped, and the matter goes to Paul").
+
+One more thing, by the harder reading. Item 5 names four run record fields. Tests (a), (b)
+and (d) already need `kind` and `task_ids`, and section 4 compares `repo`, `builder`,
+`model`, `provider`, `budget`, `max_cost_usd`, `builder_config` and `retain`. All are fields
+of the run record, and R5 item 2 allows "run records". But item 5's own list is shorter. So
+the amendment also says, under point 1, that these run record fields are read.
+
+The first writing of this version, and of the amendment, said the conditions of Part E were
+unchanged. That was wrong and is withdrawn.
+
+## 11b. One answer for all points (checker's second report, fault 2)
+
+Paul is asked one question. It covers P1 to P5 together.
+
+- A plain yes puts all five in force, with `L` as spelling A.
+- Any other reply is a no to all five. That includes a reply such as "yes to 1 to 3, not 4".
+  No point takes effect alone, because the points lean on each other: without P1 or P2 the
+  check stops, without P3 test (h) fails, and P3 without P4 would leave "Cerebras" untested.
+- On a no, the registered words stand alone. The check stops, as section 13 sets out, and
+  test (i) applies. Paul may say which part he rejects. A new draft is then written. Nothing
+  is in force meanwhile.
+
+## 12. The checker's faults and notes, one by one
+
+| Checker's point | Where dealt with | Outcome |
+|---|---|---|
+| Fault 1: "equal" undefined; `retain` fails all 49 | section 4 | closed by a field-by-field rule; reading |
+| Fault 1: `6` against `6.0` | section 4 | numbers as numbers |
+| Fault 1: is the field list complete; `ladder` | section 4 | the table is complete; `ladder` not compared; any other key stops the check |
+| Fault 2: `L` from outside the served code signed as a reading | section 6 | version 1 withdrawn on this; (h) fails as written; source goes to Paul as P3 |
+| Fault 2: which source, which poster version | section 6.2 | one source, two document lines at `7bb03d6c`; the poster is not a source |
+| Fault 2: must `L` name the provider | section 6.3 | spelling A does not; the deployment setting may not stand in; test put to Paul as P4 |
+| Fault 2: near self-comparison | section 6.2 | `L` is not from the bodies; the delivery manager's prior sight of the value is stated in the report |
+| Fault 3: (b)'s population replaced and signed | section 8 | version 1's note withdrawn; registered population kept; its source goes to Paul as P2 |
+| Quote of (i) cut short | sections 7 and 9 | quoted in full |
+| Note: "only existing copy" goes too far | section 2 | corrected |
+| Note: "as written at filing time" cannot be tested | section 3.3 | stated as trust item 2 and printed |
+| Note: body kept beside status or counts | sections 5 and 11 | drop-on-parse extended to the plan and out files |
+| Note: `factory/author.configured` missing from the fact table | section 11 | no change; the events log stays barred as an arm source. The event carries `name:model` only, no provider, so it cannot serve P4 |
+| Note: no source shows an outcome by arm if guards hold | section 11 | guards kept and extended |
+| New fact: body and run id in two files | section 3.2 | key join defined; out-file read goes to Paul as P1 |
+| New fact: possible inferred tie | section 3.3 | tested by T5 whichever way it was made; what is left is printed as trust |
+| New fact: out files hold `arm` and `clean_end` | section 5 | `run` only |
+| New fact: `L` has no provider; endpoint is a deployment setting | section 6.3 | P4 |
+
+The checker's second report (`r5-arm-source-check-2.md`):
+
+| Checker's point | Where dealt with | Outcome |
+|---|---|---|
+| Fault 1: a competing committed spelling of `L` left out | section 6.2, summary P3 | both spellings named; that B would fail every `S1` body is said; reasons for A and against A given; the choice is Paul's |
+| Fault 2: one yes or no, but split answers expected | section 11b; section 6.3 | one answer for all points; a mixed reply is a no; the mixed case of 6.3 withdrawn |
+| Fault 3: Part E item 5 widened but called unchanged | section 11a, summary P5, section 13 | stated as a change; the false no-change words withdrawn |
+| Note 1: "Part A counts 52 runs" | section 8 | now cites the annex notes |
+| Note 2: P4 failure path shows an outcome and can fail an honest run | section 6.3 item 4 | counts only; ids kept from signing seats; strictness stated |
+| Note 3: "item 1 tested against `s1`" overstated | sections 3.3 and 7 | now "the `arm` field" only |
+| Note 4: amendment cites a section that may be revised | amendment, point 1 | this ruling is pinned there by sha256; a revision of section 4 needs Paul's word again |
+| Note 5: which poster text ran for every batch | section 3.3 | trust item 5 added and printed |
+| Note 6: `factory/author.configured` | section 6.2 | named as the one served trace of the label; barred; not asked for |
+| Note 7: P4 is a one-way second test of `S1` | sections 6.3 item 4 and 11 | said as a limited exception, put to Paul |
+| Note 8: trust lines paraphrased in the amendment | amendment, point 1 | the five lines are quoted there word for word |
+| Note 9: section 0 exposure understated | section 0 | reworded; deviation log wording fixed |
+| Note 10: wrong line cite for `s1` | amendment, point 2 | now `runs.py` 1246 and 1290, `campaigns.py` 455-531 |
+| Note 11: "your decision" not neutral | amendment, the question | both spellings and both sources named |
+
+## 13. Signature
+
+Seat: **methodologist**, crb programme. Date: **2026-11-12**.
+
+**[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+
+Signed here as readings that change no registered word: section 2; in section 3, the plan
+file as the source of bodies, tests T1, T2 and T7, and the trust statement of 3.3; section 4;
+section 5 as to the plan file; the finding of section 6.1; the campaign id rule for the 49
+bodies in section 8; the finding in section 8 that test (b) stops as written; sections 9, 10
+and 11; the finding of section 11a that Part E item 5 is widened; section 11b.
+
+Not signed, fixed in wording only, and in force only on Paul's written yes to Amendment 4,
+all together or not at all: P1 (the out files' `run` values, with T3 to T6 which depend on
+them), P2 (the campaign record's `run_id` and `s1`), P3 (the source of `L`, and spelling A
+over spelling B), P4 (the provider test), P5 (the sources added to Part E item 5).
+
+Until Paul answers, the position by the registered words alone is: test (e) has no body it
+can call a run's own, test (b) has no population it can read, and test (h) has no confirmed
+value. Each is a stop under item 2, and none is a result. The script is not committed and
+the primary is not read. Until then Part E stands as registered. On a yes, item 5's list of
+sources is widened as section 11a says and nothing else in Part E changes. Condition 2 of
+Part E is still open either way.
+
+
+## Corrections applied by the delivery manager, 2026-11-12
+
+The independent checker's last report (`r5-arm-source-check-3.md`) named two faults in this
+file after the two-round cap. The delivery manager applied the checker's own fixes, word for
+word in substance, and changed nothing else: section 9 (the sentence on what P1, P2 and P4
+do) and section 11 (the stray clause "prints only run ids on a failure" struck).

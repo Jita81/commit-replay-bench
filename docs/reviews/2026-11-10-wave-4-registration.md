@@ -1538,3 +1538,355 @@ is changed by this amendment.** `N` is 62, `k` is 15, `c` is $0.1956404, the tur
 the seed is 20261112, the four lists and the 12 batch orders are as Amendments 1 and 2 give
 them, and every threshold and decision word of part 6 stands as registered.
 **[hypothesis — read from the served stack and the session of 2026-11-12 by the seats; the rows and the transcript are not in this repository]**
+
+---
+
+## Amendment 4: the order check's sources, where the served product is silent. 2026-11-12
+
+**Status: in force by Paul's written yes of 2026-11-12.** The delivery manager put the
+question printed below under "The question for Paul" to Paul on 2026-11-12, with this text
+attached as a draft. Paul's reply, in full: "Yes proceed". It is read as the plain yes that
+the question asks for, and as nothing more. It is not a word on Part E item 2, the cost
+gate, which stays open. This amendment is committed, and its hash recorded, before the
+script of R5 is committed.
+**[hypothesis — Paul's reply as the delivery manager records it from the session of 2026-11-12; the session is not in this repository]**
+
+**What was changed after the draft Paul answered.** The draft had sha256
+`3a35002f3efb11e323348307624a7596925e4f724f2435def8d9047ba0504bf9`. The delivery manager
+then changed the title, this status, this paragraph and the next, four tags that said no
+answer existed, one sentence of the signature, and the line breaks of one paragraph. The
+claim tag under each quoted block was moved inside it and repeated for each of its
+paragraphs and items, and three tags gained the words "apparatus 2.5". The repository's
+claims check asks for both. No point, no new words of a test and no word of the question
+was changed. After the outside review of the pull request, three more edits were made: the
+ruling's file name in "Why it is Paul's" was corrected from `.md` to `.txt`, the name it is
+committed under; two more tags gained the words "apparatus 2.5"; and the paragraph "How the
+tie is read for run `98fe708c`" was added under Point 1. That paragraph is outside the new
+words and changes none of them.
+**[hypothesis — the delivery manager's statement of the edits made on 2026-11-12; the draft is not in this repository]**
+
+**The ruling this amendment cites.** The methodologist's ruling, version 2, is committed
+beside this registration, byte for byte, as
+`2026-11-10-wave-4-registration/r5-arm-source-ruling-v2.txt`. Its sha256 is the one given
+below. That text holds three wording corrections the delivery manager made on 2026-11-12,
+after the checker's second round found them. They are listed at the end of the ruling. The
+corrected text has had no third check.
+**[hypothesis — the delivery manager's statement of the sessions of 2026-11-12; the checker's reports are not in this repository]**
+
+This amendment is written before the primary is read. Nothing in it is a result. No
+comparison between the arms has been computed by anyone, and none was used to write it. The
+order check of R5 item 2 has not been run. No part of it has passed or failed.
+**[hypothesis — the seat's own statement of what it read on 2026-11-12; the session is not in this repository. One exposure is disclosed in section 0 of the methodologist's ruling, version 2]**
+
+**What this amendment does not change.** `N` (62), `k` (15), `c` ($0.1956404), the turn limit
+(50), the seed 20261112, the four lists, the cut, the 12 batch orders, every threshold and
+decision word of part 6, the row rule, tests (c), (d), (f), (g) and (i), and Part E items 1
+to 4, 6 and 7.
+**[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+**What this amendment does change in Part E. One thing.** Part E item 5 reads: "**The
+filing order is checked by the script**, from run bodies and from each run record's status,
+row count, filing time and end time, as R5 item 2 says". Points 1, 2 and 4 add three sources
+to that list: the poster's two out files, the Wave 4 campaign record, and the events log of
+each standing `S1` run. Point 1 also names the other run record fields the check reads. That
+widens what item 5 allows the script to read. It is a change to a Part E condition and it is
+part of the question below. The rest of item 5 keeps its words: what is checked, that no
+seat does it by hand, and "If the check fails the primary is not read, nothing is dropped,
+and the matter goes to Paul."
+**[hypothesis — quoted from Part E item 5 of the registration at main `6deb8842`; the widening is the methodologist's finding, ruling version 2 section 11a]**
+
+**Why it is Paul's.** Each point adds a source or a test to words that say "only" or "from
+the served code". The methodologist can read registered words (topology rule 2). Only Paul
+can add to them (topology rule 1). Points that could be settled as readings are in the
+methodologist's ruling, version 2, and are not repeated here. Where this amendment cites
+that ruling, it means the file `r5-arm-source-ruling-v2.txt` with sha256
+`a4ffb60731b0f56187be62e33cfad6f342d05f2c28af072346392d7aec8e9e22`. A later change to section
+4 of the ruling does not change this amendment. It would need Paul's written word again.
+**[hypothesis — a statement of who decides, by topology rules 1 and 2; Paul's answer is quoted in the status above]**
+
+**One answer for all points.** Paul is asked one question. A plain yes puts points 1 to 4
+and the change to Part E item 5 in force together. Any other reply is a no to all of them,
+a reply such as "yes to 1 to 3, not 4" included. No point takes effect alone. Paul may say
+which part he rejects, and a new draft is then written.
+**[hypothesis — the rule by which the answer was read; Paul's answer is quoted in the status above]**
+
+**One sentence of test (i) that Paul should have in view.** "The lists and this check are
+not changed to make it pass." The check has not been run, so nothing here follows a failure.
+But on the served product, points 1, 2 and 3 are words without which the check as written
+cannot be made at all. Whether that is a change "to make it pass" is Paul's to say. The
+methodologist's position is that points 1, 2 and 4 add no way to pass a test that the
+registered tests would fail on the same facts. But points 1 and 2 supply sources without
+which the check stops for every run, so they turn a certain stop into a check that can
+pass. The methodologist does not claim that for point 3. Point 3 picks one of two committed
+spellings, and under the other one every `S1` body would fail.
+**[hypothesis — the methodologist's position; the served code was read at `7bb03d6c`, the check itself has not been run]**
+
+---
+
+### Point 1. Which file says a kept body is a run's body
+
+Registered words (R5 item 2): "For it the script reads run records and run bodies only, and
+no row." Test (e): "A run's arm is read from its body only." Part E item 5: "from run bodies
+and from each run record's status, row count, filing time and end time".
+**[hypothesis — quoted from the registration at main `6deb8842`]**
+
+The fact. The served run record carries no body, no `arm` and no `test_author`. The only
+readable copy of each body is in the poster's plan file, under a key such as `click-1/1`.
+The run id the product returned is in a second file, the poster's out file, under the same
+key. If a POST timed out, the poster took the run by matching `task_ids`, and the out file
+does not say when that happened.
+**[hypothesis — the delivery manager's second fact sheet of 2026-11-12, from the poster's source text and file shapes; the files are not in this repository]**
+
+New words, added to test (e) and to the sources of Part E item 5:
+
+> A run's body is the `body` the poster's plan file holds under the key under which the
+> poster's out file holds that run's id. From an out file the script reads the run id under
+> each key and nothing else. The files are fixed by sha256 and the script prints the
+> hashes. The tie is tested and never mended: the 49 ids must be the 48 standing runs and
+> run `98fe708c`, each once; each run's `task_ids` and its place by test (d) must match its
+> key; and every field the body and the run record share must agree, by the field rules of
+> the methodologist's ruling, version 2, section 4, at the sha256 given above. For this the
+> script reads these run record fields beside the four Part E item 5 names: `kind`,
+> `task_ids`, `repo`, `builder`, `model`, `provider`, `budget`, `max_cost_usd`,
+> `builder_config` and `retain`. Any miss fails the check. The script prints, and the
+> report repeats, these five lines under the heading "Taken on trust":
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+>
+> 1. That the poster sent the plan's `body` for place `p` as its `p`th POST of the batch, and
+>    sent it unchanged. This rests on the poster's source text (`wave4_post.py` line 150,
+>    sha256 `b30ca68e...50b105`) and on the delivery manager's statement that the plan file
+>    was not rewritten by the poster.
+>    **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+> 2. That the four files are as they were at filing time. The hashes were first recorded on
+>    2026-11-12, after the wave. The script cannot use file times.
+>    **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+> 3. Whether any tie was made by inference. No kept file says.
+>    **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+> 4. That `refile.py` filed batch 3 again from the same plan entries.
+>    **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+> 5. That the poster source text of item 1, at that sha256, is the text that ran for every
+>    batch. The deviation log (annex, D4) records a poster crash before batch 3. No kept file
+>    shows which text ran after it. T7 rests on the same text.
+>    **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+**How the tie is read for run `98fe708c`.** The new words above say "each run's `task_ids`
+and its place by test (d) must match its key". Test (d) ranks the 48 standing runs only, so
+run `98fe708c` has no place under it. The words are read with test T5 of the methodologist's
+ruling, version 2, section 3.2, signed before Paul answered: under the key
+`click-3/1#attempt1` the run must hold the `task_ids` of click batch 3 and meet the times
+that test (g) gives run `98fe708c`. Its arm is tested by the words of test (e) in Amendment
+3: it "must carry the arm of place 1 of click batch 3". The place test by test (d) applies
+to the 48 plain keys. This is the reading the cited ruling already holds. It adds no source
+and no test.
+**[hypothesis — a reading, quoted from ruling version 2 section 3.2 (T5) at the sha256 given above and from R5 item 2 test (e) of Amendment 3; no run was read to write it]**
+
+Why no looser. The arm is still read from the body only. The out file gives only the name of
+the run. Every added test can only fail the check. A tie made by matching is tested the same
+way as any other, against the product's own filing times. The added run record fields are
+inside "run records" of R5 item 2. The out files are a new source for Part E item 5, and
+that is said above.
+**[hypothesis — an argument from the wording; not shown by a run of the script]**
+
+### Point 2. Two fields of the campaign record
+
+Registered words (test (a)): "Each must be a blind run of the Wave 4 campaign". Test (b):
+"Among all blind runs of the campaign whose `task_ids` name any of the 60 listed commits
+there must be exactly one more". Item 2: "run records and run bodies only".
+**[hypothesis — quoted from the registration at main `6deb8842`]**
+
+The fact. The served run record has no campaign field, so the script cannot tell which runs
+are "of the campaign". The campaign record, `GET /campaigns/{campaign_id}`, lists every run
+admitted under the campaign in `runs[].run_id`. Beside it, `runs[].s1` says whether the run
+was admitted with an `arm` field. That flag is the only served field that shows a run's arm
+without a clean figure next to it. It shows the `arm` field only. It does not show
+`test_author`.
+**[measured — n = 2 fields, method: read-only `git show` of `src/crb/server/campaigns.py` 455-531 and `routes/runs.py` 1246 and 1290 at the served commit `7bb03d6c`, apparatus 2.5; a property of the product's code, not a graded row]**
+
+New words, added to tests (a), (b) and (e) and to the sources of Part E item 5:
+
+> The runs "of the campaign" are the runs listed in `runs[].run_id` of the Wave 4 campaign
+> record. From that record the script reads `run_id` and `s1` for each run and nothing
+> else. Each of the 49 runs must be listed exactly once. Test (b) is made over the run
+> records of the listed runs. For each of the 49 runs, `s1` must be `true` where its body
+> reads `S1` and `false` where it reads `A0`. A disagreement fails the check. Neither
+> source is picked over the other.
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+Why no looser. The population of test (b) is the registered one, the campaign's runs, no
+wider and no narrower. The `s1` test is a second test that must agree. It can only fail the
+check. The script drops every spend and status field of that record as it parses. The
+campaign record is a new source for Part E item 5, and that is said above.
+**[hypothesis — an argument from the wording; not shown by a run of the script]**
+
+### Point 3. Where the `test_author` value comes from, and which of two spellings
+
+Registered words (test (h)): "the delivery manager confirms from the served code ... the
+exact value the served code stores in `test_author` for the Cerebras `gpt-oss-120b` rung".
+And: "no such value is confirmed, the check fails."
+**[hypothesis — quoted from the registration at main `6deb8842`]**
+
+The fact. The served code stores whatever label was sent, with outer spaces removed. It
+accepts more than one spelling for this model. It holds no table from the model to a
+provider. So the code alone fixes no value, and read as written test (h) fails.
+**[measured — n = 3 code paths, method: read-only `git show` and `git grep` at `7bb03d6c` of `routes/runs.py` 772-776, `builders/adapter.py` 457-479 and `builders/openai_client.py` 560-589, apparatus 2.5; a property of the product's code, not a graded row]**
+
+Two spellings are committed in the served checkout `7bb03d6c`, both written before the
+wave:
+
+- **Spelling A, `editblock:gpt-oss-120b`.** `docs/DECISION-LOG.md` line 175 (DL-378, Paul's
+  decision of 2026-10-11): "The `S1` test author is `editblock:gpt-oss-120b` on Cerebras".
+  `docs/OPERATOR.md` lines 1404 and 1432. The Wave 3 registration, line 200.
+  **[measured — n = 4 document lines, method: read-only `git grep` for `editblock:gpt-oss-120b` in `docs` at `7bb03d6c`, apparatus 2.5; the lines exist as quoted]**
+- **Spelling B, `editblock:gpt-oss-120b:cerebras`.**
+  `docs/reviews/2026-10-09-wave-3-registration.md` line 1238: "`raw.factory.test_author`
+  reads `editblock:gpt-oss-120b:cerebras`". This is a reading of the deployment's own
+  setting, dated 2026-11-09 by the checker. It is the more recent record and the only one
+  that names the provider.
+  **[measured — n = 1 document line, method: the same read-only `git grep` at `7bb03d6c`, apparatus 2.5; the line exists as quoted]**
+
+**The choice decides the test.** The test is exact equality. The delivery manager's second
+fact sheet reports that the kept `S1` bodies hold spelling A and no other. If so, A passes
+this part for all 24 `S1` bodies and B fails all 24. The delivery manager knew what the
+bodies held before the documents were searched. So the value is being chosen, between two
+committed spellings, by seats who know which one the bodies hold.
+**[hypothesis — the second fact sheet's report of the kept bodies; the methodologist has not opened them and the check has not been run]**
+
+Why A is put forward. DL-378 is the decision that sets the `S1` test author, and part 2's
+words follow it. A is the form the operator guide gives for the body field. Line 1238
+records a deployment setting on one day. It is not a rule for what a run body carries. The
+provider, which is all B adds, is tested apart under point 4, on the product's own stamp of
+each call.
+**[hypothesis — the methodologist's reasons; an argument from the documents, not shown by a run]**
+
+What counts against A. B is the more recent record. Read as a label, "the Cerebras
+`gpt-oss-120b` rung" is more fully written as B. If Paul holds that the body itself had to
+name the provider, the answer is no.
+**[hypothesis — the methodologist's statement of the other side; an argument from the documents, not shown by a run]**
+
+New words, added to test (h):
+
+> The value is `editblock:gpt-oss-120b`. It is taken from two documents committed in the
+> served checkout `7bb03d6c` before the wave: `docs/DECISION-LOG.md` line 175 (DL-378,
+> Paul's decision of 2026-10-11) and `docs/OPERATOR.md` line 1432. It is chosen over the
+> spelling `editblock:gpt-oss-120b:cerebras` that line 1238 of the Wave 3 registration
+> records. It is not taken from a kept body, the plan file, a run, an event or a row. The
+> delivery manager confirms from the served code that this label is stored as sent and is
+> accepted as the model `gpt-oss-120b`. The script compares by exact equality. Any other
+> spelling fails.
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+Why no looser, and where that claim stops. It is one fixed string, from documents older
+than the wave. Exact equality. No second spelling is allowed. But it is the spelling the
+bodies are reported to hold, picked over one they do not. That is not shown to be "no
+looser". It is put to Paul as a choice. The report states both facts: that the delivery
+manager had seen the value in the plan file before the documents were searched, and that
+spelling B exists and would fail every `S1` body.
+**[hypothesis — an argument from the wording; not shown by a run of the script]**
+
+### Point 4. The word "Cerebras"
+
+Registered words (part 2 and test (e)): "`test_author` set to the Cerebras `gpt-oss-120b`
+rung".
+**[hypothesis — quoted from the registration at main `6deb8842`]**
+
+The fact. The value of point 3 names no provider. The test author calls whichever endpoint
+the worker's settings name. Cerebras is only the fallback in the code. No seat may read
+those settings. So neither the body nor the code shows the author ran on Cerebras. The
+product does stamp the provider on each author call that returns, in the `provider` field
+of the `author.attempt` event. A call that raises leaves no event.
+**[measured — n = 1 call chain, method: the fact-finder's read-only trace at `7bb03d6c` through `worker.py` 4543-4574, `factory/author.py` 241-264, 321-331 and 338-348, `builders/openai_client.py` 531-545 and 648-674, apparatus 2.5; a property of the product's code, not a graded row]**
+
+New words, added after test (h) and to the sources of Part E item 5:
+
+> After the order check passes and before any row is read, the script reads the events log
+> of each standing `S1` run, the same log R12 reads. For this test it keeps only the
+> `provider` value of each `author.attempt` event. Each such run must hold at least one such
+> event, and every value must be exactly `cerebras`. If not, the script stops. It prints
+> two counts, the runs with no such event and the runs with another value, and no figure
+> and no run id. It writes the run ids to a file for the deviation log, which no signing
+> seat opens before the primary is filed and signed. Test (i) applies. The delivery manager
+> confirms the event name and the value from the served code before the script is
+> committed.
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+Why no looser. It is a new way for the check to stop, and no new way for it to pass. It is
+strict: an honest `S1` run whose every author call raised fails it, because Cerebras is not
+shown for that run. It works one way as a second test of `S1` from the events log, which is
+otherwise barred as a source for the arm. The script keeps one value per event. On a stop
+it prints counts only, so no seat learns before the read which `S1` run's author made no
+call that returned. The events log is a new source for Part E item 5, and that is said
+above.
+**[hypothesis — an argument from the wording; not shown by a run of the script]**
+
+---
+
+### The question for Paul
+
+> The check that must pass before the Wave 4 result is read cannot be made as written. The
+> product does not show a run's request, its campaign or its test author's provider. May
+> the script do these four things, as Amendment 4 sets out?
+> **[hypothesis — the question as the delivery manager put it to Paul on 2026-11-12; Paul's answer is quoted in the status above]**
+>
+> 1. Match each kept request to its run using the poster's own two files.
+>    **[hypothesis — the question as the delivery manager put it to Paul on 2026-11-12; Paul's answer is quoted in the status above]**
+> 2. Read two fields of the campaign record: the run id and the `S1` flag.
+>    **[hypothesis — the question as the delivery manager put it to Paul on 2026-11-12; Paul's answer is quoted in the status above]**
+> 3. Take the test author label as `editblock:gpt-oss-120b`, from decision DL-378 and the
+>    operator guide. The Wave 3 registration records it as
+>    `editblock:gpt-oss-120b:cerebras`. The kept requests are reported to hold the first
+>    spelling. Under the second, every `S1` request would fail the check.
+>    **[hypothesis — the question as the delivery manager put it to Paul on 2026-11-12; Paul's answer is quoted in the status above]**
+> 4. Stop unless each `S1` run shows at least one test author call, and every call shown is
+>    stamped `cerebras`. A run whose every author call failed would stop the read.
+>    **[hypothesis — the question as the delivery manager put it to Paul on 2026-11-12; Paul's answer is quoted in the status above]**
+>
+> Items 1, 2 and 4 add three sources to the list in Part E item 5: the poster's files, the
+> campaign record and the events log. That is a change to a Part E condition.
+> **[hypothesis — the question as the delivery manager put it to Paul on 2026-11-12; Paul's answer is quoted in the status above]**
+>
+> One answer covers all of it. Anything other than a plain yes counts as no to all.
+> **Yes or no.**
+> **[hypothesis — the question as the delivery manager put it to Paul on 2026-11-12; Paul's answer is quoted in the status above]**
+
+### What happens on "no"
+
+A no is a no to all points. The registered words then stand alone, and each point's lack
+has this effect:
+
+1. **Point 1.** No kept body can be called a run's body. Test (e) stops for all 49 runs.
+   **[aspiration — the consequence by the registered words; the check has not been run]**
+2. **Point 2.** No served field says which runs are of the campaign. Test (b) stops on a
+   field that is absent. The arm of each run rests on the team's own files alone.
+   **[aspiration — the consequence by the registered words; the check has not been run]**
+3. **Point 3.** Test (h) fails by its own words: "no such value is confirmed, the check
+   fails."
+   **[aspiration — the consequence by the registered words; the check has not been run]**
+4. **Point 4.** No provider test is made. The word "Cerebras" in the registered `S1` body
+   is not shown from the product before the read. With point 3 also absent, test (h) has
+   already failed.
+   **[aspiration — the consequence by the registered words; the check has not been run]**
+5. **Part E item 5.** It is not widened. Its list of sources stays as registered.
+   **[aspiration — the consequence by the registered words; the check has not been run]**
+
+Test (i) applies as written. The stop goes into the deviation log. No run is dropped, no
+batch is filed again and no row is set aside. Nothing is read. Only Paul, in writing, can
+then say whether the primary is read. So a "no" is not the end of the matter. It means Paul
+is asked that second question instead, or a new draft is written for the part he rejects.
+**[aspiration — the consequence by the registered words; the check has not been run]**
+
+A "yes" does not close Part E item 2, the cost gate. That condition is still open and still
+waits for Paul's separate written word.
+**[hypothesis — Part E item 2 as it stands in Amendment 3 at main `6deb8842`]**
+
+### Signature
+
+Seat: **methodologist**, crb programme. Date: **2026-11-12**. Drafted before the primary is
+read, and before any result by arm exists. In force by Paul's written yes of 2026-11-12,
+quoted in the status above. The delivery manager added the status when the yes was given.
+
+**Nothing in `N`, `k`, `c`, the turn limit, the seed, the lists, the orders, the thresholds
+or the decision words is changed by this amendment. In Part E one thing is changed: the
+list of sources in item 5 is widened by the poster's out files, the campaign record and the
+events log, and by the run record fields point 1 names. No other word of Part E is
+changed.**
+**[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
