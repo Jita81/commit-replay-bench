@@ -22,6 +22,18 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   command write at a time, so two cannot both write a first anchor; a platform with no `fcntl`
   is refused. docs/LEDGER-ANCHORS.md says who should hold anchors and what one cannot prove.
 
+- **The UI's wire field names are checked against the API's schema, and Scorecard runs weekly**
+  ([#126](https://github.com/Jita81/commit-replay-bench/pull/126)).
+  `scripts/check_ui_types_drift.py` builds the OpenAPI schema offline and, for each
+  `ui/src/api/types.ts` interface that maps to a component, reports a field the component lacks
+  or a required field the interface lacks; it does not compare types or optionality. The
+  fresh-clone gates fail on a finding not in `scripts/ui_types_drift_allowlist.txt`, a stale
+  entry, or a change to `scripts/ui_types_mapped.txt`. Every finding is a missing
+  required field **[measured — n = 56 findings over the 78 of 172 shapes that
+  map to a component; method: this pull request's `check_ui_types_drift.py --list` over main `e1d267c9`'s inputs;
+  apparatus 2.5]**. `.github/workflows/scorecard.yml` runs OpenSSF Scorecard weekly and on
+  push to `main`, with SARIF upload.
+
 - **The factory's pull request names the cell that licensed it**
   ([#125](https://github.com/Jita81/commit-replay-bench/pull/125)).
   The body of a pull request the factory opens on a customer's repository now carries a block
