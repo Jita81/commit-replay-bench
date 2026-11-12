@@ -405,3 +405,44 @@ poster's folder, the product or a row.
   computed after filing and reported as description. The read is not run again without
   that word. Whether more commits are worth their cost is also Paul's, as part 6 says.
   **[hypothesis — the seats' reading of the read-once rule of the registration]**
+
+## 2026-11-12 — Why the output says "usable tests: 0 of 120"
+
+Paul asked for the cause. The entries below give it, each with its method. No agent read
+a row, a run, an event or the poster's folder.
+
+- **The 0 of 120 is a counting fault in the read script. It is not a measure of the test
+  author.** The product's event emitter takes the `task` key out of an event's payload and
+  stores it as the event's top-level `task_id` (`src/crb/observability/events.py` line 350).
+  `GET /runs/{id}/events/log` serves `task_id` at the top level and the rest as `payload`
+  (`src/crb/server/routes/runs.py` lines 298 to 302). The read script looks for the commit
+  in `payload["task"]` (`scripts/wave4_primary_read.py`, `keep_event`), as R12 item 2 of the
+  registration says. That key is never there, so test (b) of R12 fails for every attempt,
+  whatever the author did.
+  **[measured — n = 3 source passages, method: `git show 7bb03d6c73c8c9e10cbc283049be2ce9740eb19e:<path>` for the two product files and a read of the script as merged, by four agents and then the delivery manager on 2026-11-12; apparatus n/a, a reading of code, not a graded row]**
+- **What follows from it.** The 12 "author-hit" labels, the blocks result on two units and
+  the left-out result that cannot be calculated all come from that count. The decision
+  word does not: the seats signed Inconclusive for any count.
+  **[hypothesis — the delivery manager's reading of the script and of the signatures above]**
+- **The null-`error` theory of the entry above is wrong.** The row's `error` field is a
+  string that defaults to empty (`src/crb/core/ledger.py` line 865,
+  `src/crb/server/schemas.py` line 1072), and an empty string passes test (d).
+  **[measured — n = 2 source lines, method: `git show` at `7bb03d6c73c8c9e10cbc283049be2ce9740eb19e` by one agent on 2026-11-12; apparatus n/a, a reading of code]**
+- **Why nothing caught it.** `docs/API.md` line 565 lists `task` among the payload keys of
+  these events. The script's test fixtures copied that shape. The name check of R12 item 5
+  looked at the key's name and not at where the product stores it. The provider check
+  passed on the same log because `provider` stays in the payload.
+  **[hypothesis — the agents' account of 2026-11-12, for the deviation log]**
+- **The author's real usable-test rate is not known.** The provider line shows only that in
+  each of the 24 `S1` runs at least one author call returned. Some authoring failures did
+  happen (five texts in click batches 1 and 2, recorded above), and a row whose authoring
+  fails skips the builder. How many of the 120 is not in the filed output.
+  **[hypothesis — the agents' reading of the served code; no row was read]**
+- **Still reserved to Paul.** A corrected count needs a second look at the product after
+  filing: the `S1` rows whose `error` begins `authoring:`, or the script with the one-line
+  mend. Neither is done without Paul's written word.
+  **[hypothesis — the read-once rule of the registration, as the seats read it]**
+- **When the read started.** The entry of Part E item 2 gives the time the output was last
+  written, which is the end of the read. The session's transcript logs the terminal call
+  that started the script at 12:53:13Z, after the push at 12:53:05Z.
+  **[hypothesis — one timestamp in the delivery manager's session transcript, which is not in this repository]**
