@@ -12,6 +12,8 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **One local command runs the gates CI runs, before a push.** `scripts/pre_push.py` runs the static gates of the CI workflow and then the test suite as CI runs it; `--fast` runs the gates and the tests for the changed files. It checks the pull request title as the squash subject, names every CI job it does not run, and exits non-zero when a gate could not run. A ratchet test reads each `run:` line of the workflows and fails when CI gains a gate the command does not mirror. Nothing yet makes an author run it; the register row stays pending. ([#137](https://github.com/Jita81/commit-replay-bench/pull/137))
+
 - **Wave 4: the misses found after the read are entered in the deviation log.** The record notes named them without entering them: the read script's lookup of an event's task in the payload, a consistency figure removed before the script was committed, and a spec rule with no signed reading. No filed result changes and the read is not run again. ([#135](https://github.com/Jita81/commit-replay-bench/pull/135))
 
 - **Wave 4: the primary read is made and filed.** Paul closed the cost gate in writing (the read goes ahead on product dollars, unconfirmed), the entry was pushed first, and the read script was then run once from main. Its output is filed unedited as `primary-read-output.txt` with its sha256. The script's decision word is Inconclusive; the two seats' signatures follow. ([#134](https://github.com/Jita81/commit-replay-bench/pull/134))
