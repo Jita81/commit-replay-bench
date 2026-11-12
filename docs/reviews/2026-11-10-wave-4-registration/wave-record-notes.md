@@ -461,13 +461,14 @@ none changes the decision word, which the seats signed for any count
 - 2026-11-12, the delivery manager. **The read script looked for an event's task where the
   product does not store it.** R12 item 2 of the registration and `docs/API.md` line 565
   name `task` as a payload key. The product stores it as the event's top-level `task_id`.
-  The script reads the payload for both the start event and the failed event, so tests (b)
-  and (c) of R12 could not pass for any attempt. The script's fixtures copied the
+  The script reads the payload for both the start event and the failed event. Test (b) of
+  R12 could not pass for any attempt. In a run that holds a `builder.author_test.failed`
+  event, test (c) could not pass for any attempt of that run. The script's fixtures copied the
   documented shape, and the name check of R12 item 5 looked at the key's name only. No
   check against the served shape of an event was made before the read. The output's
   "usable tests: 0 of 120", its 12 author-hit labels, its two-unit blocks result and its
   left-out result all rest on this.
-  **[hypothesis — a deviation of preparation, recorded by the delivery manager from the entry "Why the output says usable tests: 0 of 120" above; no row was read]**
+  **[measured — n = 120 `S1` attempts in 12 batches of 24 standing `S1` runs, method: line 59 ("usable tests: 0 of 120") and lines 31 to 42 (one "author-hit yes" label a batch) of `primary-read-output.txt`, the one run of `scripts/wave4_primary_read.py`, read by the delivery manager on 2026-11-12; builder and models as registered in part 2; apparatus 2.5. The count is what the faulty check printed and is not a measure of the test author]**
 - 2026-11-12, the delivery manager. **A consistency figure was taken out of the script
   before it was committed.** The figure counted clean `S1` rows that the script held to be
   without a usable test. On the filed output it would have been above zero wherever an `S1`
