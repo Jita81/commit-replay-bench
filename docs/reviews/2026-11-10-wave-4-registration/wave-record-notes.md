@@ -251,11 +251,11 @@ Written before the primary is read and before any result by arm exists.
   `8b9bb6afe1a1d9982e3c6f25d3400939ea0b9badf4de8d9e7655464510727a25`. That is the same
   value the file had at the reviewed head of the pull request,
   `8a3d4fc45aa18d64ec365100163abfe37243da24`.
-  **[measured — n = 1 file, method: `git show origin/main:scripts/wave4_primary_read.py | shasum -a 256` by the delivery manager on 2026-11-12; apparatus n/a, a file hash, not a graded row]**
+  **[measured — n = 2 commits, one file, method: `git show ddf061a2cfdb1724dc7bccecc44196b9a1bec620:scripts/wave4_primary_read.py | shasum -a 256` and `git show 8a3d4fc45aa18d64ec365100163abfe37243da24:scripts/wave4_primary_read.py | shasum -a 256`, each commit named by its full id, by the delivery manager on 2026-11-12; apparatus n/a, file hashes, not graded rows]**
 - The registration file was not changed by that merge. At the same commit its sha256 is
-  `6f6d9c9b71712c988e39a3962cc9522400d3bf98c5f887cf55e2822b8746c03e`, the value recorded
-  when Amendment 4 merged.
-  **[measured — n = 1 file, method: `shasum -a 256` of the file read from `origin/main` by the delivery manager on 2026-11-12; apparatus n/a, a file hash, not a graded row]**
+  `6f6d9c9b71712c988e39a3962cc9522400d3bf98c5f887cf55e2822b8746c03e`, the same value it
+  has at `dd52bc8456330cdd2187b3233685a3a0f96b2d76`, the commit that merged Amendment 4.
+  **[measured — n = 2 commits, one file, method: `git show ddf061a2cfdb1724dc7bccecc44196b9a1bec620:docs/reviews/2026-11-10-wave-4-registration.md | shasum -a 256` and `git show dd52bc8456330cdd2187b3233685a3a0f96b2d76:docs/reviews/2026-11-10-wave-4-registration.md | shasum -a 256`, each commit named by its full id, by the delivery manager on 2026-11-12; apparatus n/a, file hashes, not graded rows]**
 - The read is run from that commit of the script and from no other. If the script is
   changed before the read, the new commit and hash are recorded here first.
   **[aspiration — the operator's rule for the one run of the read, which has not happened]**
