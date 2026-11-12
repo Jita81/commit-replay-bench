@@ -115,3 +115,125 @@ a run, a row, an event or a kept request.
   narrower rule: a provider-test stop prints counts only. The script's tests on made-up
   rows assert that no run id reaches that output.
   **[aspiration — a rule for the read script, which is not yet written; fixed before any result by arm exists]**
+
+## 2026-11-12 — the read script, recorded before it is committed
+
+Written before the primary is read and before any result by arm exists.
+**[hypothesis — the delivery manager's statement of when this section was written, 2026-11-12]**
+
+### The methodologist's readings
+
+- The readings on the read script are in `r5-read-script-readings.txt`, beside this file,
+  sha256 `71b3c8b3064d91327b0d8c1ce93f5a4373730729acf5c52bddc51d29f963e539`. It is a signed
+  record and is not edited after signing. Its line numbers for the script are those of the
+  draft the methodologist read, not of the committed script.
+  **[hypothesis — the delivery manager's statement of how the file is kept, 2026-11-12]**
+- The six script changes the readings require (C1 to C6) are made in the committed script
+  `scripts/wave4_primary_read.py`, each with a test on made-up records.
+  **[measured — n = 6 changes, method: `pytest tests/test_wave4_primary_read.py` on the branch, apparatus 2.5; a property of the script, not a graded row]**
+- The readings cite the read spec by open-point number. The spec the methodologist read is
+  `r5-read-script-spec.txt`, beside this file, sha256
+  `6b827a754b0b271dc5d2a30c64101aac605ba3a0c68e5622b610403056885c64`. It is copied unedited
+  from the delivery manager's working folder, which is the path line 11 of the readings
+  names. It is a spec, not the script: where the two differ, the script's opening text
+  lists the departure.
+  **[measured — n = 1 file, method: `shasum -a 256` by the delivery manager on 2026-11-12; apparatus n/a, a file hash, not a graded row]**
+- The readings file carries no claim tags of its own. It is a signed record, so none is
+  added. Its statements are the methodologist's readings of the registered text and of the
+  draft script, signed 2026-11-12. Each one this record relies on is restated in this
+  section under a tag.
+  **[hypothesis — the delivery manager's statement of how the readings are to be taken, 2026-11-12]**
+
+### What the poster kept, as the script reads it
+
+- The script reads four files and fixes each by sha256: the plan `wave-batches.json`
+  (`ae705b68e03e1ff58972d34cdb81f5e85095ca88449e23a99a9c5276702fb45a`), its copy from before
+  `S3` was added, `wave-batches.before-s3.json`
+  (`a3c592cd9e7a19210888b2f9bd6d3b8c6e05d6ce76169e996a71d36d7b2970fd`), `click-out.json`
+  (`27b2747e044048c6766186a1689cc5749178c46a8dce3c78dacd6ed09a4c4170`) and `cobra-out.json`
+  (`59d7eefc3361caa5f78fd18bc8b66f5e0e2cc5f36a1e49915ea79033b506e0e1`).
+  **[measured — n = 4 files, method: `shasum -a 256` by the delivery manager on 2026-11-12; apparatus n/a, file hashes, not graded rows]**
+- The place of a run in its batch is the `slot` number of its plan entry. The out key is
+  the batch name, a slash, and that number. This is read from the poster's source text
+  (`wave4_post.py`, sha256 `b30ca68ea35e7659b720011af690c6cc3713dfd8f6ce1777523f4651b850b105`,
+  lines 102 to 150).
+  **[measured — n = 1 rule, method: reading of the poster's source text by the delivery manager; apparatus n/a, a property of the poster, not a graded row]**
+- In the out files the `run` value under each key is an object, not a run id. The ruling
+  assumed an id. The object's key names are `id`, `status`, `progress`, `clean`, `errors`,
+  `stopped_reason`, `stopped_code`, `cost_usd` and `error`. The script reads `run.id` and
+  nothing else, under Point 1 of Amendment 4 ("the run id under each key and nothing else").
+  It stops if any entry or any `run` object has a key name other than the recorded ones.
+  The delivery manager read key names only, and no value.
+  **[measured — n = 49 entries, method: a key-name listing of the two out files by the delivery manager on 2026-11-12, no value printed; files the poster wrote against the served stack at apparatus 2.5; file shapes, not graded rows]**
+
+### Where the 48 standing run ids came from
+
+- The script carries the 48 standing run ids as a fixed list. They were taken from the
+  delivery manager's run ledger with no slot column (sha256
+  `31ade1ad2417ec5ec75e0536f1bdefd7c47da72d46663e169f52d149f8706495`), which was built from
+  the run ids the poster recorded in its out files. The sha256 of the list, one id a line
+  in sorted order, is `b79c3cbedaf775238e0f74ddb506a7ebb86858d9b20845ca97a65dd6a7bedf3d`.
+  The script checks that hash before it opens any file.
+  **[measured — n = 48 ids, method: `shasum -a 256` of the id list by the delivery manager on 2026-11-12; apparatus n/a, a file hash, not a graded row]**
+- So test T4 is not independent of the out files. It shows that the out files still agree
+  with the ledger as issued. That each id is the right run rests on tests (a) and (b) on
+  the run records and on campaign membership. The script prints this, and the wave report
+  says it.
+  **[hypothesis — the methodologist's reading, item 10 of the readings file, 2026-11-12]**
+
+### Decisions of the delivery manager after the code check
+
+- The script writes its whole output to a file named by `--output`, created new before
+  the first request, and to the screen, line for line the same. It will not start if the
+  file exists. The filed output is that file, unedited.
+  **[aspiration — a rule for the one run of the read, which has not happened; fixed before any result by arm exists]**
+- A row that is absent is a miss and does not stop the read (readings, items 1 and 4).
+  If any is absent the script says that Amendment 3 recorded 240 rows, and lists each
+  absent row with its run id, task, batch and arm after the decision word.
+  **[hypothesis — the methodologist's reading, items 1 and 4 of the readings file, 2026-11-12]**
+- A stop of the provider test writes the run ids and the two served times to the deviation
+  file and prints counts only (Point 4 of Amendment 4 applies test (i)). Every other
+  deviation file line that names a run also carries that run's two served times. A
+  transport failure names only the run whose request failed.
+  **[aspiration — a rule for the one run of the read, which has not happened; fixed before any result by arm exists]**
+- The script departs from the read spec in five places, all recorded in its opening
+  text: its name and its `--poster-dir` and `--output` arguments; an absent row is a miss;
+  no figure for "clean without a usable test" is printed (R12 governs); the provider-stop
+  deviation file keeps the two times; exit code 5 for a failed `--output` write.
+  **[hypothesis — the delivery manager's decisions of 2026-11-12, made before any result by arm exists]**
+
+### Deviation log entries, entered before the read
+
+- 2026-11-12, the writer of the read spec. Read lines 9 to 18 of this file. Those lines
+  hold eight run ids of click batches 1 and 2 and nine build error texts by short run id,
+  five of which begin `authoring:`. The spec writer saw outcome-level text by run, namely
+  authoring errors on named `S1` runs, before the read. Only `S1` builds have an author, so
+  an authoring error names the run's arm. It was joined to nothing. No clean count was
+  made. No constant, id or rule in the spec or the script was taken from it.
+  **[hypothesis — a deviation of exposure recorded by the delivery manager from the spec writer's own statement, 2026-11-12]**
+- 2026-11-12, the methodologist. Set out to read lines 31 to 117 of this file. After a
+  break in the session the whole file was read back, lines 1 to 30 included. So the
+  methodologist saw outcome-level text by run, namely authoring errors on named `S1` runs,
+  before the read. This is the same text section 0 of the ruling already records for this
+  seat, seen a second time. It was joined to nothing. No count was computed from it. No
+  reading rests on it.
+  **[hypothesis — a deviation of exposure recorded from the methodologist's own disclosure in the readings file, 2026-11-12]**
+
+### What happens after a stop
+
+- Exit 1 (not ready): no wave file was opened and no request was made. The cause is
+  fixed and the script is started again. This is not a run of the read. Exit 2, 3 or 4:
+  nobody runs the script again. The stop goes into the deviation log. Whether the primary
+  is then read, and whether that run is a second read, is for Paul in writing.
+  **[aspiration — the operator's rule for the one run of the read, from item 13 of the readings file; fixed before any result by arm exists]**
+- Exit 5 (added after outside review of the pull request, before any result by arm
+  exists): the `--output` file could not be written or closed after it was opened. Each
+  line goes to the file before the screen, so the screen never shows a line the file does
+  not hold. The script stops at once and prints one fixed line to the screen only. Exit 5
+  is treated as exit 2, 3 or 4: nobody runs the script again, and the rest is for Paul in
+  writing.
+  **[aspiration — the operator's rule for the one run of the read, which has not happened; fixed before any result by arm exists]**
+- Two more points are left to Paul in writing and are not in the script: a new test that
+  every kept body carries every registered fixed setting, and failing a body that sends
+  `arm: "A0"`. As registered, there is no such test, and test (e) accepts `arm: "A0"`.
+  **[hypothesis — the methodologist's reading, items 6 and 8 of the readings file, 2026-11-12]**

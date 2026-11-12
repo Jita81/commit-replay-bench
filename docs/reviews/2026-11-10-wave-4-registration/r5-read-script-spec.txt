@@ -1,0 +1,729 @@
+# Wave 4 primary read script: specification (R5)
+
+Status: a specification for a script that is not yet written, run or committed. Written
+2026-11-12, before any result by arm exists. It reads no run, row, event, campaign record or
+kept body, and was written without reading one.
+
+## How to read this spec
+
+There are two sources, with these abbreviations:
+
+- **REG** is `docs/reviews/2026-11-10-wave-4-registration.md` at main `dd52bc84` of
+  Jita81/commit-replay-bench. It holds Amendments 1 to 4.
+- **RUL** is `docs/reviews/2026-11-10-wave-4-registration/r5-arm-source-ruling-v2.txt`. Its sha256
+  is `a4ffb60731b0f56187be62e33cfad6f342d05f2c28af072346392d7aec8e9e22`, which matches the hash
+  pinned at REG 1602-1603. The hash was checked in this session.
+
+`REG 1043-1051` means lines 1043 to 1051 of REG. Line citations to served code are at commit
+`7bb03d6c`. The files they cite are unchanged from `7bb03d6c` to `dd52bc84`: `schemas.py`,
+`routes/runs.py`, `campaigns.py`, `routes/campaigns.py`, `routes/grades.py` and
+`routes/ledger.py`.
+
+Where the registered text and convenience differ, this spec follows the registered text word for
+word. Where the text leaves a choice, the spec takes the harder reading, as REG 830-833 defines
+it, and lists the choice under section 6. The spec invents no threshold. Every number below is
+either a registered number or arithmetic on one.
+
+Proposed files (in the worktree, not committed by the spec writer):
+
+- `scripts/wave4_r5_read.py`, the script;
+- `tests/test_wave4_r5_read.py`, the tests.
+
+The tests use made-up fixtures only: invented 32-hex run ids, invented rows and invented events.
+They run the HTTP layer through `httpx.MockTransport` and make no network call.
+
+Runtime: the commit-replay-bench venv (Python 3.12.13, httpx 0.28.1). The script uses only the
+standard library and httpx. There is no scipy. Run it with `PYTHONDONTWRITEBYTECODE=1`. Run the
+tests with `-p no:cacheprovider -o addopts= -q`.
+
+### Disclosure (seat exposure of the spec writer)
+
+While collecting facts for this spec, I read `wave-record-notes.md` lines 9-18 in the worktree.
+Those lines name the eight run ids of click batches 1 and 2, and they give nine build error texts
+by short run id, five of them `authoring:` errors. This is the same note RUL section 0 discloses.
+I joined it to nothing. Nothing in this spec depends on it, and no constant below is taken from
+it. It is recorded here so that the deviation log can carry it.
+
+---
+
+## 1. Inputs
+
+### 1.1 Command-line arguments (all required; there are no defaults)
+
+| Argument | Meaning |
+|---|---|
+| `--api URL` | Base URL of the served product, e.g. `http://127.0.0.1:8000`. The script appends `/api/v1/...`. |
+| `--login PATH` | A JSON file holding `{"username": ..., "password": ...}`. Its path and contents are never printed, logged, echoed in an exception or written to any output. See open point 20. |
+| `--plan PATH` | The poster's plan file (`wave-batches.json`). |
+| `--plan-pre-s3 PATH` | The plan file's copy from before the `S3` batches were added. |
+| `--click-out PATH` | The poster's click out file (`click-out.json`). |
+| `--cobra-out PATH` | The poster's cobra out file (`cobra-out.json`). |
+| `--output PATH` | Where the whole output is written, byte-identical to stdout. It is created with `O_CREAT\|O_EXCL`, so the script refuses to overwrite a file. |
+| `--deviation-out PATH` | The file for run ids that may not be printed (sections 3.3 and 3.4). It is created with `O_EXCL` and mode `0600`. It is written only when such a stop occurs. No signing seat opens it before the primary is filed and signed (REG 1806-1807; RUL 6.3 item 4, lines 410-414). |
+
+The script prints the four poster-file paths with their hashes (RUL 11, lines 592-593). It does not
+print `--login`.
+
+### 1.2 Fixed constants carried in the script
+
+None of these is read from a run, a row, an event, the campaign record or a kept body. If any
+constant is missing (a sentinel `None`), the script refuses to start. It prints `not ready: <name>
+not recorded`, makes no request and exits 1.
+
+| Constant | Value / source | Rule |
+|---|---|---|
+| `CAMPAIGN_ID` | `cmp_88cf9e875edba15371e6d3f7` | REG 636; RUL 8, lines 469-475 |
+| `LISTS` | The first 15 commits of each Amendment 1 list, in list order. Lines: click XS REG 496-510, click S REG 532-546, cobra XS REG 576-590, cobra S REG 598-612. | REG 709-718. The test suite parses REG and checks that each list, joined one commit per line with `\n` after each, hashes to `4be598d7…a4493370f` (click XS), `70c88481…f60a3b` (click S), `14f3ee86…2320f559` (cobra XS) and `08428d27…a3dc7fb3` (cobra S). |
+| `BATCHES` | 12 batches, as `(repo, batch number, cell, list positions, order)`. | REG 744-757. Cells alternate XS, S, XS, S, XS, S, so batches 1/3/5 are XS positions 1-5/6-10/11-15 and batches 2/4/6 are S positions 1-5/6-10/11-15 (REG 191-197). The test suite recomputes each coin from REG 195-197 and 739-742: the first hex digit of `sha256("crb.wave4.order\|" + repo + "\|" + str(batch))`, where even gives `A0,S1,S1,A0` and odd gives `S1,A0,A0,S1`. It asserts that the table matches. |
+| `STANDING_IDS` | The 48 full 32-hex run ids. | REG 1043 ("The script carries the 48 standing run ids as a fixed list"). They are not in REG. See open point 1. |
+| `SHORT_IDS` | `98fe708c` (first filing, click batch 3) and `8a258976`, `78b4d435`, `3f67a4d0`, `5fd4dc40` (the click batch 3 runs that stand). | REG 862-864 |
+| `L` | `editblock:gpt-oss-120b` | REG 1768-1776 (Amendment 4 Point 3). The source is `docs/DECISION-LOG.md` line 175 (DL-378) and `docs/OPERATOR.md` line 1432, at `7bb03d6c`. |
+| `H_FIELDS` | Filing time `created`; end time `finished`; status `status`; row count `counts.rows`; commits `task_ids`; kind `kind`. | REG 1081-1088; RUL 10, lines 528-540; wave-record-notes 83-86 |
+| `FILE_SHA256` | The full sha256 of each of the four poster files. RUL T1 gives them only truncated: plan `ae705b68…fb45a`, pre-S3 copy `a3c592cd…2970fd`, `click-out.json` `27b2747e…4c4170`, `cobra-out.json` `59d7eefc…06e0e1`. | RUL 3.2 T1, lines 127-131. The test suite asserts that each full constant starts and ends with the truncated forms. See open point 2. |
+| `PLACE_RULE` | Either `"position"` (the entry's position in the batch's `runs` list) or `"slot"` (the entry's `slot` value). | RUL 3.2 T7, lines 147-150. See open point 3. |
+| `PLAN_SHAPE` and `OUT_SHAPE` | The JSON shapes of the plan and out files, as recorded from the poster source (`wave4_post.py`, sha256 `b30ca68e…50b105`). | RUL 3.1, lines 107-109; RUL 5, lines 256-263. See open point 4. |
+| `T975` | The 97.5% points of Student's t for df 1 to 11, rounded up to 4 decimals: 12.7063, 4.3027, 3.1825, 2.7765, 2.5706, 2.4470, 2.3647, 2.3061, 2.2622, 2.2282, 2.2010. | REG 329-330 and 911-917. The test suite recomputes each value with the standard-library regularised incomplete beta and asserts `exact <= constant < exact + 1e-4`. See open point 5. |
+| `STOP_B` | Strict reading: 0. `git stash` only: 2. Every refused read-only git command: 4. Plus the sentence of REG 1384-1386. | REG 1350-1354 and 1382-1387. See open point 9. |
+| `TRUST_LINES` | The five "Taken on trust" lines, word for word, without claim tags. | REG 1655-1669 = RUL 172-182 |
+
+### 1.3 The poster files: what is opened, what is kept, what is dropped at parse
+
+The keep-lists are in RUL 5, lines 254-277, and RUL 11, lines 557-564. They are in force under P1
+(REG 1640-1653).
+
+1. **Hash first (T1).** Before parsing, the script computes the sha256 of each file's bytes and
+   compares it with `FILE_SHA256` by full-string equality. A prefix match is not accepted. On a
+   mismatch the check stops at T1 (REG 1644-1645; RUL 127-131).
+2. **Plan file and pre-S3 copy.** The script locates the 12 wave batches by `PLAN_SHAPE`. For each
+   of the 48 wave keys `<repo>-<batch>/<place>`, it keeps the `body` value. If `PLACE_RULE ==
+   "slot"`, it also keeps `slot`. It does not descend into an `S3` batch. It drops `arm`, `cell`,
+   `coin`, `order` and every other key as it parses, and never stores, logs or prints them
+   (RUL 256-260).
+3. **Out files.** For each key, the script keeps the `run` value and drops `arm`, `posted`,
+   `ended`, `clean_end` and every other key as it parses (RUL 262-267). The key set read from each
+   file is kept for T3.
+4. **Body handling.** A `body` value is kept as parsed JSON. A field that is absent or null counts
+   as absent (REG 1068; RUL 212-213, 275-277). `test_author` is compared with `L` by exact
+   equality, with no strip and no case fold.
+5. The script parses each JSON file with a strict parser that rejects duplicate object keys and
+   NaN/Infinity. If parsing fails, or the file does not match `PLAN_SHAPE`/`OUT_SHAPE`, the check
+   stops at T3 with the words `file shape not as recorded`.
+
+### 1.4 API endpoints, and the fields kept from each
+
+All endpoints are under `{api}/api/v1`. The script makes no other request. In particular it
+never calls `/runs/{id}/tasks`, `/ledger/export`, `/readings` or any aggregate map, or any of the
+other sources barred in RUL 11, lines 588-591. It never calls `GET /runs` (the list), and it
+makes no request with a method other than GET, apart from the login POST. The tests assert that
+the set of requested paths is exactly the allowed set.
+
+| # | Request | When | Kept (everything else dropped at parse) |
+|---|---|---|---|
+| E1 | `POST /auth/login` with body `{"username","password"}` | first | Only the session cookie, which the httpx client holds. The response body is discarded. Login is CSRF-exempt (`app.py` 113-114). GETs need only the cookie (`app.py` 310-330). |
+| E2 | `GET /campaigns/{CAMPAIGN_ID}` (not paged) | before any run record | From `runs[]`: `run_id` (str) and `s1` (bool) only (REG 1707-1712; RUL 8, line 488). Every spend, status, cap and total is dropped (REG 1716-1717; RUL 576-580). |
+| E3 | `GET /runs/{run_id}` | for every `run_id` listed in E2 | For **every** run: `id`, `kind`, `task_ids`. For the 49 wave runs, also `status`, `counts.rows`, `created`, `finished`, `repo`, `builder`, `model`, `provider`, `budget`, `max_cost_usd`, `builder_config` and `retain` (REG 1649-1651; RUL 11, lines 565-573). `counts.clean`, `counts.first_pass_clean`, `counts.disqualified`, `counts.errors`, `error`, `cost_usd`, `ladder`, `apparatus*` and every other key are dropped. |
+| E4 | `GET /runs/{run_id}/events/log?limit=500&offset=k` | only for the 24 standing runs read as `S1`, and only after the order check passes | For events with `action == "author.attempt"`, `payload.provider` only. For events with `action` in `{"builder.author_test.start", "builder.author_test.failed"}`, the action and `payload.task` only. Every other event, and every other field, is dropped (REG 960-964 and 1801-1804; RUL 6.3 items 1-2, lines 404-407). `payload.reason` of `author.attempt` is never kept (RUL 581-583). |
+| E5 | `GET /grades?run_id={run_id}&limit=500&offset=k` | only for the 48 standing runs, and only after E4 and the provider test pass; never for the first filing `98fe708c` (REG 211-212 and 862-864) | `run_id`, `task_id` and `clean` for every row. `error` is kept only for rows of runs read as `S1`. `labels` (which may carry the arm), `trial`, `disqualified`, `dq_reason`, `cost_usd` and every other field are dropped. |
+
+**Paging (E4, E5).** The response shape is `{items, total, limit, offset}` (`schemas.py` 159-165;
+the page maximum is 500 at `schemas.py` 68-69). The script reads pages until `offset >= total`.
+`total` must be identical on every page, the item count summed over pages must equal `total`,
+and for E4 the `seq` values must be strictly increasing. Any breach stops the script with no
+figure (open point 21).
+
+**Transport.** The script uses an `httpx.Client` with `timeout=60` and no retries. Any non-2xx
+status, any connection error, or any response body that is not JSON of the expected shape stops
+the script. A stop before the order check passes is an order-check stop (section 3.2). A stop
+after it is a read-not-made stop (section 3.5). No figure is printed in either case. See open
+point 23.
+
+**Times (test (c)).** `created` and `finished` are parsed with `datetime.fromisoformat`. A value
+that is missing, null, empty, unparsable, or parsed with `tzinfo is None` (or `utcoffset() is
+None`) counts as an absent field (REG 1056-1060; RUL 534). Instants are compared as aware
+datetimes at the precision served. Nothing is truncated or rounded. See open point 16.
+
+---
+
+## 2. The order check (R5 item 2, tests (a) to (i), with RUL T1-T7, RUL sections 4 and 8, and Amendment 4 Points 1-4)
+
+The order check reads run records, run bodies, the out files' `run` values and the campaign
+record's `run_id`/`s1`. It reads no row and no event (REG 1040-1042, 1587-1596). Every part
+below is a predicate. A part fails if its predicate is false or a field it needs is absent
+(REG 1041-1042).
+
+**Evaluation.** The parts are evaluated in the order listed. A part whose inputs depend on a part
+that failed is reported as `not evaluated (depends on <part>)`. Every failure found is printed
+(section 3.2), and then the script stops with no figure and exits 2. Nothing is mended. No run is
+dropped, refiled or set aside. No alternative tie is tried (REG 1089-1094; RUL 124-125).
+
+Notation:
+
+- `C` is the campaign record's run list from E2.
+- `R[id]` is the kept run record from E3.
+- `BODY[key]` is the plan body.
+- `OUT[key]` is the out file's run id.
+- `B(repo,b)` is the commit set of batch `b` of `repo` (5 commits).
+- `ORDER(repo,b)` is its arm order (4 entries).
+- `LISTED` is the union of all 60 commits.
+
+### T1. Files fixed by hash (RUL 127-131; REG 1644-1645)
+
+For each of the four files, `sha256(file bytes) == FILE_SHA256[file]`.
+
+### T2. The two plan copies agree (RUL 132-134)
+
+For each of the 48 wave keys, `json_equal(BODY_plan[key], BODY_pre_s3[key])`. `json_equal` uses
+the general rules of RUL section 4, lines 212-216:
+
+- numbers compare as numbers;
+- a boolean is not a number;
+- strings compare exactly;
+- arrays compare element-wise in order;
+- objects must have the same key set, with each value `json_equal`.
+
+A key missing from either copy fails T2. See open point 11.
+
+### Campaign membership (Point 2: REG 1707-1712; RUL 8, lines 483-493)
+
+1. Every `run_id` value in `C` occurs once. Each `s1` is a JSON boolean.
+2. A short id `x` resolves to the unique `run_id` in `C` that starts with `x`. Zero matches, or
+   more than one, fails (a) (REG 1048-1050).
+3. Each of the 48 `STANDING_IDS` occurs in `C` exactly once, and so does the resolution of
+   `98fe708c`.
+
+### T3. Keys (RUL 135-137)
+
+The union of the out files' key sets is exactly the 49 keys:
+
+- `click-<b>/<p>` for b in 1..6 and p in 1..4, all in the click file;
+- `cobra-<b>/<p>` for b in 1..6 and p in 1..4, all in the cobra file;
+- `click-3/1#attempt1`, in the click file.
+
+Any other key, a missing key, or a key in the other repository's file fails. If the out files
+hold `S3` keys, T3 fails as written (open point 10).
+
+### T4. Ids (RUL 138-140)
+
+1. The 49 `OUT[key]` values are 49 distinct strings, each matching `^[0-9a-f]{32}$`.
+2. The 48 values under the plain keys equal `STANDING_IDS` as a set.
+3. `OUT["click-3/1#attempt1"]` equals the resolution of `98fe708c`.
+
+### (a) The runs (REG 1043-1051)
+
+For each id in `STANDING_IDS`, all of the following hold:
+
+1. `R[id].kind == "blind"`;
+2. `R[id].status == "succeeded"`;
+3. `R[id].counts.rows == 5`, compared as an integer, where a boolean is not accepted;
+4. `R[id].task_ids` is a list of 5 distinct strings whose set equals `B(repo,b)` for exactly one
+   of the 12 batches. Call that batch `batch(id)`.
+
+Beyond that:
+
+- Each of the 12 batches has exactly 4 standing ids mapped to it.
+- The set of standing ids mapped to click batch 3 equals the resolutions of `8a258976`,
+  `78b4d435`, `3f67a4d0` and `5fd4dc40`. Each of those must resolve uniquely, and each must be in
+  `STANDING_IDS`.
+- "Of the Wave 4 campaign" is tested by campaign membership above (REG 1707-1709).
+
+### (b) No other filing (REG 1052-1055 and 1707-1710; RUL 491-493)
+
+Let `X` be the set of ids `r` in `C` such that:
+
+- `R[r].kind == "blind"`, and
+- `set(R[r].task_ids) ∩ LISTED ≠ ∅`, or `R[r].task_ids` is empty or absent (open point 18).
+
+Then `X` must equal `STANDING_IDS ∪ {id98}`, where `id98` is the resolution of `98fe708c`.
+Separately:
+
+- `R[id98].status == "failed"`;
+- `R[id98].counts.rows == 0`;
+- `set(R[id98].task_ids) == B(click,3)`, with length 5 and distinct entries.
+
+The run record of every id in `C` is fetched, but only `id`, `kind` and `task_ids` are kept for
+ids outside the 49 (RUL 572-573).
+
+### (c) Two times (REG 1056-1061)
+
+For each of the 49 runs, `created` and `finished` are both present, and both are parsed as
+zone-aware instants (section 1.4, "Times").
+
+### (d) Place (REG 1062-1064)
+
+Within each batch, the four standing runs are ranked by `created`, ascending. Their ranks 1-4 are
+`place(id)`. If two `created` instants in one batch are equal, (d) fails. `id98` has no place
+under (d) (REG 1672-1679).
+
+### T5. The key agrees with the product (RUL 141-145; REG 1645-1647 and 1672-1681)
+
+For each plain key `<repo>-<b>/<p>` with `id = OUT[key]`:
+
+- `batch(id) == (repo, b)`;
+- `R[id].repo == repo`;
+- `place(id) == p`.
+
+For `click-3/1#attempt1`:
+
+- `set(R[id98].task_ids) == B(click,3)`;
+- `id98` meets the two time conditions that (g) gives it.
+
+The plan key for `id98` is `click-3/1`. No other suffix key is accepted (RUL 121-122).
+
+### T6 / section 4. The body is not contradicted by the run record (RUL 205-252; REG 1647-1651)
+
+This applies to all 49 runs, `id98` included, using `BODY[plan key]` (open point 12). Only keys
+the body carries (present and not null) are compared.
+
+| Body key | Rule |
+|---|---|
+| `repo`, `builder`, `model`, `provider` | Equal strings with the served field. |
+| `kind` | Equal strings, and the value is `"blind"`. |
+| `task_ids` | Same length, same strings, same order as `R.task_ids`. |
+| `max_cost_usd` | Body and served values are both numbers, not booleans, and are equal as numbers. A served null fails. |
+| `budget` | Take the body's `budget` with its null-valued keys removed. The served object has exactly the same keys, each value `json_equal`. |
+| `builder_config` | Exactly the same keys, each value `json_equal`. |
+| `retain` | Each key the body carries equals the served value. Each served key the body does not carry is `false`. |
+| `campaign_id` | Not compared with the record. It must be **present** and equal `CAMPAIGN_ID` (RUL 469-475; open point 13). |
+| `env_stop`, `outage_stop`, `learning` | Not compared. The pass print says so (RUL 231). |
+| `arm`, `test_author` | Not compared here. They are tested under (e). |
+| `ladder`, or **any other key** | Fails. The script prints the key name and the run id, never the value (RUL 234-240). |
+
+### (e) Arm (REG 1065-1071 and 1640-1643)
+
+The script reads the arm of each of the 49 runs from `BODY[plan key]` only:
+
+- **S1** when `arm == "S1"` and `test_author` is a string equal to `L`.
+- **A0** when `arm` is absent or `"A0"`, and `test_author` is absent.
+
+Anything else fails. That includes `arm == "S1"` without `test_author`, a `test_author` other
+than `L` (`editblock:gpt-oss-120b:cerebras` among them), a non-string arm, and `test_author` on
+an A0 body. See open point 24 on `arm: "A0"`.
+
+For each standing run, `arm(id) == ORDER(batch(id))[place(id) - 1]`. For `id98`,
+`arm(id98) == ORDER(click,3)[0]`, which is `A0` (REG 1070-1071 and 748).
+
+### Campaign `s1` agreement (Point 2: REG 1710-1712; RUL 7, lines 440-445)
+
+For each of the 49 runs, `C[id].s1 is True` when its arm is S1, and `C[id].s1 is False` when its
+arm is A0. A disagreement fails. Neither source is preferred.
+
+### (f) One after another (REG 1072-1074)
+
+For each batch and for p in 1..3: `finished(place p) <= created(place p+1)`. Equal times pass.
+
+### (g) Batches in order (REG 1075-1080, with the reading of REG 1105-1121)
+
+For each repository and for b in 1..5: `finished(place 4 of b) <= created(place 1 of b+1)`.
+
+For the first filing of click batch 3:
+
+- `created(id98) >= finished(place 4 of click 2)`;
+- `finished(id98) <= created(place 1 of click 3)`.
+
+Across repositories: `finished(place 4 of click 6) <= created(place 1 of cobra 1)`.
+
+### (h) A check on names (REG 1081-1088 and 1768-1776; RUL 10)
+
+The `H_FIELDS` names and `L` are constants recorded in the wave record before commit
+(wave-record-notes 76-103). The check fails if:
+
+- any of the four record fields `created`, `finished`, `status` and `counts.rows` is absent from
+  a fetched record of the 49; or
+- `L` is unset.
+
+The script prints the names and `L` with its source.
+
+### (i) If it fails (REG 1089-1095; RUL 9)
+
+The script prints what section 3.2 says, prints no figure, writes nothing to `--deviation-out`
+(the run ids go to stdout, as (i) requires), and exits 2. The read waits. The script has no
+option to skip, relax or resume past a failed part.
+
+### After the order check: the provider test (Point 4: REG 1801-1810; RUL 6.3, lines 402-427)
+
+This runs only if every part above passed. The script fetches E4 for each of the 24 standing
+runs read as S1, and **not** for `id98` (RUL 424). For each such run:
+
+- the run has at least one `author.attempt` event; and
+- every kept `payload.provider` is the string `"cerebras"`, compared exactly.
+
+An event whose payload lacks `provider` counts as "another value". On failure, see section 3.4.
+
+---
+
+## 3. What is printed
+
+The rules, for every case:
+
+- Stdout and `--output` carry identical bytes.
+- No table or list of arms by run is ever printed (RUL 597).
+- No body value, out-file value other than a run id, campaign spend or status, row field, event
+  field or clean figure is printed before the read.
+- No cost figure is printed at any point.
+
+### 3.1 Header (always)
+
+1. `wave4_r5_read` with the sha256 of the script file's own bytes (Part E item 1, REG 1404-1406).
+2. `campaign: cmp_88cf9e875edba15371e6d3f7`.
+
+### 3.2 Order-check failure (REG 1041-1042 and 1089-1094; RUL 9, lines 506-509; RUL 11, lines 594-597)
+
+For each failed part, one block:
+
+```
+ORDER CHECK FAILED: part <(a)|(b)|...|T1..T7|section 4|campaign s1|(h)>
+  reason: <fixed text for that predicate>
+  run <full id>  created <served string or ABSENT>  finished <served string or ABSENT>
+  ...
+```
+
+- For (e), the reason is exactly `body does not give the arm its place requires`. If the body
+  fits neither arm, the reason is `body fits neither arm`. The arm itself is not printed.
+- For a section 4 "any other key", the line is `key <name> not in the field table` with the run
+  id.
+- For T1, the line is the path and the computed and expected hashes. No run id is involved.
+
+The footer is:
+
+```
+No figure is printed. The read waits. Test (i): no run is dropped, no batch is filed again, no row is set aside; only Paul, in writing, can say whether the primary is then read.
+```
+
+The exit code is 2.
+
+### 3.3 Order-check pass (RUL 11, lines 592-594; RUL 3.3, lines 184-190; REG 1652-1653 and 1081-1087)
+
+In this order:
+
+1. The (h) field names: `filing time: created`, `end time: finished`, `status: status`,
+   `row count: counts.rows`, `commits: task_ids`, `kind: kind`.
+2. `L = editblock:gpt-oss-120b`, with its source line (DL-378, `docs/DECISION-LOG.md` line 175,
+   and `docs/OPERATOR.md` line 1432, at `7bb03d6c`).
+3. The four file paths with their sha256.
+4. `Taken on trust`, followed by the five `TRUST_LINES` word for word.
+5. `Not compared (not served): env_stop, outage_stop, learning.`
+6. `Order check passed.`
+7. `For all 49 runs the product's s1 flag agreed with the arm field of the body.` (RUL 186-187)
+
+No run ids are printed here. The 48 run ids are printed at the end of the read (section 4.9).
+
+### 3.4 Provider-test stop (REG 1804-1807; RUL 6.3 item 4; wave-record-notes 112-116)
+
+The script prints exactly:
+
+```
+test author provider not shown as cerebras
+runs with no author.attempt event: <n1>
+runs with another provider value: <n2>
+```
+
+and nothing else after it. That means no run id, no figure and no provider value. A run that
+fails both ways is counted under `n1` only: it has no event, so it has no value.
+
+The script then writes the run ids, each with its cause (`no event` or `other value`), to
+`--deviation-out`, and exits 3. Test (i) applies.
+
+The tests assert that no fixture run id, and no substring of 8 or more of its hex characters,
+appears in the stdout or `--output` of this path.
+
+### 3.5 Read-not-made stops (after the order check)
+
+Any transport or shape failure in E4 or E5 makes the script print `read not made: <E4|E5>
+<short reason>`, with no run id and no figure, and exit 4. So does any row-integrity failure
+(section 5.3). For a row-integrity failure it prints two counts only:
+
+- runs whose row set is not exactly one row per listed commit;
+- rows with a non-boolean `clean`.
+
+The run ids go to `--deviation-out`. See open points 7, 8 and 23.
+
+---
+
+## 4. The primary read (A5 to A9, R1 to R4, R12)
+
+This is computed only after section 3.3 has been printed and the provider test has passed. All
+arithmetic is exact: integers and `fractions.Fraction`. Decimal strings are produced for printing
+only.
+
+### 4.1 Rows per commit (A2, A3: REG 855-874; part 6 item 5: REG 385-387)
+
+For each listed commit `i` in batch `(repo,b)`:
+
+- its A0 attempts are the rows of the two standing runs of that batch whose arm is A0;
+- its S1 attempts are the rows of the two whose arm is S1.
+
+That gives 4 rows per commit and 240 in all. A row counts as clean iff its `clean` field is
+`true`. Every other row is a miss. Nobody re-grades a row (REG 870-871). Harness classes are not
+an input (A4, REG 876-880).
+
+### 4.2 The statistic (A5: REG 882-888; R1: REG 890-896)
+
+- `D_i = cleanS1_i − cleanA0_i`, an integer in [−2, 2]. This equals `2·d_i`.
+- For each batch b, `U_b = Σ_{i∈b} D_i`, which equals `2·S_b`.
+- `T2 = Σ_b U_b`, which equals `2·T`.
+- `T = T2/2` and `d = T/60`.
+- Direction is S1 minus A0. "S1 ahead" means `T > 0`. Zero is not ahead.
+
+### 4.3 The test (A6: REG 898-909; part 6 item 1: REG 306-323)
+
+Units are the 12 batches. Over all `2^U` sign vectors ε (the observed one included),
+`m = #{ε : |Σ ε_u·U_u| ≥ |T2|}`, compared on integers. Then `p = m / 2^U`.
+
+"Below 0.05" is `20·m < 2^U`, which for U = 12 is `m ≤ 204` (REG 907-908). The p-value is
+printed as `m/2^U` and as a decimal.
+
+### 4.4 The interval (A7: REG 911-918; part 6 item 2: REG 324-332)
+
+For units u with `n_u` commits and unit sum `S_u = U_u/2`, `N = Σ n_u` and `d = T/N`:
+
+- `Q = Σ (S_u − n_u·d)²`, a Fraction.
+- `SE² = (B/(B−1))·Q / N²`, with `B` the number of units.
+- `t = T975[B−1]`, so 2.2010 for B = 12.
+- The interval is `d ± t·SE`, printed in points (×100) to 4 decimals. To print `SE`, the script
+  uses `Decimal` sqrt at 50 digits.
+
+**"Upper end below 15 points", without rounding.** This is true iff `0.15 − d > 0` and
+`t²·SE² < (0.15 − d)²`, compared with Fractions. `t` is taken as `Fraction("2.2010")`, and so
+on for the other df. The interval is labelled `a description, not a second test` (REG 331-332).
+
+### 4.5 Usable tests, R12 (REG 943-992)
+
+An expected S1 attempt is one listed commit in one standing S1 run, so 10 per batch and 120 in
+the wave. It has a usable test iff all four hold:
+
+- (a) the run has a row with `task_id` equal to the commit;
+- (b) the run's kept events include a `builder.author_test.start` whose `payload.task` is that
+  exact 40-hex commit;
+- (c) the run's kept events include no `builder.author_test.failed` with that `payload.task`;
+- (d) the row's `error` is a string that does not begin with `authoring:`. The prefix is REG's
+  literal `authoring:`, without the trailing space of the code's `"authoring: "`, so it can only
+  match more.
+
+A field that is absent, null or of the wrong type counts as failing that condition (R12 item 3:
+"or cannot be read"). No clean field is read for this count.
+
+The script prints, for each batch, `without usable test: k/10`, and for the wave
+`usable: u/120`. A batch is **author-hit** iff `k ≥ 6` (A8 item 2, REG 926). The script also
+prints `S1 attempts counted without a usable test whose row is clean: c`. This is a consistency
+figure and it changes nothing (open point 25).
+
+### 4.6 The sensitivity results (A8: REG 920-934; R2: REG 936-941; part 6 item 3: REG 347-362)
+
+- **Blocks.** Within each repository, maximal runs of author-hit batches that are consecutive in
+  batch number form one unit each. Every other batch is its own unit. `N` = 60. `B` = the number
+  of units. The test and interval are as in 4.3-4.4 over the units.
+- **Left out.** Every author-hit batch is removed. `B` and `N` count what is kept, `d = T'/N'`,
+  and the test and interval are over the kept batches.
+- **Cannot be calculated** applies when no batch is left, or fewer than 2 units are left
+  (REG 360-362 and 932-933). The script prints it as `cannot be calculated` and computes no p or
+  interval for that result.
+- **No author-hit batch.** If no batch is author-hit, both recomputed results equal the primary,
+  and both are still printed (R2).
+
+### 4.7 The decision word (A9: REG 1006-1020; R3: REG 994-1004; R4: REG 1022-1028)
+
+Let:
+
+- `sgn(x) ∈ {−1, 0, +1}`;
+- `below(r)` mean `20·m_r < 2^{U_r}`;
+- `P` be the primary result and `K`, `O` the blocks and left-out results.
+
+The word is chosen in this order, and no other word is used:
+
+1. **Inconclusive** (item 3), if for `K` or `O`:
+   - it cannot be calculated; or
+   - `below(r) ≠ below(P)`; or
+   - `sgn(T_r) ≠ sgn(T_P)` (three signs; two zeros agree).
+2. **Cleared**, if `below(P)` and `T_P > 0` and, for both `K` and `O`, `below(r)` and `T_r > 0`.
+3. **No 15-point effect**, if all of the following hold:
+   - `not below(P)`, `not below(K)` and `not below(O)`;
+   - the upper end is below 15 points for `P`, `K` and `O`;
+   - `#{b among the 12 primary batches : U_b ≠ 0} ≥ 6`;
+   - `usable ≥ 108` (9/10 of 120).
+4. **Inconclusive**, otherwise.
+
+### 4.8 Stop (b) (Part D: REG 1335-1395)
+
+Under the heading `Stop (b), as recorded in Amendment 3 Part D (not computed by this script)`,
+the script prints the three counts:
+
+- strict 0;
+- `git stash` only 2, the count the methodologist signs (REG 1373-1374);
+- every refused read-only git command 4.
+
+It then prints the sentence of REG 1384-1386 word for word. See open point 9.
+
+### 4.9 Output format (after section 3.3)
+
+Plain text, deterministic, in this order:
+
+1. The provider test: `test author provider shown as cerebras: 24 of 24 standing S1 runs`.
+2. `Rows read: 240 (48 runs x 5); rows missing: 0; first filing 98fe708c: set aside unread.`
+3. Per batch, in filing order (click 1-6, then cobra 1-6): `repo`, `batch`, `n_b`, `S_b` (exact
+   fraction and decimal), `without usable test k/10`, `author-hit yes|no`. There are no per-arm
+   clean counts and no per-repository totals (REG 383-384).
+4. Primary:
+   - `T`, `d` in points;
+   - `m`, `2^U`, p as a decimal, and `below 0.05: yes|no`;
+   - the interval in points, with `t` and df;
+   - `upper end below 15 points: yes|no`.
+5. Blocks result: the units (as batch lists), then the same lines, or `cannot be calculated`.
+6. Left-out result: the batches kept and `N`, then the same lines, or `cannot be calculated`.
+7. `batches with a non-zero summed difference: x of 12`, then `usable tests: u of 120 (nine in
+   ten = 108)`.
+8. `DECISION: <Cleared | No 15-point effect | Inconclusive>`. If the word is Inconclusive, the
+   line names the condition that fixed it.
+9. Fixed sentences, each printed verbatim:
+   - REG 1030-1031: a rejection "says that the arms differ; the direction and size are read from
+     the estimate of item 2";
+   - "No error rate is quoted for the call" (REG 382-383);
+   - "nothing is claimed for either repository alone" (REG 383-384);
+   - "The interval is a description, not a second test" (REG 332).
+10. Stop (b) (4.8).
+11. `Standing run ids (sorted by id; no place, no arm):` followed by the 48 ids. This lets the
+    output be "filed unedited with the 48 run ids" (REG 1098).
+
+The exit code is 0.
+
+---
+
+## 5. Which row endpoint supplies outcomes, and which fields
+
+### 5.1 Endpoint
+
+The endpoint is `GET /api/v1/grades?run_id=<id>&limit=500&offset=<k>` (`routes/grades.py`
+158-210). It serves `Page[GradeRowOut]` in chain order (`seq`). This is "the row's own field in
+the product ledger" (REG 870): `GradeRowOut` is the ledger row (`schemas.py` 1042-1087).
+
+The script does **not** use `GET /runs/{id}/tasks`. That endpoint collapses trials into a task
+view and is barred (RUL 588-591). It does not use `/ledger/export`, and it does not filter
+`/grades` by `clean` or by any other outcome field.
+
+### 5.2 Fields
+
+| Field | Use |
+|---|---|
+| `run_id` | Must equal the requested run, or the script stops. |
+| `task_id` | Joins the row to a listed commit. Exact string. |
+| `clean` | Must be a JSON boolean. Clean iff `true`. |
+| `error` | Kept only for S1 runs' rows. Used only by R12 (d). |
+
+`labels`, `trial`, `disqualified`, `dq_reason`, `failure kind`, costs, tokens and every other
+field are dropped at parse.
+
+### 5.3 Integrity (stops; section 3.5)
+
+For each of the 48 runs:
+
+- the page `total` equals 5 and equals `counts.rows` already checked in (a);
+- the 5 rows' `task_id` set equals the run's 5 listed commits, each exactly once;
+- every `clean` is a boolean.
+
+Any breach means read not made (open points 7 and 8).
+
+---
+
+## 6. Open points (each with the harder reading recommended)
+
+1. **The 48 standing run ids are not in REG.** REG 1043 makes them a constant of the script. T4
+   requires them to be a source other than the out files, otherwise T4 is circular. Recommended:
+   - the delivery manager writes them into the script before commit, from the run ledger sorted
+     by id with no slot column (Part E item 7, REG 1474-1475);
+   - they are recorded in the wave record with the script's sha256;
+   - the script writer never derives them from an out file or the campaign record.
+
+   The spec writer has not seen them.
+2. **The full hashes of the four poster files appear only truncated** (RUL T1). Recommended: the
+   delivery manager records the full sha256s in the wave record before commit. The script
+   carries them, and compares full strings only. The tests assert agreement with the truncated
+   forms, and a prefix-only match is refused.
+3. **T7's place rule (`position` or `slot`) is not yet recorded.** Recommended: the script
+   refuses to start until `PLACE_RULE` is set from the poster source with its sha256 and line
+   (RUL 147-150).
+4. **The JSON shapes of the plan and out files are unknown to the spec writer**, who may not open
+   `~/wave4`. Recommended: the delivery manager records `PLAN_SHAPE` and `OUT_SHAPE` from the
+   poster source text (`wave4_post.py`, sha256 `b30ca68e…50b105`), not from the files. The
+   parser follows that record exactly and fails closed on any other shape. That includes how
+   `S3` batches are told apart without reading a poster `arm` label.
+5. **The t value.** A7 prints 2.2010 for df 11, and the exact quantile is 2.2009852. For the
+   recomputed results REG gives no figure. Recommended (harder: the interval is wider, so fewer
+   "No 15-point effect" calls): use each quantile rounded **up** to 4 decimals. That reproduces
+   A7's 2.2010 exactly, and the same rule applies to every df. The softer alternative is the
+   exact quantile.
+6. **REG does not name the row endpoint.** Recommended: `GET /grades?run_id=`, the ledger row's
+   own `clean` (REG 870), and not `/runs/{id}/tasks` (barred, and it collapses trials).
+7. **The row set disagrees with `counts.rows`.** This covers a duplicate (run, task), a missing
+   listed commit, or a page total other than 5. Recommended: stop, read not made, counts only,
+   ids to `--deviation-out`. Neither the row rule's "counts as a miss" (REG 217-218) nor a
+   choice between two rows is applied after rows are seen, because A3 (REG 871-873) states that
+   all 240 rows exist and none is dropped or replaced.
+8. **A row whose `clean` is not a boolean.** Recommended: stop, read not made. It is not counted
+   as a miss, because that would be a re-grade (REG 870-871).
+9. **Stop (b).** Recommended: print Part D's three recorded counts and the REG 1384-1386
+   sentence, labelled "not computed by this script". The harder alternative is to recompute from
+   the `error` fields of click batches 1-2. It is not taken, because no closed list of row-field
+   tests exists (REG 1392-1393), and recomputing would invent a classifier. If the methodologist
+   wants a recomputation, a closed list must be written first.
+10. **The out files may hold `S3` keys.** T3 says "exactly 49 keys" and "any other key … fails".
+    Recommended: follow T3 as written. If the poster wrote `S3` run ids into the same out files,
+    T3 fails, and the remedy is a ruling before commit, not a filter in the script.
+11. **T2 says "equal as parsed JSON".** Python `==` treats `True == 1`. Recommended: use the
+    stricter RUL section 4 equality, under which a boolean is not a number.
+12. **Section 4 (T6) and the campaign `s1` test also apply to `98fe708c`.** Recommended: yes for
+    both, since they cover "each of the 49 runs" (REG 1645-1648 and 1710-1711). Its body is the
+    `click-3/1` plan body.
+13. **`campaign_id` absent from a body.** Section 4's general rule compares only carried keys, but
+    RUL 469 says "Each kept body must carry `campaign_id`". Recommended: require it to be present
+    and equal.
+14. **Required registered body fields.** For example `max_cost_usd: 6`, `budget.max_turns: 50`,
+    `env_stop: 2`, `outage_stop: 3` and `learning: "off"` (REG 158-160 and 759-760). No test
+    requires a body to carry them. Recommended: the script does not add such a test, since it
+    would be a new test of the order check, which only Paul can add (REG 1598-1600). The
+    methodologist may rule on it before commit.
+15. **`finished` null, or a time without a zone.** These count as absent and fail (c) (REG
+    1059-1060; RUL 534). There is no fallback to `started`, `heartbeat` or any out-file time.
+16. **The two times are served at different precisions.** `created` is served with microseconds
+    and `finished` to the second (each `+00:00`). REG 1059 says to compare "at the precision the
+    record serves". Recommended: follow it, with no truncation or padding. This can let a true
+    sub-second overlap pass (f)/(g), or make an equal-second ordering fail. The report should
+    say so.
+17. **Outside the script.** The product's own split (part 6 item 5, REG 386-387), the item 6
+    descriptions, `S3`, part 7 classing, the Part B review draw and Paul's audit are report
+    matter. The script computes none of them.
+18. **A blind run of the campaign with empty or absent `task_ids`.** Such a run names no
+    commit, but may build listed commits from the pool. Recommended (harder): it is counted in
+    (b)'s set, so (b) fails.
+19. **Served code between `7bb03d6c` and `dd52bc84`.** The schema and route files the script
+    depends on are unchanged. A `core/ledger.py` change (#130, chain-head anchoring) does not
+    alter `GradeRowOut`. The script is still tested only against shapes read at `7bb03d6c`.
+20. **The login file's keys** are assumed to be `username`/`password` (`routes/auth.py`
+    183-187). Recommended: the delivery manager confirms them without printing the file. The
+    script refuses a file with other keys and prints `login file shape not as expected`, with
+    no value.
+21. **Paging stability.** A changing `total`, a short page or non-increasing `seq` stops the
+    script with read not made. The script does not retry.
+22. **Seat exposure.** The spec writer read `wave-record-notes.md` lines 9-18. They give run ids
+    of click batches 1-2, with error texts including five `authoring:` errors. This is the same
+    note as RUL section 0. Recommended: add it to the deviation log beside RUL section 0's
+    entry. It was joined to nothing.
+23. **A transport failure after the order check** (E4 or E5). This is not R12's "cannot be read",
+    which applies to fields inside a served event or row. Recommended: stop with read not made,
+    and no figure. Whether a second invocation after such a stop is a "second read" (REG
+    1105-1106) is for Paul. No figure exists at that point, but rows or events may have been
+    fetched. The script prints nothing derived from them.
+24. **`arm: "A0"` in a body.** Test (e) accepts it (REG 1067). The served request schema
+    (`arm: Literal["S1"]`, `extra="forbid"`, `schemas.py` 765) would have refused such a body,
+    so a body holding it cannot be what was sent. Recommended: the script follows (e) word for
+    word, and the methodologist rules before commit whether to fail it instead. Failing it is
+    harder, since it can only fail.
+25. **A clean S1 row that R12 counts as without a usable test.** A3 says clean is the row's own
+    field and nobody re-grades. Recommended: the primary uses `clean` only. The script prints
+    the count of such rows as a consistency figure, and the methodologist rules on any non-zero
+    count after filing. It changes no word.
+26. **The deviation-log channel for order-check failures.** (i) puts the run ids and times in the
+    deviation log, and RUL 9 has them printed. Recommended: print them, so the delivery manager
+    files the output. `--deviation-out` is reserved for the provider-test and row-integrity
+    stops, whose ids must not be printed.
+27. **The P4 count when a run has no event and also a non-cerebras value.** This cannot occur
+    jointly. Each run is counted once, under "no event" if it has no `author.attempt`, otherwise
+    under "another value" if any value is not `cerebras`.

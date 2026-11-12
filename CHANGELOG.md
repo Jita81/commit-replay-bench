@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Wave 4's primary read script, written and tested before any result by arm exists**
+  ([#132](https://github.com/Jita81/commit-replay-bench/pull/132)). `scripts/wave4_primary_read.py`
+  makes the ruling's order check and, only when it passes, the registered read in the same run.
+  It uses the standard library alone, keeps every input behind an injected function, prints the
+  sha256 of each input file and of itself, and on a failure prints only what the ruling allows,
+  with no figure. A provider-test stop prints counts and no run id. Its whole output also goes
+  to a new file named by `--output`. The wave record holds the methodologist's signed readings
+  and where each recorded constant came from. The tests use made-up waves only.
+
 - **Wave 4's fourth amendment: where the order check reads what the product does not serve**
   ([#131](https://github.com/Jita81/commit-replay-bench/pull/131)). The served run record
   shows no request body, campaign or test author provider, so the check that must pass before
