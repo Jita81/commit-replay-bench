@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Wave 4's review draw: Amendment 3 Part B (B1-B3, readings R6-R10), after the read's order check.
 
-    python scripts/wave4_review_draw.py --poster-dir DIR --login FILE \\
-        --api URL --campaign cmp_88cf9e875edba15371e6d3f7 \\
-        --key-out FILE --audit-out FILE --output FILE
+    python scripts/wave4_review_draw.py --poster-dir DIR --login FILE --api URL \\
+        --campaign cmp_88cf9e875edba15371e6d3f7 --key-out FILE --audit-out FILE --output FILE
 
 The registration is ``docs/reviews/2026-11-10-wave-4-registration.md``, Amendment 3 Part B: the
 ten patches per repository and arm (B2 items 1-4, R6, R7), Paul's audit (B3 items 1-3, R8,
@@ -87,8 +86,8 @@ the filed list how many patches each arm gave.
 
 Exit codes: 0 the draw was made; 1 not ready (a recorded constant, an argument or the login
 file is not as expected, an output file exists, or a module other than ``READ_PATH`` is loaded
-as the read), no request made; 2 the order check failed
-(counts only); 4 the draw was not made (a row request failed, or the rows are not as the run
+as the read), no request made; 2 the order check failed (counts only); 4 the draw was not
+made (a row request failed, or the rows are not as the run
 records state: the read's added integrity stop, a run without exactly five rows, or a row
 with no ``error`` field (ruling Q4); counts only; or an unexpected error before any salt was
 made, named by its class only); 5 the ``--output``, ``--key-out`` or ``--audit-out`` file
@@ -106,18 +105,19 @@ What it does: Runs the read's order check again (T1-T5, (a)-(h), section 4); on 
               the 48 standing runs' ledger rows, draws up to ten clean patches per repository
               and arm in the three steps of B2 item 3, orders each repository's patches by the
               audit hash of B3, labels them for the reviewer from a secret salt, writes the
-              keyed list to ``--key-out`` and Paul's ten, in a salted order, to
-              ``--audit-out``, and prints the blinded list with its own sha256 and the sha256
-              of both files.
+              keyed list to ``--key-out`` and Paul's ten, in a salted order, to ``--audit-out``,
+              and prints the blinded list with its own sha256 and the sha256 of both files.
 How:          Standard library only. The rule itself is the pure ``draw`` over plain rows
               (repository, commit, arm, attempt, clean). All I/O goes through injected
               callables (``read_file``, ``open_getter``, ``open_output``, ``open_key``,
-              ``open_audit``, ``path_exists``, ``make_salt``, ``sync``); the getter is the read's
-              (urllib, no redirect, no retry).
+              ``open_audit``, ``path_exists``, ``make_salt``, ``sync``); the getter is the
+              read's (urllib, no redirect, no retry).
 Layer:        tooling — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   scripts/wave4_primary_read.py (the order check, arms, rows and constants it
-              reuses), docs/reviews/2026-11-10-wave-4-registration.md (Amendment 3 Part B)
+              reuses), docs/reviews/2026-11-10-wave-4-registration.md (Amendment 3 Part B),
+              docs/reviews/2026-11-10-wave-4-registration/wave-record-notes.md (the signed
+              readings Q2-Q4 it applies)
 Tested by:    tests/test_wave4_review_draw.py
 Touch when:   never for a new repository; Wave 4's registration changes the review draw or
               the audit rule of Amendment 3 Part B (a new commit, before the draw is run).
