@@ -12,13 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **Wave 4's second amendment: the pilot, the cut and the batch orders**
-  ([#129](https://github.com/Jita81/commit-replay-bench/pull/129)). The registration gains
-  Amendment 2, written before the first wave run: the three pilot runs and their product
-  costs, each pilot gate read one by one (two did not hold as written, and Paul's decision on
-  them is quoted), the turn limit doubled once to 50, the cut to 15 commits a cell (60 commits,
-  12 batches) with each cut list's sha256, every batch's seeded arm order, and the power
-  simulation rerun on the cut lists with its script and output beside the page.
+- **Wave 4's second and third amendments: the cut, the orders and the rules of the read**
+  ([#129](https://github.com/Jita81/commit-replay-bench/pull/129)). Amendment 2, written
+  before the first wave run, records the pilot runs, each pilot gate (two did not hold as
+  written; Paul's decision is quoted), the turn limit of 50, the cut to 15 commits a cell,
+  every batch's seeded arm order, and the power simulation rerun on the cut lists.
+  Amendment 3, written after the blind runs and before any result by arm, holds the
+  methodologist's signed readings of the decision rule, the review draw, the stop (b)
+  counts, the candidate list for the next untuned repository, the conditions for the read
+  and the deviation log. The wave's record notes sit beside the simulation files.
 
 - **The ledger's heads can be anchored to a file kept off the machine**
   ([#130](https://github.com/Jita81/commit-replay-bench/pull/130)).

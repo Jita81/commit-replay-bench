@@ -807,3 +807,645 @@ output byte for byte. No number, list or order changed: the turn limit of 50, `c
 the cut lists and their sha256s, the 12 batch orders, the seed and every rejection share are
 as first put on record in commit `ca90419a`
 **[hypothesis — `power_sim.out.txt` rerun and compared with its first recording; a simulation, not a measurement of the product]**.
+
+## Amendment 3 — pre-unblinding rules: the read, the review draw, stop (b) and the next pool — 2026-11-12
+
+This amendment is written before the primary is read. Nothing in it is a result. No comparison
+between the arms has been computed by anyone, and none was used to write it. The methodologist
+read no row, no clean count and no figure by arm, and did not combine the run ledger's slot
+labels with Amendment 2's batch orders
+**[hypothesis — the seat's own statement of what it read on 2026-11-12; the session is not in this repository]**.
+
+**What this amendment does not change.** `N` (62), `k` (15), `c` ($0.1956404, which Amendment 2
+prints rounded as $0.195640), the turn limit (50), the seed 20261112, the four lists, the cut,
+the 12 batch orders, and every threshold and decision word of part 6. Part A restates part 6
+and the row rule. Parts B, C and D fill gaps the registration left open.
+**[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+**How a choice is marked.** Where the registered text left a choice, the choice is made here,
+once, and marked:
+
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+
+The registered words are quoted beside each reading. Where two readings were possible and the
+text does not settle it, the reading taken is the one that is harder on the product: more waves
+called *inconclusive*, fewer called *cleared*, a less flattering sample. Each reading says
+whether the text settled it or the harder reading was taken. Reading the decision rule is the
+methodologist's to sign (topology rule 2). Nothing here waives or changes registered matter,
+which only Paul can do (topology rule 1).
+**[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+All money figures in this amendment are **product dollars, unconfirmed**: the product's own
+price table, not compared with the provider's bill.
+
+---
+
+### Part A. The primary read
+
+**A1. When it may be read.** Registered: "It is read once, when every batch has been filed (and
+re-filed where the row rule says so)" (part 6 item 1). All 12 batches are filed: 48 standing
+runs, each `succeeded` with 5 of 5 rows, and one earlier run of click batch 3 that failed with
+no row. The money stop did not fire. The campaign record read on 2026-11-12 at about 03:40Z
+shows $45.791476 spent of the $95 line and $49.208524 left (product dollars, unconfirmed). That
+figure includes the pilot ($3.047552), the 49 wave runs ($42.575859) and the test author's
+calls. So the primary is to be read, and not declared "not read", **once every condition of
+part E holds**. Until then it is not read
+**[hypothesis — figures from the delivery manager's read of the campaign record and from the run ledger given to the seats; neither is in this repository]**.
+
+**A2. Which rows count.**
+
+1. The 60 listed commits: the first 15 of each of the four lists (Amendment 2, "The cut").
+   **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+2. For each commit and arm, "the rows from that arm's two runs in the commit's batch" (part 2,
+   row rule). That is 4 rows a commit, 240 rows in all.
+   **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+3. For click batch 3, the rows of the filing that stands (runs `8a258976`, `78b4d435`,
+   `3f67a4d0`, `5fd4dc40`). The first filing (run `98fe708c`, failed, 0 rows) is "set aside
+   unread" (part 2, row rule). It holds no row, so nothing is set aside in practice.
+4. "Pilot rows are never counted" (part 2, row rule; part 5).
+5. No `S3` row enters the primary. Part 6 item 1 reads "`A0` against `S1`".
+
+**A3. What a row is worth.** A row is clean or it is a miss. "Disqualified rows, missing rows,
+outages, turn-limit endings and an author that produced no usable test all count as misses,
+under both arms" (part 6 item 5). Clean is read from the row's own field in the product ledger.
+Nobody re-grades a row. A row that carries an error is a miss, not a gap. The 240 rows all
+exist, so the primary runs on 240 rows, 60 commits and 12 batches. No row is dropped, replaced
+or run again.
+**[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+**A4. Harness-class rows stay in.** A miss classed harness under part 7 is still a miss in the
+primary, under both arms. The table "that leaves out harness-caused misses" is description, and
+"A secondary table never replaces the primary" (part 6 item 6). No part 7 class is an input to
+the primary script.
+**[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+**A5. The statistic.**
+
+1. For commit *i*: `d_i` = (clean `S1` rows ÷ 2) − (clean `A0` rows ÷ 2).
+2. For batch *b*: `S_b` = the sum of `d_i` over its five commits.
+   **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+3. `T` = the sum of all 60 `d_i` ("Statistic: the sum of the per-commit differences", part 6
+   item 1).
+
+> **R1. Direction.** Registered: "the share of its two attempts that are clean under each arm,
+> and the difference" (item 1); "p below 0.05 with `S1` ahead" (item 4). The difference is `S1`
+> minus `A0`. "`S1` ahead" means the summed difference is above zero. A sum of exactly zero is
+> not "ahead". **The text settles this**: item 4 names the direction, and the two-sided p-value
+> is the same either way.
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+**A6. The test.** "One exact two-sided sign-flip test at 0.05 ... in which the unit that is
+flipped is the batch" (item 1). There are 12 batches, so 2^12 = 4,096 sign patterns
+(Amendment 2: "all 4,096 sign patterns"). The p-value is "the share of those patterns, the
+observed one included, whose summed difference is at least as far from zero as the observed
+sum".
+**[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+- The script works in whole numbers (twice each difference), so ties are exact. "At least as
+  far" means greater than or equal.
+- Let `m` be the number of patterns that qualify. p = `m` ÷ 4,096. p is below 0.05 exactly
+  when `m` is 204 or fewer (0.05 × 4,096 = 204.8). This is arithmetic, not a new threshold.
+- "This is the only p-value in the wave" (item 1).
+
+**A7. The interval** (item 2). The estimate is `d` = `T` ÷ 60. The standard error is
+`sqrt(B/(B−1) × Σ(S_b − n_b×d)²) / N`. Here `B` = 12 batches, `n_b` = 5, and **`N` (commits)
+= 60**. That `N` is item 2's letter for the number of commits in the formula. It is not the
+cut rule's `N` = 62 of part 3, which is unchanged. The interval is `d` plus and minus the error
+times the 97.5% point of Student's t with 11 degrees of freedom (2.2010). It is reported in
+points (×100). It is "a description, not ... a second test". "Below 15 points" is compared
+without rounding.
+**[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+**A8. The sensitivity results** (item 3), computed in the same run of the script.
+
+1. Count, "from the runs' events", each expected `S1` attempt with no usable test, as R12
+   below defines it. Expected
+   attempts are "two for each commit of the batch": 10 a batch, 120 in the wave. "An attempt
+   with no row, or with no event showing a usable test, counts as one without a usable test."
+2. A batch is author-hit when that count is "more than half" of 10, which is 6 or more.
+3. "Author-hit batches that follow one another in filing order within a repository form one
+   block, which flips as a whole in the test and counts as one unit in the interval."
+4. The test and the interval are "recomputed twice: with those blocks, and with every
+   author-hit batch left out". With blocks, `B` is the number of units and `n_b` the commits in
+   each unit. With batches left out, `B` and `N` (commits) count only what is kept.
+5. A recomputed result "cannot be calculated when no batch is left, or when fewer than two
+   units are left".
+   **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+> **R2. No author-hit batch.** Registered: "The same test and interval are then recomputed
+> twice: with those blocks, and with every author-hit batch left out." If no batch is
+> author-hit, there is no block and nothing is left out, so both recomputed results are the
+> primary itself. They are still printed. **The text settles this**: the rule changes units
+> only for author-hit batches, and "cannot be calculated" is defined only by too few units.
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+
+> **R12. "A usable test", and the event that shows it.** Registered: "read from the runs'
+> events. An attempt with no row, or with no event showing a usable test, counts as one
+> without a usable test" (part 6 item 3); "an author that produced no usable test" (item 5).
+> The text does not say what makes a test usable, or name the event. Amendment 2 did read it
+> once, at the pilot gate: "The author produces a usable test for at least 5 of 6 commits",
+> result "5 of 6", where the sixth was "an authored test that was not red at the parent" (commit
+> `047adef2`, a row "with failure kind `authoring`"). So a test that is present but not RED
+> at the parent is **not usable**. Reading:
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+>
+> 1. **Usable means** the author's test was written and shown RED at the parent, by a test
+>    that it defines, so that the builder was started with it. A test that is absent, on a
+>    path that is not allowed, not RED at the parent, timed out, or RED for no test it
+>    defines, is not usable. So is an attempt where the author's provider refused the call or
+>    the harness failed while proving RED. The cause does not matter to this count: "an
+>    author that fails is part of what `S1` is" (item 3).
+> 2. **What the script reads.** The stored events of each `S1` run, from the run's event log
+>    (`GET /api/v1/runs/<id>/events/log`), and the `task` key of each event's payload. Two
+>    actions matter: `builder.author_test.start` and `builder.author_test.failed`. The
+>    product writes no event that says "usable" in so many words. It writes `start` when the
+>    author step begins and `failed`, once, on every way that step can end without a usable
+>    test.
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+> 3. **The count.** An expected `S1` attempt (one commit in one `S1` run) has a usable test
+>    only if all four hold. (a) The attempt has a row. (b) The run's events hold a
+>    `builder.author_test.start` for that commit's task. (c) The run's events hold no
+>    `builder.author_test.failed` for that task. (d) The row's `error` field does not begin
+>    with `authoring:`. If any one fails, or cannot be read, the attempt counts as one
+>    without a usable test. Test (d) is a row field, not an event; it can only lower the
+>    count. The script reads no clean field for this count.
+> 4. **One count serves both rules**: the author-hit rule of item 3 (A8 items 1 and 2) and
+>    the nine-in-ten rule of item 4 (A9 item 3). The script prints the count for each batch
+>    and for the wave.
+> 5. **A check on names, made on code and not on rows.** The two action names and the
+>    `authoring:` prefix are those of the product's code and event table at `32630d12`. The
+>    wave was served from `7bb03d6c`, which the seat may not read. Before the script of R5 is
+>    committed, the delivery manager confirms from the served code that it writes these names.
+>    If it does not, the read waits and this reading is corrected first, before any result by
+>    arm exists. Without that check a changed name would count all 120 attempts as without a
+>    usable test.
+>
+> **The text does not settle it, so the harder reading is taken**, and it is the one
+> Amendment 2 already applied to the pilot. It is harder in two plain ways: it can only
+> lower the count held against nine in ten, and it can only add author-hit batches, never
+> remove one. The softer reading, any test file the author returned, would count a test that
+> was never RED as usable.
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+>
+> The names in item 2 are from the code
+> **[measured — n = 2 event actions and 1 error prefix, method: read in `src/crb/builders/adapter.py` and the event table of `docs/API.md` with read-only `git show` and `git grep`, commit `32630d12`, apparatus 2.5]**.
+
+> **R3. A sum of exactly zero.** Registered: the wave is inconclusive "if either recomputed
+> result ... has a summed difference of the other sign". The text does not say what a zero sum
+> is. Two readings are possible. The softer one: zero is not "the other sign". The harder one:
+> a recomputed sum counts as "of the other sign" whenever its sign differs from the primary's,
+> with three signs, below zero, zero and above zero. So zero against a non-zero primary, or
+> non-zero against a zero primary, makes the wave *inconclusive*. Two zeros are the same sign.
+> **The text does not settle it, so the harder reading is taken.** It calls more waves
+> inconclusive and none cleared that the softer reading would not. This reverses the softer
+> reading in the seat's first draft; the change was made before any result existed.
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+**A9. The decision words** (items 3 and 4), applied in this order. No other word may be used.
+
+1. ***Inconclusive*, by item 3**: "whatever the primary p-value says, if either recomputed
+   result falls on the other side of 0.05 from the primary, or has a summed difference of the
+   other sign, or cannot be calculated". "The other side" means one is below 0.05 and the other
+   is not.
+2. ***Cleared***: "p below 0.05 with `S1` ahead, and both sensitivity results of item 3 also
+   below 0.05 with `S1` ahead".
+3. ***No 15-point effect***: "p not below 0.05, both sensitivity results of item 3 also not
+   below 0.05, the upper end below 15 points of the primary interval and of both recomputed
+   intervals of item 3, and at least six batches with a summed difference that is not zero, and
+   a usable test from the author in at least nine in ten of the wave's expected `S1` attempts".
+   Nine in ten of 120 is 108 or more. The count is the one R12 defines.
+   **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+4. ***Inconclusive***: "anything else".
+
+> **R4. The six batches.** Registered: "at least six batches with a summed difference that is
+> not zero". The six are counted once, among the 12 batches of the primary. **The text settles
+> this**: item 3 uses "unit" for blocks and "batch" for batches, and item 4 says "batches" and
+> gives one count. A harder reading, the same count in each recomputed result, would add a
+> condition the text does not hold, so it is not taken.
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+A rejection "says that the arms differ; the direction and size are read from the estimate of
+item 2, and the report words it so" (item 1). "Nothing is claimed for either repository alone"
+(item 4). "No error rate is quoted for the call" of *No 15-point effect* (item 4).
+
+**A10. How the read is done.**
+
+> **R5. Read once, by one script.** Registered: "It is read once" (item 1). The text does not
+> say how. Reading:
+> 1. One script computes A5 to A9. It is written and tested on made-up rows only. It is
+>    committed, and its sha256 recorded, before it touches a Wave 4 row.
+> 2. The script first checks, from the run bodies, that every run's arm is the arm Amendment 2's
+>    order gives its place in its batch, and that the 48 run ids are the standing runs. If any
+>    check fails it stops and prints no figure.
+> 3. It is run once on the 240 rows. Its whole output is filed unedited with the 48 run ids.
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+> 4. The delivery manager runs it. The methodologist and the validity engineer each sign the
+>    reading, and either can block (topology rule 4). Until both sign, the primary is open.
+> 5. Until the output is filed, nobody computes a clean count by arm, by repository, by cell or
+>    by batch: "no comparison between the arms is computed, on click or anywhere" (item 1).
+>
+> **The text does not settle the method; this is the reading that leaves the least room.** A
+> second run, or a figure seen before the script is fixed, would be a second read.
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+
+---
+
+### Part B. The review sample and Paul's audit (part 6 item 8)
+
+Registered, in full: "Ten clean patches per arm per repository, drawn where possible from
+commits clean under both arms, compared with the real commit by a reviewer who is not told the
+arm: merge as is, merge with small edits, or do not merge. Reported as counts. Paul checks five
+as an audit of the reviewer" (part 6 item 8). And: "Check five sampled patches per repository"
+(part 9, the table of what needs Paul). The registration gives no draw rule. The topology
+document cites this as "part 6 item 7"; the committed number is item 8.
+**[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+**B1. When.** The rule is fixed now. The draw is run only after the primary is read and signed.
+It needs the clean and arm fields, so it cannot run earlier.
+
+**B2. The ten patches, for each repository `R` and each arm `A`.**
+**[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+1. A patch is one clean row (commit, arm, attempt) from the rows of A2. Attempt 1 is the row
+   from the first-filed of the arm's two runs in the batch. Attempt 2 is the other.
+   **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+2. Order the 30 commits of `R` by ascending
+   `sha256("crb.wave4.review|20261112|" + R + "|" + commit)`, ties by commit. `R` is `click`
+   or `cobra`, as the run body names it. The commit is its full 40-character id.
+   **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+3. Walk that order and take one patch a commit: the clean row of arm `A` with the lower attempt
+   number. First take commits clean under both arms. If that gives fewer than ten, carry on
+   with the other commits that have a clean row under `A`. If still fewer than ten, walk the
+   order again and take second clean rows. If still fewer than ten, review all there are and
+   report the shortfall as a count.
+4. The drawn list and its sha256 are filed before the reviewer sees a patch. The reviewer is
+   not told the arm.
+
+> **R6. "Clean under both arms".** Registered: "drawn where possible from commits clean under
+> both arms". A commit is clean under both arms when it has at least one clean row under `A0`
+> and at least one under `S1`. The other reading is that all four rows are clean. **The text
+> does not settle it, so the harder reading is taken.** "All four clean" would keep only the
+> easiest commits, and their patches would flatter the merge counts.
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+> **R7. The order of the draw.** Registered: "Ten clean patches per arm per repository". The
+> text gives no order. Reading: B2 items 2 and 3. One commit order serves both arms, so the
+> same commits are reviewed under both arms where possible. One patch a commit comes first, so
+> ten patches are not ten views of three commits. The lower attempt is taken, so no one picks
+> between two clean rows. **The text does not settle it; nothing in this order uses a result
+> beyond the clean field the registered rule already requires.**
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+**B3. Paul's audit.**
+
+1. For each repository, order its reviewed patches (up to 20) by ascending
+   `sha256("crb.wave4.audit|20261112|" + R + "|" + A + "|" + commit + "|" + attempt)`, ties by
+   commit, then arm, then attempt. `A` is `A0` or `S1`. Attempt is `1` or `2`.
+2. Paul checks the first five of each repository: ten patches in all.
+   **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+3. He takes them in this sequence: click 1, cobra 1, click 2, cobra 2, and so on to click 5,
+   cobra 5. If he checks fewer than ten, the ones checked are the first in that sequence, and
+   the report states the shortfall against part 9.
+4. The result is reported as counts of agreement with the reviewer, and nothing more.
+
+> **R8. Five or ten.** Registered: "Paul checks five as an audit of the reviewer" (part 6
+> item 8) and "Check five sampled patches per repository" (part 9). Read together, they mean
+> **five per repository, ten in all**. I agree with the delivery manager's account of the two
+> texts, for three reasons. Item 8's sentence sits inside a rule scoped "per arm per
+> repository" and gives no scope of its own. Part 9 is the table of what Paul is asked, it
+> states the scope outright, and Paul approved the registration with it. And ten is the harder
+> reading: it is the larger audit of the reviewer. So **the text settles it when both parts
+> are read together**, and the harder reading agrees. This commits no time of Paul's beyond
+> what part 9 already asked. The alternative, five in all, would need Paul to waive part 9's
+> words in writing; the sequence in B3 item 3 already fixes which patches those would be.
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+> **R9. What Paul is told.** Registered: "a reviewer who is not told the arm". The text
+> withholds the arm from the reviewer and is silent on Paul. Reading: Paul is not told the arm,
+> or the reviewer's verdict, until he has given his own. **The text does not settle it, so the
+> harder reading is taken.** An auditor who has seen the verdict tends to agree with it.
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+
+> **R10. The number 20261112 in the hash strings.** Registered: seeded orders by sha256 (part 2,
+> step 2 and "Run order"); "seed 20261112" for the power simulation (Amendment 2). The strings
+> `crb.wave4.review|20261112|`, `crb.wave4.audit|20261112|` and `crb.d3.repo|20261112|` reuse
+> that number as a fixed label. The seed itself, and the simulation that uses it, are not
+> changed. Each hash is over the UTF-8 bytes of the string, printed as lower-case hex.
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+
+---
+
+### Part C. Decision D3: the selection rule for the next certifying reading's commit pool
+
+This is a commitment made before unblinding. It changes nothing in the Wave 4 design.
+
+Its source is decision D3 of the product meeting of 2026-11-11: "Before Wave 4 is unblinded,
+commit the rule by which the commit pool for the next certifying reading will be chosen,
+including the rule for choosing at least one repository the team has not tuned the harness on.
+The pool itself is listed in that reading's registration, on commits no seat has read." D3 also
+says adding a repository "needs Paul's answer to Question 4". The delivery manager, deciding as
+managing director on Paul's instruction of 2026-11-11, answered Question 4: "Approved in
+principle ... Registering it costs nothing. Any spend on it is a new budget line and goes to
+Paul with a figure." If that answer is later held not to stand for Paul's, D3's own fallback
+applies: the rule "draws from click and cobra only and the untuned repository is recorded as
+outstanding"
+**[hypothesis — quoted from the programme's meeting minutes and decisions page of 2026-11-11, which are not in this repository]**.
+
+> **R11. The rule.** Registered: Wave 4 "uses up these commits for any later certifying reading
+> on click and cobra at `bug.fix` XS and S" (part 2). D3 as quoted above. Reading:
+>
+> 1. **Eligible commit.** A commit is eligible only if it has no build row in the product
+>    ledger at any apparatus version, under any arm, and it is on no list in Amendment 1. That
+>    bars all 114 listed commits: the 60 of the wave, the six struck for the pilot and the 48
+>    of the uncut tails.
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+> 2. **Untuned repository.** A repository is untuned when all of these hold: it is not
+>    registered on the stack on 2026-11-12; it has no build row in the ledger; and no harness
+>    fix, prompt, checklist, arm file, ADR or backlog item has been written with reference to
+>    it. The pool of the next certifying reading holds at least one untuned repository.
+> 3. **Where it comes from.** Only from the candidate list of C1 below. No name may be added
+>    to that list. A name is dropped only by the mechanical checks of item 4.
+> 4. **Which one.** The candidates are taken in the order of C2. The untuned repository is the
+>    first name that passes every check: it can be cloned without credentials; its language is
+>    Python or Go; its own test suite runs in the existing builder image; it is still untuned
+>    under item 2; and its qualify run, at no model cost, leaves at least one eligible commit
+>    in every cell that reading measures. The cells are fixed in that reading's registration
+>    before the first candidate is qualified. Every candidate tried, and the check it failed,
+>    is reported. If no candidate passes, the untuned repository is recorded as outstanding and
+>    the reading certifies nothing about an untuned repository.
+> 5. **Order and cut.** Within each cell the pool is its qualified, eligible commits in the
+>    product's seeded order (part 2, step 2). The cut is by that registration's own money rule.
+>    The full lists and their sha256s are appended to that registration before its first run.
+> 6. **Nothing from Wave 4 picks a commit or a repository.** No Wave 4 result, cause code or
+>    review verdict adds, drops or reorders one.
+> 7. **Money.** Registering and qualifying cost nothing. Any model spend on the repository is
+>    a new budget line and goes to Paul with a figure.
+>
+> **The registered text does not hold this rule; D3 asks for it.** Where there was a choice,
+> the harder one was taken: the list is closed today, the order is by hash and not by any
+> seat, and a failed candidate is reported and not quietly replaced.
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+
+**C1. The candidate list, written now.** Rule for the list: a public repository; Python or Go,
+because those are the builder images that exist; with its own test suite; not click and not
+cobra; and not registered on the stack. The repositories registered on the stack today are
+click, cobra, koa, mesh-client, nhsuk-frontend and nhsuk-react-components. Two further tests
+were applied by the seat. No repository of the `pallets` or `spf13` owners is listed, because
+the team has worked on their code. And each name below was searched for in `docs`, `src` and
+`tests` of this registration's commit (`32630d12`), ignoring case, in three ways.
+**[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+1. Each `owner/name` as a fixed string. All 12 match no file.
+2. Each owner as a whole word. Ten of the 12 match no file. The owner `jd` matches no file
+   as a whole word. The owner `rs` matches 39 files as a whole word. Those hits are the Rust
+   file ending `.rs` and the like, not the repository.
+3. For those two, the repository's own name anywhere in a line. `zerolog` and `tenacity`
+   match no file. Neither do `github.com/rs` and `github.com/jd`.
+
+A plain substring search for the owner alone does not give zero, and the seat's first wording
+was wrong to say it did: `rs` is inside 750 files and `jd` inside 15, as parts of other words.
+So no listed repository is referred to there, by method 1 for all 12 and by methods 2 and 3
+for the owners
+**[measured — n = 12 names, method: read-only `git grep -i -l -F` on commit `32630d12`, paths `docs`, `src`, `tests`; `owner/name` 12 of 12 zero files; owner with `-w` 11 of 12 zero files and `rs` 39 files; `zerolog`, `tenacity`, `github.com/rs`, `github.com/jd` zero files; owner without `-w`: `rs` 750 files, `jd` 15 files, the other ten zero, apparatus 2.5]**.
+
+The twelve names were written down before any hash was computed. Six are Python and six are Go.
+The seat had no network. That each is public, in the stated language and has its own test suite
+is the seat's own knowledge, not checked today; the checks of R11 item 4 test each one
+mechanically at selection
+**[hypothesis — the seat's general knowledge of these repositories; not checked against the network on 2026-11-12]**.
+
+**C2. The order.** Ascending `sha256("crb.d3.repo|20261112|" + owner + "/" + name)`, ties by
+`owner/name`. Computed with the Python standard library; anyone can recompute it from the rule
+**[hypothesis — the sha256 of each of the 12 strings, computed outside the product]**.
+
+| Place | Repository | Language | sha256 of `crb.d3.repo|20261112|owner/name` |
+|---|---|---|---|
+| 1 | `gorilla/mux` | Go | `0c423f70451c20084e6e23ee26d0c8527b9f001f4c14123754ed8b72ad6e8ffb` |
+| 2 | `jpadilla/pyjwt` | Python | `1570d839d6ea6d427c7f5c078e6b3249ac81b9f84eb37fa6baf8ba925e44031b` |
+| 3 | `rs/zerolog` | Go | `3e1c2a5b20c514db528e02fc2ebed837b4eec44aee82a53cca6c4e69476bff9c` |
+| 4 | `hynek/structlog` | Python | `6346b19e791f1001532d1f08bd9f3cb528f59c8ee54a1166c83720a8ed28761f` |
+| 5 | `pelletier/go-toml` | Go | `7abe50ab47eb78139eac8f23ed8f6a0c98b5685f1ac6587e99ee3292b13e48ed` |
+| 6 | `jd/tenacity` | Python | `989617ce4221038db2cac58905579a57858b8edd4107b5f35cd011a91b0eb40b` |
+| 7 | `sirupsen/logrus` | Go | `a54e5b77161adf1477892a2c5ffc6d86c84a70155e41cd2c4af36a25eccbd7a2` |
+| 8 | `tox-dev/filelock` | Python | `c734df9a7bc739b2f6a2e7a8595cef45a91ed99d49cd1744c1f3871d02f32503` |
+| 9 | `marshmallow-code/marshmallow` | Python | `d2891d30bde677997e838ff2eae00c949ea93d7d974a1608eedee3f170e8a290` |
+| 10 | `hashicorp/go-version` | Go | `f0a645d21d930c47d6feb8753fd7031a4fc530475c240f3dd919627fab020901` |
+| 11 | `urfave/cli` | Go | `f12d0a4f43b5daef7ceca7c8e9b05010f9a2f30095ed3430e26f4de874c8df5f` |
+| 12 | `more-itertools/more-itertools` | Python | `f1a8dac473fde82a2240b750c840b6d1239b2c7aeba324906ab574eab694c402` |
+
+The sha256 of the list as ordered above, one `owner/name` a line, each line ended by a newline,
+is `b38fb8b6b8de3bf50ebc88b54e6dd54c1d9578bc2c5209c47fcc8350a612a1de`.
+
+From this amendment's commit until that reading's registration is filed, no harness fix,
+prompt, checklist or arm file is written with reference to a listed repository. If one is, that
+repository is no longer untuned and is dropped under R11 item 4, and the report says so.
+
+---
+
+### Part D. Stop (b): the three counts and the methodologist's position
+
+Registered: "(b) Four or more of the first 40 wave builds ending on an outage, a provider
+error, a container failure or a refused allowed command, counted from row fields" (part 6
+item 9). Amendment 2, written before the wave, said of the pilot's refused `git stash list`:
+"that is 'an allowed command refused' in spirit, a read-only command the guard does not list",
+and "the wave's stop (b) still counts every refused allowed command".
+**[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+
+**The facts.** The first 40 wave builds are click batches 1 and 2. Nine of them ended in an
+error. Five were authored tests not red at the parent. Two were a refused `git stash`. One was
+a refused `git log` and one a refused `git show`. None was an outage, a provider error or a
+container failure. The count depends on the reading of "a refused allowed command"
+**[hypothesis — row `error` fields read by the delivery manager from the served API on 2026-11-11; the responses are not in this repository]**:
+
+| Reading | Count | Does the stop fire? |
+|---|---|---|
+| Strict: the guard forbids all three commands, so none is an allowed command | **0** | no |
+| `git stash` only, as Amendment 2 treated the pilot's refused `git stash list` | **2** | no |
+| Every refused read-only git command | **4** | **yes** |
+
+**How it was decided.** The strict reading was applied by the delivery manager during the click
+runs and first reported to Paul as 0, without the other two. The methodologist raised the
+ambiguity from pooled figures. Paul was then shown all three counts and decided to continue
+under the strict reading: "Happy to proceed with the [recommendations]". That decision was made
+on 2026-11-11, before any cobra run, **after 110 pooled click rows existed**. No comparison by
+arm had been made. So this reading was fixed after rows were seen, and it is recorded as a
+deviation (annex, row D2)
+**[hypothesis — Paul's words are from the session of 2026-11-11, which is not in this repository]**.
+
+> **The methodologist's position.** I do not sign the strict count of 0 as the only reading the
+> registered text supports. I sign the following.
+>
+> 1. **Two readings have support in the text.** "Allowed command" is the registration's own
+>    term for a command on the guard's allow-list (part 4, fix 3). On that, 0 is right.
+>    Amendment 2 then counted a refused `git stash list` as "an allowed command refused" in
+>    spirit, and said in the same paragraph that stop (b) "still counts every refused allowed
+>    command". On that, 2 is right. Amendment 2 was written before the wave; the strict reading
+>    was fixed after rows existed. So where one count must be named, **the count I sign is 2,
+>    not 0**. It is the harder of the two supported readings.
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+> 2. **Under both supported readings the stop did not fire.** Two is fewer than four. On that
+>    ground I sign the reading "continue", and I do not block the read of the primary.
+> 3. **The widest reading, 4, is not the registered one, but the text does not shut it out.**
+>    It needs "in spirit" stretched from a command "the guard does not list" to `git log` and
+>    `git show`, which the guard names and refuses on purpose ("no history/other revisions").
+>    Amendment 2 did not go that far. I do not take it. I cannot say the words forbid it.
+> 4. **What a reader should conclude.** The wave passed stop (b) at 0 or at 2. At 4 it would
+>    have stopped, every row so far would have been set aside, and the wave would have started
+>    again under a new amendment. A reader who holds the widest reading should treat every
+>    Wave 4 result as coming from a wave that passed its stop (b) on the operator's decision,
+>    made after 110 pooled rows were seen. The report prints all three counts and this
+>    sentence on its first page, beside the pilot-gate waiver of Amendment 2.
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+> 5. **It changes no row.** No row is added, dropped, re-read or re-classed by this statement.
+>    The seat's earlier answer of 2026-11-11, which called the strict reading the count of
+>    record, was an unsigned draft written without the committed text; this statement replaces
+>    it. The next registration will write this stop as a closed list of row-field tests, so
+>    that it has one reading.
+>
+> **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+
+---
+
+### Part E. Conditions that must hold before the primary is read
+
+None of these needs a result by arm. If any one fails, the primary is not read until it is
+put right or Paul rules in writing.
+
+1. **This amendment is committed and hashed.** Its commit and the sha256 of the registration
+   file with this amendment appended are recorded before the script of R5 touches a row. The
+   script's own commit and sha256 are recorded with them.
+2. **The cost gate. It is not met as written, and it is Paul's to rule on.** The gate is a
+   team rule, not registered text: "Before cobra spend (a gate, not an option): cost
+   metrologist reconciles click (needs Paul's Console figure/export) ... A block here yields
+   'primary not read', never a click-only reading" (topology section 3 task 2). Three facts.
+   **[hypothesis — read from the served stack and the session of 2026-11-12 by the seats; the rows and the transcript are not in this repository]**
+   - It was not held in order. Cobra started at 23:28Z on 2026-11-11 without it. The
+     reconciliation was done on 2026-11-12, over both stages.
+   - It is not the reconciliation the gate asks for. The cost metrologist's verdict reads:
+     "The ledger adds up, and the wave runs are well under the line. The reconciliation is
+     one-way only, not three-way, and three gaps stay open." No Console figure or export
+     exists. The metrologist did not say "passed", and neither does this amendment.
+     **[hypothesis — read from the served stack and the session of 2026-11-12 by the seats; the rows and the transcript are not in this repository]**
+   - The metrologist's block is about labelling only: the figures "may go into the report
+     only when labelled 'product dollars, not confirmed against the provider'. No figure may
+     be called provider-confirmed." It does not say the primary may be read.
+
+   What is established, in product dollars, unconfirmed: the product's figures agree with
+   themselves; stop (a) did not fire on them; the independent check reproduced them; and the
+   $0.067900 gap seen before cobra is the test author's spend, which the campaign counts and
+   a run's own cost does not.
+
+   What is not established: that the product's figures match the provider's bill.
+
+   Only Paul can close this. The delivery manager "cannot skip, defer or re-scope" a trigger;
+   "only Paul can, in writing" (topology rule 7). The registration auditor rates the gate a
+   fail against the team rule and names Paul as its owner. So **this condition is open. The
+   primary is not read until Paul has done one of two things in writing**: given the Console
+   figure or export, so that the metrologist can finish the reconciliation; or said that the
+   gate is deferred and the primary may be read on product dollars, unconfirmed. The seat
+   holds no such word from Paul for this gate. Paul's words on the pilot's cost gate, quoted
+   in Amendment 2 ("Don't blockthings for spend innaccuracies, its minimal cost just keep
+   pushing"), were given for that gate on 2026-11-11. The methodologist does not stretch them
+   to this one. If Paul's word is given, it is quoted in the wave record with its date, and
+   every cost figure in the report still carries the label "product dollars, unconfirmed".
+
+   The skipped order is deviation D5 of the annex. That row uses the delivery manager's word
+   "passed". This item, not that word, is the methodologist's position. No registered number
+   moves either way: the primary counts clean rows, not dollars
+   **[hypothesis — the cost metrologist's report, its independent check, the registration audit and the delivery manager's facts of 2026-11-12; none is in this repository]**.
+3. **`S3` does not gate the primary.** Registered: "`S3` runs are filed last and only while the
+   remaining line still covers every outstanding blind row at one and a half times the running
+   cost per attempt" (part 2); `S3` is among "Everything else is description, with no tests"
+   (part 6 item 6). No blind row is outstanding and $49.21 is left (product dollars,
+   unconfirmed), so the condition for filing holds. The decision to file was taken before the
+   read, so it cannot depend on the result. How `S3` rows are handled:
+   - No `S3` row enters the primary, the interval, the sensitivity results or the decision word.
+   - Nobody computes or looks at an `S3` clean count until the primary is filed and signed.
+   - `S3` rows are reported in their own table, as description, with their run ids and filing
+     times, as item 6 lays out: "`S3` against each blind arm, with the blind rows that the
+     test-files check alone disqualified listed beside it".
+   - The six cobra `S3` runs are being filed from 2026-11-12, same campaign, same caps. The six
+     click `S3` runs wait for the next restart Paul grants. Until they exist the report says
+     "click `S3`: not yet filed", and shows no `S3` figure for click.
+   - If click `S3` is filed after any change to the served code or apparatus, its rows are
+     shown apart and labelled with their apparatus. They are never blended with rows at 2.5.
+4. **The served code did not change during the wave** (stop (c), part 6 item 9). The served
+   commit is checked to be the same from the second amendment to the last blind run. The notes
+   show `7bb03d6c`, unchanged, at the second restart.
+5. **The filing order is checked by the script**, from run bodies, as R5 item 2 says. No seat
+   does this by hand from a ledger.
+6. **The product owner's outcome decisions are committed** and their hash recorded, as that
+   document itself requires before the primary is read.
+7. **No seat-facing ledger carries a slot label.** From now on any ledger given to a seat
+   before the primary is signed is sorted by run id and has no slot column (annex, row D6).
+
+One matter does not gate the read and is stated in the report: Amendment 1's "One thing not
+checked" (the product's own pool against the listed pool). The wave's runs named their commits
+by explicit `task_ids` from the listed pools. The report says whether the product's pools were
+compared with the lists, and what was found.
+
+---
+
+### Annex. The deviation log
+
+This is the delivery manager's deviation log of 2026-11-12, as given to the seats, unchanged
+in substance. It is to be committed with the wave record. Rows are numbered as the delivery
+manager numbered them. **Row D3 of this log is not decision D3 of the product meeting** (Part C).
+Every cost is in product dollars, unconfirmed
+**[hypothesis — the delivery manager's log of 2026-11-12; the events it records are not in this repository]**.
+
+| # | When (UTC) | What | Registered text | Effect |
+|---|---|---|---|---|
+| D1 | 2026-11-11 | Both pilot gates failed and were waived by Paul | Part 5 | Recorded in Amendment 2 |
+| D2 | 2026-11-11 | Stop (b) read under the strict reading on Paul's decision, after 110 pooled click rows existed; counts 0, 2, 4 recorded | Part 6 item 9 | Wave continued; a reader holding the widest reading treats the wave as passing stop (b) on the operator's decision |
+| D3 | 2026-11-11 | Click-3/1 failed at gold control; batch 3 filed again once | Part 2 row rule | Within the rule |
+| D4 | 2026-11-11 | Runs from click-3/1 onward filed by the `svc-claude` operator account; a poster crash and a login-verify timeout before batch 3, no run lost | none | None on rows |
+| D5 | 2026-11-11 | Cost gate before cobra not held in order; done after both stages, passed | Topology section 3 task 2 | Order only |
+| D6 | 2026-11-12 | Seat-facing ledger carried slot labels (arm derivable) | Wave rule | No seat combined them; fixed for later ledgers |
+| D7 | 2026-11-12 | Cobra `S3` filed after the blind runs; click `S3` deferred to the next granted restart | Part 2 run order, Amendment 2 | `S3` is description only |
+| D8 | 2026-11-12 | Costs are product dollars; the provider's bill is not yet compared | Part 3 | Labelled "product dollars, unconfirmed" everywhere |
+
+Notes beside the log, from the same source. The failed first filing of click batch 3 (run
+`98fe708c`) ended at its gold control before any build, with 0 rows and $0.00 (product dollars,
+unconfirmed); its cause was not diagnosed and is on the backlog as "flaky click gold test".
+The campaign record shows $45.791476 spent, of which $0.174468 is the test author's calls, and
+$49.208524 left, over 52 runs (3 pilot, 49 wave), all in product dollars, unconfirmed, read
+before any `S3` run. On row D2, Part D of this amendment gives the methodologist's own
+position, which differs from the strict reading and changes no row.
+**[hypothesis — read from the served stack and the session of 2026-11-12 by the seats; the rows and the transcript are not in this repository]**
+
+Two notes by the delivery manager, added on 2026-11-12 before this amendment was committed and
+before any result by arm exists. They change no reading.
+**[hypothesis — read from the served stack and the session of 2026-11-12 by the seats; the rows and the transcript are not in this repository]**
+
+1. Row D5's word "passed" is withdrawn. The reconciliation was one-way only and there is no
+   Console figure. Part E item 2 states the position: the gate is open and is Paul's to rule on.
+   **[hypothesis — read from the served stack and the session of 2026-11-12 by the seats; the rows and the transcript are not in this repository]**
+2. The name check that R12 item 5 asks for was made. The served code writes the two event
+   actions and the error prefix that R12 names
+   **[measured — n = 2 event actions and 1 error prefix, method: read-only `git grep` for `author_test` and `authoring:` in `src/crb` and `docs/API.md` of the served checkout, commit `7bb03d6c`, apparatus 2.5]**.
+
+---
+
+### Signature
+
+Seat: **methodologist**, crb programme.
+Date: **2026-11-12**.
+Signed before the primary is read, and before any result by arm exists.
+
+Signed here: readings R1 to R12, the stop (b) statement of Part D, and the conditions of
+Part E. Condition 2 of Part E is signed as open: it waits for Paul's written word. The
+validity engineer's signature on the reading itself is separate and is given, or
+withheld, after the script's output is filed (topology rule 4).
+
+**Nothing in `N`, `k`, `c`, the turn limit, the seed, the lists, the orders or the thresholds
+is changed by this amendment.** `N` is 62, `k` is 15, `c` is $0.1956404, the turn limit is 50,
+the seed is 20261112, the four lists and the 12 batch orders are as Amendments 1 and 2 give
+them, and every threshold and decision word of part 6 stands as registered.
+**[hypothesis — read from the served stack and the session of 2026-11-12 by the seats; the rows and the transcript are not in this repository]**
