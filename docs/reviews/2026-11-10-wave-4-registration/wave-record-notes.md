@@ -319,3 +319,29 @@ Written before the primary is read and before any result by arm exists.
   `8b9bb6afe1a1d9982e3c6f25d3400939ea0b9badf4de8d9e7655464510727a25`, the value recorded
   above for the merged script.
   **[measured — n = 1 file, method: `shasum -a 256 scripts/wave4_primary_read.py` in a checkout at `07125be0ef710fd91af5a273ffaa1c002a21f5a3` by the delivery manager on 2026-11-12; apparatus n/a, a file hash, not a graded row]**
+
+## 2026-11-12 — The primary read: made once, filed unedited
+
+- The read script was run once, at 12:53Z on 2026-11-12, by the delivery manager in a
+  terminal tab, from a checkout whose only change against main
+  `07125be0ef710fd91af5a273ffaa1c002a21f5a3` is the entry above. It printed its own sha256,
+  `8b9bb6afe1a1d9982e3c6f25d3400939ea0b9badf4de8d9e7655464510727a25`, and ended with exit
+  code 0 (the read was made). No deviation file was written. There was no earlier run and
+  there is no second one.
+  **[measured — n = 1 run of the script, method: `scripts/wave4_primary_read.py` with `--output`, its printed hash and exit code read from the terminal by the delivery manager on 2026-11-12; apparatus n/a, a script run, not a graded row]**
+- Its output is filed beside this record as `primary-read-output.txt`, copied byte for byte
+  from the file the script wrote. Its sha256 is
+  `0ffe99026cfefb0ef04ab43529b1ffecdf982dee9a01984889a410020d06dd53` and it has 118 lines.
+  Nothing in it is edited.
+  **[measured — n = 1 file, method: `shasum -a 256` of the script's `--output` file and of the copy filed here, equal, by the delivery manager on 2026-11-12; apparatus n/a, a file hash, not a graded row]**
+- What the output says, in its own figures. The order check passed. 240 of 240 rows were
+  read and none was missing. The difference is `S1` minus `A0`. Over 12 batches and 60
+  commits the summed difference is T = -55/2, which is d = -45.8333 points; p = 4/4096 =
+  0.0009765625; the interval is -58.6725 to -32.9942 points. The blocks result, on 2 units,
+  has p = 2/4 = 0.5. The left-out result cannot be calculated. Usable tests: 0 of 120. The
+  decision word the script printed is **Inconclusive** ("the blocks result falls on the
+  other side of 0.05").
+  **[measured — n = 240 blind rows of 48 runs in 12 batches over 60 commits of click and cobra, method: the one run of `scripts/wave4_primary_read.py` filed as `primary-read-output.txt`, sign-flip test over batches; builder and models as registered in part 2; apparatus 2.5]**
+- The output is not yet signed. The methodologist and the validity engineer sign it, or
+  say why they do not, in the next entry. Until then no seat states a finding from it.
+  **[aspiration — the two signatures are the next step and have not been given]**
