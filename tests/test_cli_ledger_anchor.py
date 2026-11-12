@@ -649,7 +649,8 @@ def test_store_anchors_are_still_checked_when_a_chain_is_broken(
 def test_the_anchor_directory_lock_excludes_a_second_holder(tmp_path: Path) -> None:
     """While one holder has an anchor directory's lock, a second cannot take it; the lock is
     on the directory itself, so no lock file sits among the anchors."""
-    fcntl = pytest.importorskip("fcntl")
+    import fcntl  # the product refuses to anchor without it
+
     from crb.core.anchor import anchor_dir_lock
 
     out = tmp_path / "anchors"
@@ -690,7 +691,6 @@ def test_an_anchor_waits_for_the_directory_lock_and_then_chains(
     """An anchor command started while another holds the directory writes nothing until the
     lock is released, then reads the directory as the holder left it: its anchor names the
     holder's anchor as its predecessor, so two commands cannot both write a first anchor."""
-    pytest.importorskip("fcntl")
     import threading
 
     from crb.core.anchor import anchor_dir_lock
