@@ -12,6 +12,8 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Wave 4: the misses found after the read are entered in the deviation log.** The record notes named them without entering them: the read script's lookup of an event's task in the payload, a consistency figure removed before the script was committed, and a spec rule with no signed reading. No filed result changes and the read is not run again. ([#135](https://github.com/Jita81/commit-replay-bench/pull/135))
+
 - **Wave 4: the primary read is made and filed.** Paul closed the cost gate in writing (the read goes ahead on product dollars, unconfirmed), the entry was pushed first, and the read script was then run once from main. Its output is filed unedited as `primary-read-output.txt` with its sha256. The script's decision word is Inconclusive; the two seats' signatures follow. ([#134](https://github.com/Jita81/commit-replay-bench/pull/134))
 
 - **Wave 4: the read script's merged hash and the outcome decisions are on record**

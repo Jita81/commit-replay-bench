@@ -455,7 +455,8 @@ a row, a run, an event or the poster's folder.
 
 The entries of 2026-11-12 above name three misses "for the deviation log". They are entered
 here. Each is a miss in how the read was prepared. None is a change to a filed result, and
-none changes the decision word, which the seats signed for any count.
+none changes the decision word, which the seats signed for any count
+**[hypothesis — the delivery manager's reading of the two entries of 2026-11-12 above]**.
 
 - 2026-11-12, the delivery manager. **The read script looked for an event's task where the
   product does not store it.** R12 item 2 of the registration and `docs/API.md` line 565
