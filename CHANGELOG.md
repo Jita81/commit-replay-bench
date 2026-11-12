@@ -22,6 +22,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   command write at a time, so two cannot both write a first anchor; a platform with no `fcntl`
   is refused. docs/LEDGER-ANCHORS.md says who should hold anchors and what one cannot prove.
 
+- **The value scorecard reads one posture class** (P-135, G-991, ADR-0019 §8;
+  [#128](https://github.com/Jita81/commit-replay-bench/pull/128)). `GET /value` summed spend
+  and counted working changes over every posture class, so a sealed row and a host row shared
+  one rate per pound. It now reads the deployment's class by default and another with
+  `posture=<class>`; `posture=all` over two classes is refused 422 `posture_pooling_refused`.
+  A pre-2.3 Docker row is counted `unqualified_posture`, an exported review no row places
+  `precision.review.posture_unplaced`, another class's reading `readings_other_posture`.
+  `scripts/value_baseline.py` takes `--posture`. A figure quoted from `/value` before may
+  differ. This ports the October fix held by the feature freeze, which has ended.
+
 - **The UI's wire field names are checked against the API's schema, and Scorecard runs weekly**
   ([#126](https://github.com/Jita81/commit-replay-bench/pull/126)).
   `scripts/check_ui_types_drift.py` builds the OpenAPI schema offline and, for each
