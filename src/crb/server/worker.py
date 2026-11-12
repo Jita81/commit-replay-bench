@@ -4095,7 +4095,7 @@ class Worker:
                 fingerprints=lambda classes: store_qualifications.latest_fingerprints(
                     s, repo, classes
                 ),
-                legacy_executor_of=legacy_executor_lookup(s),
+                legacy_executor_of=legacy_executor_lookup(s, current),
             ).rows
             cmap, _ = signed_map(
                 rows, PROJECTION_CLASS_SIZE, s, repo, controls=latest_controls_verdict(s, repo)

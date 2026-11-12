@@ -58,9 +58,11 @@ from crb.core.value import (
     MIN_REVIEWS_FOR_REVIEW_BASIS,
     ClassStatus,
     KindRegister,
+    PosturePoolingError,
     ReviewVerdict,
     ValueRow,
     default_register,
+    in_apparatus_scope,
     learning_curve,
     process_loss,
     prospective_routing,
@@ -236,7 +238,11 @@ def test_precision_reads_reviews_when_there_are_enough_and_says_so() -> None:
 
 def test_too_few_reviews_in_a_repository_borrow_every_repositorys_before_the_proxy() -> None:
     rows = [vr(i, kind=FAILURE_CLEAN) for i in range(4)]
-    rows += [vr(10 + i, kind=FAILURE_CLEAN, repo="beta") for i in range(4)]
+    # beta's reviews name no row hash: its rows on the same tasks place them (P-135)
+    rows += [
+        vr(i, kind=FAILURE_CLEAN, repo="beta", row_hash=f"{100 + i:064x}")
+        for i in range(MIN_REVIEWS_FOR_REVIEW_BASIS)
+    ]
     vs = [verdict(i, mergeable=i == 0, repo="beta") for i in range(MIN_REVIEWS_FOR_REVIEW_BASIS)]
     rep = value_report(rows, vs, repo="alpha", apparatus="all").to_dict()
     assert rep["precision"]["basis"] == BASIS_REVIEW_POOLED
@@ -385,6 +391,141 @@ def test_the_default_scope_is_the_current_apparatus_and_pooling_is_flagged() -> 
     assert pooled["rows"] == 2 and pooled["pooled"] is True
     assert pooled["apparatus_versions"] == ["2.1", APPARATUS_VERSION]
     assert len(select_rows(rows, repo="beta", apparatus="all")) == 0
+
+
+def test_the_scorecard_reads_one_posture_class_and_refuses_to_reduce_two() -> None:
+    """ADR-0019 §8 (P-135): posture is a filter, never a blend. A named class reads only its
+    rows, down to the every-repository review fallback (beta's sealed reviews never lend a
+    host reading a pooled precision); ``all``, the default, reads the one class a scope
+    holds and refuses two, naming them: a pound spent in a sealed container and a pound
+    spent on the host buy two measurements, never one rate per pound."""
+    host, sealed = "local/inplace/host-env", "docker/copy/sealed"
+    rows = [
+        *(dataclasses.replace(vr(i, kind=FAILURE_CLEAN), posture_class=host) for i in (1, 2)),
+        dataclasses.replace(vr(3, kind=FAILURE_BUDGET, cost=4.0), posture_class=sealed),
+        *(
+            dataclasses.replace(vr(i, kind=FAILURE_CLEAN, repo="beta"), posture_class=sealed)
+            for i in range(10, 10 + MIN_REVIEWS_FOR_REVIEW_BASIS)
+        ),
+    ]
+    vs = [
+        verdict(i, mergeable=True, repo="beta", row_hash=f"{i:064x}")
+        for i in range(10, 10 + MIN_REVIEWS_FOR_REVIEW_BASIS)
+    ]
+    one = value_report(rows, vs, repo="alpha", posture=host).to_dict()
+    assert (one["posture"], one["posture_class"], one["rows"]) == (host, host, 2)
+    ns = one["north_star"]
+    assert (ns["clean"], ns["n_attempts"], ns["spend_usd"]) == (2, 2, pytest.approx(2.0))
+    assert (
+        ns["precision_basis"] == BASIS_PROXY and one["process_loss"]["kinds"]["budget"]["rows"] == 0
+    )
+    other = value_report(rows, vs, repo="alpha", posture=sealed).to_dict()
+    assert other["rows"] == 1 and other["north_star"]["spend_usd"] == pytest.approx(4.0)
+    assert value_report(rows, vs, repo="beta").to_dict()["posture_class"] == sealed
+    with pytest.raises(PosturePoolingError, match="ADR-0019") as refused:
+        value_report(rows, vs, repo="alpha")
+    assert refused.value.classes == (sealed, host)
+    with pytest.raises(PosturePoolingError):
+        value_report(rows, vs)
+    unrecorded = value_report([vr(1, kind=FAILURE_CLEAN)], []).to_dict()
+    assert (unrecorded["posture"], unrecorded["posture_class"]) == ("all", "")
+
+
+def test_an_unjoined_review_reads_the_posture_of_its_graded_row_or_none() -> None:
+    """ADR-0019 §8 (P-135): an exported review names no row hash, so it is placed by the rows
+    graded on its task. One of another class lends a host reading nothing, down to the
+    every-repository fallback; one whose task's rows span two classes, or that no row holds,
+    is in no precision and is counted ``posture_unplaced`` — in a repository of one class
+    too, because its other rows establish nothing about a task none of them graded."""
+    host, sealed = "local/inplace/host-env", "docker/copy/sealed"
+    beta = range(10, 10 + MIN_REVIEWS_FOR_REVIEW_BASIS)
+    rows = [
+        *(dataclasses.replace(vr(i, kind=FAILURE_CLEAN), posture_class=host) for i in (1, 2)),
+        *(
+            dataclasses.replace(vr(i, kind=FAILURE_CLEAN, repo="beta"), posture_class=sealed)
+            for i in beta
+        ),
+    ]
+    sealed_reviews = [verdict(i, mergeable=True, repo="beta") for i in beta]
+    one = value_report(rows, sealed_reviews, repo="alpha", posture=host).to_dict()
+    assert one["north_star"]["precision_basis"] == BASIS_PROXY
+    assert one["precision"]["review"]["posture_unplaced"] == 0
+    assert value_report(rows, sealed_reviews, repo="beta").to_dict()["precision"]["basis"] == (
+        BASIS_REVIEW
+    )
+    # alpha's own reviews: t1 is host; t2 was graded on both classes; t99 has no row at all
+    both = [*rows, dataclasses.replace(vr(2, kind=FAILURE_CLEAN), posture_class=sealed)]
+    mine = [verdict(i, mergeable=True) for i in (1, 2, 99)]
+    rep = value_report(both, mine, repo="alpha", posture=host).to_dict()
+    assert rep["precision"]["review"]["n"] == 1
+    assert rep["precision"]["review"]["posture_unplaced"] == 2
+    # the pooled call counts every repository's; a repository's counts its own
+    # (beta's t98 has no row: every beta row is sealed, and that still places nothing)
+    pooled = value_report(both, [*mine, verdict(98, mergeable=True, repo="beta")], posture=host)
+    assert pooled.to_dict()["precision"]["review"]["posture_unplaced"] == 3
+    beside = value_report(rows, [verdict(99, mergeable=True)], repo="alpha").to_dict()
+    assert (beside["precision"]["review"]["n"], beside["posture_class"]) == (0, host)
+    assert beside["precision"]["review"]["posture_unplaced"] == 1
+
+
+def test_a_review_no_row_holds_is_unplaced_in_a_repository_of_one_class() -> None:
+    """P-135 (review of #128): a repository whose rows share one class does not lend that
+    class to a review of a task none of them graded — the review may come from another
+    posture. It is counted ``posture_unplaced`` and is in no precision: not the
+    repository's own, and not the one another repository borrows."""
+    host = "local/inplace/host-env"
+    single = [dataclasses.replace(vr(i, kind=FAILURE_CLEAN), posture_class=host) for i in (1, 2)]
+    stray = [verdict(i, mergeable=True) for i in range(50, 50 + MIN_REVIEWS_FOR_REVIEW_BASIS)]
+    own = value_report(single, [verdict(1, mergeable=True), *stray], repo="alpha").to_dict()
+    assert own["posture_class"] == host
+    assert own["precision"]["review"]["n"] == 1
+    assert own["precision"]["review"]["posture_unplaced"] == MIN_REVIEWS_FOR_REVIEW_BASIS
+    assert own["precision"]["basis"] == BASIS_PROXY
+    # another repository, short of reviews, borrows none of them either
+    rows = [
+        *single,
+        dataclasses.replace(vr(7, kind=FAILURE_CLEAN, repo="beta"), posture_class=host),
+    ]
+    borrowed = value_report(rows, stray, repo="beta").to_dict()
+    assert borrowed["precision"]["basis"] == BASIS_PROXY
+    assert borrowed["precision"]["review"]["n"] == 0
+
+
+def test_an_unjoined_review_is_placed_by_the_rows_of_the_apparatus_scope_only() -> None:
+    """P-135: a row of another apparatus version is outside every figure, so it never places
+    a review either: a task only an older version graded has no row in the scope, so its
+    review is counted unplaced, and one the scope does hold reads the scope's class though
+    an older version graded the same task in another."""
+    host, sealed = "local/inplace/host-env", "docker/copy/sealed"
+    rows = [
+        *(dataclasses.replace(vr(i, kind=FAILURE_CLEAN), posture_class=host) for i in (1, 2)),
+        dataclasses.replace(vr(5, kind=FAILURE_CLEAN, app="0.1"), posture_class=sealed),
+        dataclasses.replace(vr(2, kind=FAILURE_CLEAN, app="0.1"), posture_class=sealed),
+    ]
+    mine = [verdict(i, mergeable=True) for i in (2, 5, 99)]
+    rep = value_report(rows, mine, repo="alpha", apparatus="current").to_dict()
+    assert rep["posture_class"] == host
+    assert rep["precision"]["review"]["n"] == 1
+    assert rep["precision"]["review"]["posture_unplaced"] == 2
+
+
+def test_a_review_placed_only_by_rows_of_no_recorded_posture_is_counted() -> None:
+    """P-135: a row below apparatus 2.3 recorded no posture (``""``). A review whose task only
+    such rows hold has no established class: reading a named class, it is counted
+    ``posture_unplaced``, never dropped unseen; reading ``""`` itself, it is read."""
+    host = "local/inplace/host-env"
+    rows = [
+        *(dataclasses.replace(vr(i, kind=FAILURE_CLEAN), posture_class=host) for i in (1, 2)),
+        *(vr(i, kind=FAILURE_CLEAN) for i in (101, 102)),
+    ]
+    assert {r.posture_class for r in rows} == {host, ""}
+    mine = [verdict(i, mergeable=True) for i in (101, 102)]
+    rep = value_report(rows, mine, repo="alpha", posture=host).to_dict()
+    assert rep["precision"]["review"]["n"] == 0
+    assert rep["precision"]["review"]["posture_unplaced"] == 2
+    old = value_report(rows, mine, repo="alpha", posture="").to_dict()
+    assert old["precision"]["review"]["n"] == 2
+    assert old["precision"]["review"]["posture_unplaced"] == 0
 
 
 # --- process loss -----------------------------------------------------------------------
@@ -691,3 +832,42 @@ def test_a_ceiling_or_descriptive_arm_never_scores_a_deliver(arm: str) -> None:
         for i in range(25)
     ]
     assert prospective_routing(certifying).to_dict()["decisions"][ROUTE_DELIVER] == 5
+
+
+@pytest.mark.parametrize("repo", [None, "alpha"])
+@pytest.mark.parametrize("apparatus", ["current", "2.2", "all"])
+def test_the_report_reads_only_its_apparatus_scope(repo: str | None, apparatus: str) -> None:
+    """``GET /value`` classes only the rows of the apparatus read (every repository's): the
+    report over those rows and the reviews joined to them is the report over every row."""
+    rows: list[ValueRow] = []
+    for i in range(24):
+        kind = FAILURE_CLEAN if i % 3 else FAILURE_BUILDER_RED
+        rows.append(
+            vr(
+                i,
+                kind=kind,
+                repo="alpha" if i % 2 else "beta",
+                app="2.2" if i % 4 == 0 else APPARATUS_VERSION,
+                mode="blind" if i % 5 else "sighted",
+            )
+        )
+    every = [
+        verdict(i, mergeable=i % 7 != 0, repo=r.repo, row_hash=r.row_hash)
+        for i, r in enumerate(rows)
+        if r.clean
+    ]
+    every.append(verdict(99, mergeable=True))  # unjoined: placed by its repository
+    scoped = select_rows(rows, apparatus=apparatus)
+    hashes = {r.row_hash for r in scoped}
+    kept = [v for v in every if not v.grade_row_hash or v.grade_row_hash in hashes]
+    full = value_report(rows, every, repo=repo, apparatus=apparatus).to_dict()
+    assert value_report(scoped, kept, repo=repo, apparatus=apparatus).to_dict() == full
+
+
+@pytest.mark.parametrize("apparatus", ["current", "", "all", "2.2", APPARATUS_VERSION, "9.9"])
+def test_the_apparatus_scope_predicate_is_select_rows_rule(apparatus: str) -> None:
+    """``GET /value`` scopes its ledger rows by ``in_apparatus_scope`` before it builds value
+    rows: the predicate is the very rule ``select_rows`` applies, so the two cannot drift."""
+    rows = [vr(i, app="2.2" if i % 3 == 0 else APPARATUS_VERSION) for i in range(9)]
+    kept = [r for r in rows if in_apparatus_scope(r.apparatus_version, apparatus)]
+    assert kept == select_rows(rows, apparatus=apparatus)

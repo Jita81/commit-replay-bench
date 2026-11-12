@@ -54,6 +54,15 @@ What is measured, and the rule for each
   scoped to one). The cells and prospective routing are keyed by arm, so they read every arm
   side by side; the learning curve reads every arm on purpose — a lever the loop switches on
   is exactly the before/after it measures, and it counts bug classes, not clean verdicts.
+* **One posture class** (ADR-0019 §8: posture is a filter, never a blend) — a pound spent
+  grading in a sealed container and a pound spent on the host buy two measurements, so EVERY
+  figure, the curve, cells and the every-repository review fallback included, reads ONE
+  class: ``posture`` names it (the server passes the deployment's own class by default), and
+  ``all`` reads the one class the scope holds and refuses two (:class:`PosturePoolingError`)
+  — the map pools rates over fingerprint-invariant tasks, but a cost is never invariant
+  across postures (the economics fold withholds it for the same reason). An exported review
+  names no row, so the rows graded on its task place it in a class; one they cannot place
+  is in no precision and is counted (``review.posture_unplaced``).
 
 Navigation
 ----------
@@ -66,18 +75,22 @@ What it does: Reduces rows (``ValueRow``, adapted from ``GradeRow`` or read from
               included — never $0, as the flow reading serves it), whose apparatus scope
               defaults to the current version (pooling is explicit and flagged), whose
               headline reads one checks
-              arm (named in ``checks``) and whose cells never pool two, and whose time-ordered
+              arm (named in ``checks``) and whose cells never pool two, whose every figure
+              reads one posture class (named in ``posture_class``; two are refused, P-135),
+              and whose time-ordered
               measures use only prior data; its process loss counts outage rows by cause
               ("your login" apart from "the provider", pilot D1). Never writes, never calls a
               model.
-How:          ``select_rows`` (repo, apparatus) → the ``checks`` arm → ``north_star``
+How:          the ``posture`` class → ``select_rows`` (repo, apparatus) → the ``checks``
+              arm → ``north_star``
               (``Rate`` × ``precision``) → ``process_loss`` → ``learning_curve``
               (``BugRegister.class_of`` per attempt, windows, ``statuses`` → shares) →
               ``prospective_routing`` (the look rule over each cell's running first
               attempts) → per-cell and per-repository roll-ups.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0024-working-by-construction.md
-              (the headline reads one checks arm)
+              (the headline reads one checks arm),
+              docs/adr/0019-qualification-is-posture-relative.md (§8: one posture class)
 Works with:   src/crb/core/ledger.py (the rows, the failure kinds, ``CellStats``),
               src/crb/core/review.py (the verdicts precision reads), src/crb/core/stats.py (the
               Wilson interval), src/crb/core/routing.py (the rule the prospective decisions
@@ -161,6 +174,23 @@ CLASS_STATUSES: tuple[str, ...] = ("open", "applied", "closed", "retired", "esca
 LEVERS: tuple[str, ...] = ("process", "context", "")
 #: Label a row carries for belt 6 until the belt is a field (stream W): "true" / "false".
 LABEL_API_STABLE = "api_stable"
+#: ``posture=`` beside a posture class: no filter — and still never a blend (the one class the
+#: scope holds, else :class:`PosturePoolingError`).
+POSTURE_ALL = "all"
+
+
+class PosturePoolingError(ValueError):
+    """A reduction asked over rows of two posture classes (ADR-0019 §8): a rate per pound
+    over two instruments is no measurement of either. ``classes`` are the classes present,
+    sorted (``""`` = a row that recorded none)."""
+
+    def __init__(self, classes: Iterable[str]) -> None:
+        self.classes = tuple(sorted(classes))
+        named = ", ".join(c or "not recorded" for c in self.classes)
+        super().__init__(
+            f"the rows span {len(self.classes)} posture classes ({named}); posture is a filter, "
+            "never a blend (ADR-0019 §8): a pound spent in one buys a different measurement"
+        )
 
 
 # --- the row --------------------------------------------------------------------------
@@ -215,6 +245,9 @@ class ValueRow:
     taxonomy: str = ""
     #: The distinct change the row observed (``GradeRow.change_id``, else the task)
     change: str = ""
+    #: The posture class the row is compared as (ADR-0019 §8; the caller's mapping, e.g. a
+    #: pre-2.3 host row read as ``local/inplace/host-env``): ``""`` = not recorded
+    posture_class: str = ""
     grade: GradeRow | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -274,9 +307,11 @@ def _detail(row: GradeRow, kind: str) -> str:
     return ""
 
 
-def value_row_from_grade(row: GradeRow) -> ValueRow:
+def value_row_from_grade(row: GradeRow, *, posture_class: str | None = None) -> ValueRow:
     """Reduce a ledger row. Belt 6 (``api_stable``) is read from the row when the field
-    exists, else from its label — ``None`` when neither recorded it."""
+    exists, else from its label — ``None`` when neither recorded it. ``posture_class`` is the
+    class the caller compares the row as (the server places a pre-2.3 row by its run's
+    executor); by default the row's own label (``""`` before 2.3)."""
     kind = row.failure_kind
     api = getattr(row, "api_stable", None)
     if api is None:
@@ -310,6 +345,7 @@ def value_row_from_grade(row: GradeRow) -> ValueRow:
         taxonomy=row.taxonomy,
         change=row.change_id or row.task_id,
         outage_cause=row.outage_cause,
+        posture_class=row.posture_class if posture_class is None else posture_class,
         grade=row,
     )
 
@@ -540,6 +576,8 @@ class Precision:
     proxy_unknown: int
     proxy_api_broken: int
     agreement: dict[str, int]
+    #: answers left out because no graded row places them in one posture class (ADR-0019 §8)
+    review_posture_unplaced: int = 0
 
     @property
     def chosen(self) -> Rate:
@@ -552,6 +590,7 @@ class Precision:
             "review": {
                 **self.review.to_dict(),
                 "unjoined": self.review_unjoined,
+                "posture_unplaced": self.review_posture_unplaced,
                 "by_verdict": dict(sorted(self.review_by_verdict.items())),
             },
             "proxy": {
@@ -574,17 +613,22 @@ def precision(
     rows: Sequence[ValueRow],
     verdicts: Sequence[ReviewVerdict],
     pooled: Sequence[ReviewVerdict] = (),
+    *,
+    unplaced: int = 0,
+    pooled_unplaced: int = 0,
 ) -> Precision:
     """Precision over the clean valid rows in scope and the verdicts in scope. The basis is,
     in order: the scope's reviews (at least :data:`MIN_REVIEWS_FOR_REVIEW_BASIS`); every
-    repository's reviews in the same apparatus scope (``pooled``, the same bar); the proxy."""
+    repository's reviews in the same apparatus scope (``pooled``, the same bar); the proxy.
+    ``unplaced`` / ``pooled_unplaced``: the answers each review scope left out because their
+    posture could not be placed — the chosen scope's count is served."""
     clean = [r for r in rows if r.valid and r.clean]
     answers = _answers(verdicts)
     pooled_answers = _answers(pooled)
     if len(answers) < MIN_REVIEWS_FOR_REVIEW_BASIS <= len(pooled_answers):
-        chosen = pooled_answers
+        chosen, left_out = pooled_answers, pooled_unplaced
     else:
-        chosen = answers
+        chosen, left_out = answers, unplaced
     review = Rate(sum(1 for v in chosen if v.mergeable), len(chosen))
     by_verdict: dict[str, int] = {}
     for v in chosen:
@@ -621,6 +665,7 @@ def precision(
         proxy_unknown=sum(1 for p in proxies if p is None),
         proxy_api_broken=sum(1 for r in clean if r.api_stable is False),
         agreement=agree,
+        review_posture_unplaced=left_out,
     )
 
 
@@ -726,12 +771,16 @@ def north_star(
     *,
     usd_per_gbp: float,
     pooled: Sequence[ReviewVerdict] = (),
+    unplaced: int = 0,
+    pooled_unplaced: int = 0,
 ) -> NorthStar:
     blind = [r for r in rows if r.mode == "blind"]
     return NorthStar(
         n_attempts=len(blind),
         clean_rate=_rate(blind),
-        precision=precision(rows, verdicts, pooled),
+        precision=precision(
+            rows, verdicts, pooled, unplaced=unplaced, pooled_unplaced=pooled_unplaced
+        ),
         spend=spend_of_rows(blind),
         usd_per_gbp=usd_per_gbp,
     )
@@ -1068,12 +1117,17 @@ def select_rows(
 ) -> list[ValueRow]:
     """Scope: one repository (``None`` = all) and one apparatus (``current`` = the running
     version, ``all`` = pooled on request — EVIDENCE-AND-CLAIMS §5: no claim blends versions)."""
-    want = scope_label(apparatus)
     return [
         r
         for r in rows
-        if (repo is None or r.repo == repo) and (apparatus == "all" or r.apparatus_version == want)
+        if (repo is None or r.repo == repo) and in_apparatus_scope(r.apparatus_version, apparatus)
     ]
+
+
+def in_apparatus_scope(apparatus_version: str, apparatus: str = "current") -> bool:
+    """Whether a row written under ``apparatus_version`` is in the ``apparatus`` scope — the
+    one rule :func:`select_rows` applies, for callers that scope other row types by it."""
+    return apparatus == "all" or apparatus_version == scope_label(apparatus)
 
 
 def scope_label(apparatus: str) -> str:
@@ -1095,6 +1149,36 @@ def _verdicts_in_scope(
     ]
 
 
+def _place_unjoined(
+    verdicts: Sequence[ReviewVerdict], rows: Sequence[ValueRow], read: str
+) -> tuple[list[ReviewVerdict], list[ReviewVerdict]]:
+    """The one place a review meets the posture filter (ADR-0019 §8). ``rows`` are every
+    repository's rows in the apparatus scope, of every class. A joined review keeps its row's
+    class (``_verdicts_in_scope`` admits it only beside a row of the class read). An unjoined
+    one is placed only by the rows on its own repository and task: their one class. It is
+    kept when that class is ``read`` and dropped when it is another. A task graded in two
+    classes, one no row in the scope holds (its repository's other rows establish nothing
+    about it, though they share one class), or one placed only in ``""`` (no posture
+    recorded) while a named class is read, places nothing: returned apart, to be counted,
+    never read."""
+    by_task: dict[tuple[str, str], set[str]] = {}
+    for r in rows:
+        by_task.setdefault((r.repo, r.task_id), set()).add(r.posture_class)
+    kept: list[ReviewVerdict] = []
+    unplaced: list[ReviewVerdict] = []
+    for v in verdicts:
+        if v.grade_row_hash:
+            kept.append(v)
+            continue
+        classes = by_task.get((v.repo, v.task_id), set())
+        placed = next(iter(classes)) if len(classes) == 1 else None
+        if placed is None or (placed == "" and read != ""):
+            unplaced.append(v)
+        elif placed == read:
+            kept.append(v)
+    return kept, unplaced
+
+
 @dataclass(frozen=True)
 class ValueReport:
     repo: str | None
@@ -1112,6 +1196,10 @@ class ValueReport:
     reviews_source: str = REVIEWS_FROM_CALLER
     #: the one ``checks`` arm the headline figures read (ADR-0024)
     checks: str = ARM_OFF
+    #: the posture filter asked (a class, or ``all``) and the ONE class every figure read
+    #: (``""`` when the scope held no row, or rows that recorded none) — ADR-0019 §8
+    posture: str = POSTURE_ALL
+    posture_class: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         versions = sorted({r.apparatus_version for r in self.rows})
@@ -1127,6 +1215,9 @@ class ValueReport:
             # the headline (north star, rates, precision, loss, repos) reads this arm only;
             # the cells and the prospective routing are keyed by arm, the curve spans arms
             "checks": self.checks,
+            # every figure reads this one posture class: posture is a filter, never a blend
+            "posture": self.posture,
+            "posture_class": self.posture_class,
             "rows": len(self.rows),
             "usd_per_gbp": self.usd_per_gbp,
             "north_star": self.north.to_dict(),
@@ -1210,16 +1301,35 @@ def value_report(
     policy: RoutingPolicy = DEFAULT_POLICY,
     reviews_source: str = REVIEWS_FROM_CALLER,
     checks: str = ARM_OFF,
+    posture: str = POSTURE_ALL,
 ) -> ValueReport:
     """The scorecard over one scope. Pure: the same rows and verdicts give the same report.
     ``checks`` is the one arm the headline reads (ADR-0024 — never two); the cells and the
-    prospective routing, keyed by arm, and the learning curve read every arm in scope."""
+    prospective routing, keyed by arm, and the learning curve read every arm in scope.
+    ``posture`` is the one class EVERY figure reads (ADR-0019 §8), the every-repository review
+    fallback included; ``all`` reads the one class the repository and apparatus scope holds
+    and raises :class:`PosturePoolingError` over two. An unjoined review is placed by
+    ``_place_unjoined`` before any scope is cut."""
     if usd_per_gbp <= 0:
         raise ValueError("usd_per_gbp must be positive")
     if checks not in ARMS:
         raise ValueError(f"unknown checks arm {checks!r}; expected one of {ARMS}")
     all_rows = list(rows)
-    all_verdicts = list(verdicts)
+    given = all_rows
+    if posture == POSTURE_ALL:
+        present = {r.posture_class for r in select_rows(all_rows, repo=repo, apparatus=apparatus)}
+        if len(present) > 1:
+            raise PosturePoolingError(present)
+        read = next(iter(present), "")
+    else:
+        read = posture
+    all_rows = [r for r in all_rows if r.posture_class == read]
+    # a review is placed by the rows of every class in the apparatus scope, before the
+    # filter drops the other classes
+    all_verdicts, unplaced = _place_unjoined(
+        list(verdicts), select_rows(given, apparatus=apparatus), read
+    )
+    left_out = _answers(unplaced)
     every_arm = select_rows(all_rows, repo=repo, apparatus=apparatus)
     scoped = [r for r in every_arm if r.checks_arm == checks]
     vs = _verdicts_in_scope(all_verdicts, scoped, repo)
@@ -1230,6 +1340,7 @@ def value_report(
         [r for r in select_rows(all_rows, apparatus=apparatus) if r.checks_arm == checks],
         None,
     )
+    repo_unplaced = sum(1 for v in left_out if repo is None or v.repo == repo)
     sizes = sorted(
         {r.size for r in scoped if r.mode == "blind"}, key=lambda s: (_SIZE_ORDER.get(s, 9), s)
     )
@@ -1251,15 +1362,26 @@ def value_report(
                 _verdicts_in_scope(all_verdicts, rs, name),
                 usd_per_gbp=usd_per_gbp,
                 pooled=pooled_vs,
+                unplaced=sum(1 for v in left_out if v.repo == name),
+                pooled_unplaced=len(left_out),
             )
             repos.append({"repo": name, "rows": len(rs), "north_star": ns.to_dict()})
     return ValueReport(
         repo=repo,
         apparatus=scope_label(apparatus),
         rows=scoped,
-        north=north_star(scoped, vs, usd_per_gbp=usd_per_gbp, pooled=pooled_vs),
+        north=north_star(
+            scoped,
+            vs,
+            usd_per_gbp=usd_per_gbp,
+            pooled=pooled_vs,
+            unplaced=repo_unplaced,
+            pooled_unplaced=len(left_out),
+        ),
         rates=rates,
-        precision=precision(scoped, vs, pooled_vs),
+        precision=precision(
+            scoped, vs, pooled_vs, unplaced=repo_unplaced, pooled_unplaced=len(left_out)
+        ),
         loss=process_loss(scoped, usd_per_gbp=usd_per_gbp),
         curve=learning_curve(every_arm, window=window, register=register),
         routing=prospective_routing(every_arm, policy=policy),
@@ -1268,6 +1390,8 @@ def value_report(
         usd_per_gbp=usd_per_gbp,
         reviews_source=reviews_source,
         checks=checks,
+        posture=posture,
+        posture_class=read,
     )
 
 
@@ -1282,6 +1406,7 @@ __all__ = [
     "LEVERS",
     "LOSS_KINDS",
     "MIN_REVIEWS_FOR_REVIEW_BASIS",
+    "POSTURE_ALL",
     "REVIEWS_FROM_CALLER",
     "REVIEWS_FROM_EXPORT",
     "REVIEWS_FROM_STORE",
@@ -1290,6 +1415,7 @@ __all__ = [
     "ClassStatus",
     "KindRegister",
     "LoopRegister",
+    "PosturePoolingError",
     "Rate",
     "ReviewVerdict",
     "ValueReport",

@@ -74,6 +74,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.capability import (
@@ -325,19 +326,31 @@ def rows_for_posture(
     return PostureFilter(kept, POSTURE_ALL, divergent, unqualified)
 
 
-def legacy_executor_lookup(session: Session) -> Callable[[str], str]:
+#: Run ids per batched stamp read: under SQLite's bound-parameter limit.
+_RUN_BATCH = 500
+
+
+def _stamp_executor(apparatus_json: Mapping[str, Any] | None) -> str:
+    stamp = dict(apparatus_json or {}).get("executor") or {}
+    return str(stamp.get("executor", "") if isinstance(stamp, Mapping) else stamp)
+
+
+def legacy_executor_lookup(session: Session, rows: Iterable[GradeRow] = ()) -> Callable[[str], str]:
     """``run_id → executor`` from each run's apparatus stamp (cached per request) — how a
-    pre-2.3 row, which carries no posture of its own, is placed (ADR-0019 §10)."""
+    pre-2.3 row, which carries no posture of its own, is placed (ADR-0019 §10). The runs of
+    ``rows`` that carry no posture are read up front in batches, never one query per run."""
     cache: dict[str, str] = {}
+    wanted = sorted({r.run_id for r in rows if not r.posture_class and r.run_id})
+    for i in range(0, len(wanted), _RUN_BATCH):
+        chunk = wanted[i : i + _RUN_BATCH]
+        cache.update(dict.fromkeys(chunk, ""))
+        found = session.execute(select(Run.id, Run.apparatus_json).where(Run.id.in_(chunk))).all()
+        cache.update({run_id: _stamp_executor(stamp) for run_id, stamp in found})
 
     def of(run_id: str) -> str:
         if run_id not in cache:
             run = session.get(Run, run_id) if run_id else None
-            executor = ""
-            if run is not None:
-                stamp = dict(run.apparatus_json or {}).get("executor") or {}
-                executor = str(stamp.get("executor", "") if isinstance(stamp, Mapping) else stamp)
-            cache[run_id] = executor
+            cache[run_id] = _stamp_executor(run.apparatus_json) if run is not None else ""
         return cache[run_id]
 
     return of
@@ -354,13 +367,14 @@ def filter_posture(
         if posture in ("", POSTURE_DEPLOYMENT)
         else posture
     )
+    rows = list(rows)
     return rows_for_posture(
         rows,
         wanted,
         fingerprints=lambda classes: store_qualifications.latest_fingerprints(
             session, repo, classes
         ),
-        legacy_executor_of=legacy_executor_lookup(session),
+        legacy_executor_of=legacy_executor_lookup(session, rows),
     )
 
 
