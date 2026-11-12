@@ -72,11 +72,11 @@ for the reviewer and for filing): one line per patch with its label, repository 
 only, in label order; the sha256 of that list's own lines (B2 item 4: "The drawn list and its
 sha256 are filed"); the sha256 of the key file and of the audit file; the wave-wide total of
 clean rows that carry an error; the totals per repository. stdout is ``--output`` byte for byte
-(the read's ``Out``: each line is written and flushed to the file before it is printed),
-except the exit-5 lines, which go to stdout alone. The key and audit files are written,
-flushed, fsynced and closed, and their sha256 taken, before the first line of the list is
-printed, so a failure on either shows the reviewer nothing. Nothing that names an arm, an
-attempt, a run id or the audit set is ever printed.
+(the read's ``Out``: each line is written and flushed to the file before it is printed);
+once the ``--output`` file itself fails, the lines after it go to stdout alone. The key and
+audit files are written, flushed, fsynced and closed, and their sha256 taken, before the first
+line of the list is printed, so a failure on either shows the reviewer nothing. Nothing that
+names an arm, an attempt, a run id or the audit set is ever printed.
 
 B2 item 3's per-(repository, arm) step counts ("The report prints, for each repository and arm,
 how many patches each of the three steps gave") are held in the key file (ruling Q3). "The
@@ -87,15 +87,16 @@ the filed list how many patches each arm gave.
 Exit codes: 0 the draw was made; 1 not ready (a recorded constant, an argument or the login
 file is not as expected, an output file exists, or a module other than ``READ_PATH`` is loaded
 as the read), no request made; 2 the order check failed (counts only); 4 the draw was not
-made (a row request failed, or the rows are not as the run
-records state: the read's added integrity stop, a run without exactly five rows, or a row
-with no ``error`` field (ruling Q4); counts only; or an unexpected error before any salt was
-made, named by its class only); 5 the ``--output``, ``--key-out`` or ``--audit-out`` file
-could not be written or closed after it was opened, or an unexpected error came after a salt
-was made. Every exit 5, and the exit 4 on an unexpected error, ends with one fixed line:
-before any salt, ``NO_SALT`` (a later run is the first draw); after one, ``DO_NOT_RERUN`` (a
-key file may exist that no filed output binds; a second run would make different labels;
-escalate to the delivery manager).
+made (a row request failed, or the rows are not as the run records state: the read's added
+integrity stop, a run without exactly five rows, or a row with no ``error`` field (ruling
+Q4); counts only; or an unexpected error before any salt was made, named by its class only,
+when the ``--output`` file then takes the exit lines); 5 the
+``--output``, ``--key-out`` or ``--audit-out`` file could not be written or closed after it
+was opened (on the way out of an unexpected error too), or an unexpected error came after a
+salt was made. Every exit 5, and the exit 4 on an unexpected error, ends with one fixed line,
+said once: before any salt, ``NO_SALT`` (a later run is the first draw); after one,
+``DO_NOT_RERUN`` (a key file may exist that no filed output binds; a second run would make
+different labels; escalate to the delivery manager). A broken stdout does not change the code.
 
 Navigation
 ----------
@@ -136,7 +137,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, NoReturn
 
 # ---------------------------------------------------------------------------
 # the read script, imported (never edited)
@@ -668,6 +669,7 @@ class _State:
     salted: bool = False  # a salt was made: a later run would make different labels
     listing: bool = False  # the first line of the blinded list is being printed
     listed: bool = False  # every line of the blinded list was printed
+    output_failed: bool = False  # an exit line could not be written to the --output file
 
     def last_line(self) -> str:
         return DO_NOT_RERUN if self.salted else NO_SALT
@@ -710,6 +712,10 @@ def _fsync(f: Any) -> None:
     os.fsync(f.fileno())
 
 
+#: Whatever a failing file or stream raises, the exit path goes on (an interrupt included).
+_ANY = (Exception, KeyboardInterrupt)
+
+
 def _close_left(files: dict[str, Any]) -> None:
     """Close a key or audit file still open (an exit before the draw wrote it); a failure is
     exit 5 with that file's fixed text. After the list is printed none is left open."""
@@ -718,25 +724,49 @@ def _close_left(files: dict[str, Any]) -> None:
         if f is not None:
             try:
                 f.close()
-            except OSError:
+            except _ANY:
                 raise OutputFileError(msg) from None
 
 
 def _abandon(out: Any, files: dict[str, Any]) -> None:
-    """The safety net: close whatever is still open, silently (it never prints)."""
-    with contextlib.suppress(R.OutputFileError):
+    """The safety net: close whatever is still open, silently (it never prints or raises)."""
+    with contextlib.suppress(*_ANY):
         out.close()
+    _close_files(files)
+
+
+def _close_files(files: dict[str, Any]) -> None:
+    """Close the key and audit files still open, silently."""
     for f in files.values():
-        with contextlib.suppress(OSError):
+        with contextlib.suppress(*_ANY):
             f.close()
     files.clear()
 
 
-def _emit(out: Any, *lines: str) -> None:
-    """Exit-5 lines, to stdout alone (the output file may be what failed)."""
+def _drop_output(out: Any, state: _State) -> None:
+    """The ``--output`` file failed: write no more to it, close it silently, record it."""
+    state.output_failed = True
+    f, out.file = out.file, None
+    if f is not None:
+        with contextlib.suppress(*_ANY):
+            f.close()
+
+
+def _say(out: Any, state: _State, *lines: str, stream: bool = True) -> None:
+    """The last lines of an exit 4 or 5; never raises. Each goes to the ``--output`` file
+    (while it still takes lines; one that fails is dropped and recorded) and then, unless
+    ``stream`` is false, to stdout, so the last line is in every place a line can still be
+    written."""
     for ln in lines:
-        with contextlib.suppress(OSError):
-            out.stream_only(ln)
+        if out.file is not None:
+            try:
+                out.file.write(ln + "\n")
+                out.file.flush()
+            except _ANY:
+                _drop_output(out, state)
+        if stream:
+            with contextlib.suppress(*_ANY):
+                out.stream_only(ln)
 
 
 def print_order_failure(out: Any, failures: Sequence[Any],
@@ -795,19 +825,25 @@ def main(
             code = 5 if state.salted else 4
         _close_left(files)
         if unexpected is not None:
-            # Each line on its own: the file is written before the stream, so a broken
-            # stdout on the first line does not keep the last line out of the file.
-            for text in (UNEXPECTED.format(cls=unexpected), state.last_line()):
-                with contextlib.suppress(OSError, ValueError):
-                    out.line(text)
-        out.close()
+            _say(out, state, UNEXPECTED.format(cls=unexpected))
+            # The last line to the file now; to stdout only after the close, so a failure of
+            # the file still ends stdout with one last line, after the output file's line.
+            _say(out, state, state.last_line(), stream=False)
+        try:
+            out.close()
+        except _ANY:  # an interrupt in close too: the file may not hold every line
+            raise R.OutputFileError from None
+        if state.output_failed:  # an exit line above could not be written to the file
+            raise R.OutputFileError
+        if unexpected is not None:
+            _say(out, state, state.last_line())  # the file is closed: stdout alone
     except R.OutputFileError:
-        _abandon(out, files)
-        _emit(out, state.output_message(), state.last_line())
+        _abandon(out, files)  # the output file failed: the lines go to stdout alone
+        _say(out, state, state.output_message(), state.last_line())
         return 5
     except OutputFileError as exc:
-        _abandon(out, files)
-        _emit(out, str(exc), state.last_line())
+        _close_files(files)
+        _say(out, state, str(exc), state.last_line())  # the output file did not fail: it gets them
         return 5
     finally:
         _abandon(out, files)
@@ -1013,5 +1049,17 @@ def _draw(
     return 0
 
 
+def _exit_with(rc: int) -> NoReturn:
+    """Exit ``rc`` even when stdout is a broken pipe: Python flushes stdout again at shutdown,
+    and a failure there would print "Exception ignored" and exit 120. Lines it still holds go
+    to the null device instead."""
+    try:
+        sys.stdout.flush()
+    except (OSError, ValueError):
+        with contextlib.suppress(OSError, ValueError):
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+    sys.exit(rc)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    _exit_with(main())

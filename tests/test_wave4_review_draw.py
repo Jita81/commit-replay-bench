@@ -15,6 +15,10 @@ What it does: Pins the pure draw (hash order and its tie rule, R6, the step orde
               or audit set, the printed sha256s are the list's, the key file's and the audit
               file's, every file is refused if it exists, and an order-check failure (among
               them a run naming its repository otherwise) reads no row and exits non-zero.
+              A failure-injection sweep fails every I/O call of a recorded run in turn (an
+              OSError, a RuntimeError, an interrupt): after a salt each end is exit 5 with
+              DO NOT RERUN last; before one, never; no exit line is said twice. A real
+              child process exits with its own code on a broken stdout pipe.
 How:          The script and the read suite's ``World`` loaded by path; ``main`` runs with an
               injected file reader, getter, output and key openers and a fixed salt.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -31,8 +35,10 @@ import hashlib
 import importlib.util
 import io
 import itertools
+import os
 import random
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -701,9 +707,10 @@ def test_key_or_audit_failure_prints_nothing_of_the_list_and_says_do_not_rerun(
     for printed in ("review list sha256", "key file sha256", "audit file sha256"):
         assert printed not in res.out, printed
     assert "no draw is filed" not in res.out and "filed output is incomplete" not in res.out
-    # the output file holds exactly what stdout held before the two exit-5 lines
+    # the output file did not fail, so it holds stdout byte for byte, the two exit-5 lines
+    # included (it once held them on stdout alone; found by the failure-injection sweep)
     (outf,) = w.outputs.values()
-    assert res.out == outf.text + msg + "\n" + SALTED_TAIL
+    assert outf.closed_text == res.out
 
 
 def test_key_and_audit_are_synced_and_closed_before_any_line_of_the_list(
@@ -846,6 +853,31 @@ def test_an_interrupt_after_the_salts_still_says_do_not_rerun(
     line = D.UNEXPECTED.format(cls="KeyboardInterrupt") + "\n"
     assert res.code == 5 and res.out.endswith(line + SALTED_TAIL), res.out
     assert "Review list" not in res.out
+
+
+@pytest.mark.parametrize("fails_at", ["class line", "last line"])
+@pytest.mark.parametrize("salted", [False, True])
+def test_an_unexpected_error_then_an_output_failure_is_exit_5_and_says_so(
+    monkeypatch: pytest.MonkeyPatch, salted: bool, fails_at: str
+) -> None:
+    """Review of #136: an unexpected error, then the --output file fails on an exit line.
+    That is exit 5 before a salt too, and stdout says the output file failed before the
+    last line, which is said once."""
+    tail = D.DO_NOT_RERUN if salted else D.NO_SALT
+    line = D.UNEXPECTED.format(cls="RuntimeError")
+    w, _made = _output_world(line if fails_at == "class line" else tail)
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("LEAK-SECRET-MESSAGE")
+
+    if salted:
+        monkeypatch.setattr(D, "key_text", boom)
+        res = run(w, monkeypatch, check=False)
+    else:
+        res = run(w, monkeypatch, check=False, open_getter=boom)
+    assert res.code == 5, res.out
+    assert res.out.endswith(f"{line}\n{D.OUTPUT_NOT_WRITTEN}\n{tail}\n"), res.out
+    assert res.out.count(tail) == 1 and "LEAK" not in res.out
 
 
 def test_a_broken_stdout_still_leaves_do_not_rerun_in_the_output_file(
@@ -1101,3 +1133,253 @@ def test_a_read_module_loaded_from_elsewhere_is_refused(
         D._load_read()
     monkeypatch.setitem(sys.modules, D.READ_NAME, W)
     assert D._load_read() is W
+
+
+_PIPE_DRIVER = """
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("wave4_review_draw", sys.argv[1])
+D = sys.modules[spec.name] = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(D)
+print("a line the closed pipe never takes")
+try:
+    sys.stdout.flush()
+except OSError:
+    pass
+(sys.exit if sys.argv[2] == "plain" else D._exit_with)(3)
+"""
+
+
+def _child_on_a_closed_pipe(how: str) -> subprocess.CompletedProcess[bytes]:
+    """The driver in a real child (``-I``: no site, no PYTHONPATH) whose stdout is a pipe
+    with its read end closed before the child starts, so every write to it fails."""
+    r, wfd = os.pipe()
+    os.close(r)
+    try:
+        return subprocess.run(
+            [sys.executable, "-I", "-c", _PIPE_DRIVER,
+             str(ROOT / "scripts" / "wave4_review_draw.py"), how],
+            stdout=wfd, stderr=subprocess.PIPE, timeout=60, check=False,
+        )  # fmt: skip
+    finally:
+        os.close(wfd)
+
+
+def test_a_broken_real_stdout_keeps_the_exit_code() -> None:
+    """Review of #136: Python flushes stdout again at shutdown; on a broken pipe that printed
+    "Exception ignored ... BrokenPipeError" and exited 120, not the script's code."""
+    plain = _child_on_a_closed_pipe("plain")  # the premise: without the fix this is 120
+    assert plain.returncode == 120 and b"Exception ignored" in plain.stderr, plain
+    res = _child_on_a_closed_pipe("exit_with")
+    assert res.returncode == 3, res
+    assert b"Exception ignored" not in res.stderr and b"Error" not in res.stderr, res.stderr
+
+
+# ---------------------------------------------------------------------------
+# failure injection: every I/O call, every failure kind (the class, not its instances)
+# ---------------------------------------------------------------------------
+
+#: The seams the sweep must reach at least once; a sweep that misses one covers nothing there.
+SEAMS = frozenset({
+    "path_exists", "read_file", "open_getter", "request", "open_output", "open_key",
+    "open_audit", "output.write", "output.flush", "output.close", "key.write", "key.flush",
+    "key.close", "audit.write", "audit.flush", "audit.close", "stdout.write", "stdout.flush",
+    "sync", "make_salt",
+})  # fmt: skip
+#: The sink a seam belongs to: a failure there means no line can be written to it.
+SINK = {"open_output": "output", "output.write": "output", "output.flush": "output",
+        "output.close": "output", "stdout.write": "stdout", "stdout.flush": "stdout"}  # fmt: skip
+INJECTED = "LEAK-INJECTED-MESSAGE"
+#: The fixed exit lines: each is said at most once in a sink.
+EXIT_LINES = frozenset({D.NO_SALT, D.DO_NOT_RERUN, D.OUTPUT_NOT_WRITTEN, D.OUTPUT_PART_OF_LIST,
+                        D.OUTPUT_NOT_CLOSED, D.KEY_NOT_WRITTEN, D.AUDIT_NOT_WRITTEN})  # fmt: skip
+OUTPUT_LINES = (D.OUTPUT_NOT_WRITTEN, D.OUTPUT_PART_OF_LIST, D.OUTPUT_NOT_CLOSED)
+
+
+class _Calls:
+    """Counts every call through a seam; makes call number ``at`` (0-based) raise ``make()``.
+    With ``sticky`` the failed thing stays broken: every later call on the same file, stream
+    or seam raises too (a full disk or a closed pipe does not mend itself)."""
+
+    def __init__(self, at: int | None = None, make: Any = None, *, sticky: bool = False) -> None:
+        self.at, self.make, self.sticky = at, make, sticky
+        self.log: list[str] = []
+        self.dead: str | None = None
+
+    def hit(self, seam: str) -> None:
+        self.log.append(seam)
+        family = seam.split(".")[0]
+        if len(self.log) - 1 == self.at:
+            self.dead = family if self.sticky else None
+            raise self.make()
+        if self.dead == family:
+            raise self.make()
+
+
+def _seamed_file(calls: _Calls, name: str) -> Any:
+    class Seamed(F.FakeOutput):
+        def write(self, text: str) -> int:
+            calls.hit(f"{name}.write")
+            return super().write(text)
+
+        def flush(self) -> None:
+            calls.hit(f"{name}.flush")
+            super().flush()
+
+        def close(self) -> None:
+            calls.hit(f"{name}.close")
+            super().close()
+
+    return Seamed()
+
+
+@dataclass
+class Swept:
+    code: int | None
+    escaped: str | None  # the class of an exception that left ``main`` (a fault)
+    stdout: str
+    output: str | None  # the output file's text, None when it was never opened
+    log: list[str]
+
+
+def _swept_run(w: Any, rec: Any, calls: _Calls) -> Swept:
+    """One whole run with every I/O seam counted (and one call failing, if ``calls.at``)."""
+    for log in (w.calls, w.opened, w.reads, w.outputs):
+        log.clear()
+    made: dict[str, Any] = {}
+    n = itertools.count(1)
+
+    class Stream(io.StringIO):
+        def write(self, text: str) -> int:
+            calls.hit("stdout.write")
+            return super().write(text)
+
+        def flush(self) -> None:
+            calls.hit("stdout.flush")
+
+    def opener(name: str) -> Any:
+        def open_(_path: str) -> Any:
+            calls.hit(f"open_{name}")
+            made[name] = _seamed_file(calls, name)
+            return made[name]
+
+        return open_
+
+    def read_file(path: str) -> bytes:
+        calls.hit("read_file")
+        return bytes(w.read_file(path))
+
+    def open_getter(*a: Any) -> Any:
+        calls.hit("open_getter")
+        get = w.open_getter(*a)
+
+        def request(path: str, query: Any) -> tuple[int, bytes]:
+            calls.hit("request")
+            return tuple(get(path, query))  # type: ignore[return-value]
+
+        return request
+
+    def path_exists(_p: str) -> bool:
+        calls.hit("path_exists")
+        return False
+
+    def make_salt() -> str:
+        calls.hit("make_salt")
+        return f"{SALT}-{next(n)}"
+
+    stdout = Stream()
+    code: int | None = None
+    escaped: str | None = None
+    try:
+        code = D.main(list(ARGV), read_file=read_file, open_getter=open_getter,
+                      open_output=opener("output"), open_key=opener("key"),
+                      open_audit=opener("audit"), path_exists=path_exists,
+                      make_salt=make_salt, sync=lambda _f: calls.hit("sync"), stdout=stdout,
+                      recorded=rec, self_bytes=b"fixture-self", read_bytes=b"fixture-read")  # fmt: skip
+    except (Exception, KeyboardInterrupt) as exc:  # an exception out of main is the fault
+        escaped = type(exc).__name__
+    outf = made.get("output")
+    return Swept(code, escaped, stdout.getvalue(), None if outf is None else outf.text,
+                 list(calls.log))  # fmt: skip
+
+
+def _faults(i: int, seam: str, salted: bool, kind: str, r: Swept, ids: list[str]) -> list[str]:
+    """Every way the injected run ``r`` breaks the rule; empty when it keeps it."""
+    case = f"call {i} ({seam}) {kind}"
+    if r.escaped is not None:
+        return [f"{case}: {r.escaped} left main (a traceback)"]
+    bad: list[str] = []
+    code, sink = r.code, SINK.get(seam)
+    if code not in (1, 2, 4, 5):
+        bad.append(f"{case}: exit {code}")
+    if code in (1, 2) and (salted or kind != "OSError"):
+        bad.append(f"{case}: exit {code} is a refusal; only an OSError before a salt gives it")
+    if salted and code != 5:
+        bad.append(f"{case}: exit {code} after a salt")
+    if seam.endswith(".close") and code != 5:  # a key, audit or output file not closed
+        bad.append(f"{case}: exit {code}, not 5, when a file could not be closed")
+    said_output = any(m + "\n" in r.stdout for m in OUTPUT_LINES)
+    broken = kind != "KeyboardInterrupt" and seam.startswith("output.")  # it stays broken
+    if broken and (code != 5 or not said_output):
+        bad.append(f"{case}: exit {code} without saying the output file failed")
+    texts = {"stdout": r.stdout, "output": r.output}
+    if not salted:
+        for where, text in texts.items():
+            if text is not None and D.DO_NOT_RERUN in text:
+                bad.append(f"{case}: DO NOT RERUN in {where} before any salt")
+    if code in (4, 5):
+        tail = (D.DO_NOT_RERUN if salted else D.NO_SALT) + "\n"
+        for where, text in texts.items():
+            if where != sink and text is not None and not text.endswith(tail):
+                bad.append(f"{case}: {where} does not end with {tail.strip()[:24]}...")
+    for where, text in texts.items():
+        if text is None:
+            continue
+        said = [ln for ln in text.splitlines() if ln in EXIT_LINES or ln.startswith(
+            D.UNEXPECTED.split("(")[0])]  # fmt: skip
+        if len(said) != len(set(said)):
+            bad.append(f"{case}: {where} says an exit line twice")
+        if "Traceback" in text or "LEAK" in text or "987654" in text or SALT in text:
+            bad.append(f"{case}: {where} holds a traceback, message, row value or salt")
+        if any(rid in text or rid[:8] in text for rid in ids):
+            bad.append(f"{case}: {where} names a run id")
+    return bad
+
+
+#: The runs swept: the clean draw (exit 0), and an order-check failure (exit 2), whose key and
+#: audit files are left open by ``_draw`` and closed on the exit path (the "key close" case).
+BASES = {"draw": (0, SEAMS),
+         "order check fails": (2, frozenset({"read_file", "open_key", "open_audit", "key.close",
+                                             "audit.close", "output.close", "stdout.write"}))}  # fmt: skip
+
+
+@pytest.mark.parametrize("base", sorted(BASES))
+@pytest.mark.parametrize("kind", ["OSError", "RuntimeError", "KeyboardInterrupt"])
+def test_every_io_call_failing_ends_as_the_rule_says(
+    monkeypatch: pytest.MonkeyPatch, kind: str, base: str
+) -> None:
+    """Four reviews found exit-5 holes by hand (key close, sync, Ctrl-C, broken stdout). This
+    stops the class: a recorded run counts every call through every I/O seam, then the run is
+    made again once per call with that call failing. After a salt every end is exit 5 with
+    DO NOT RERUN last in each sink that did not fail; before one, no DO NOT RERUN, and an
+    unexpected error ends NO_SALT. No run ends 0, leaks, or lets an exception out."""
+    w = world()
+    if base == "order check fails":
+        w.tamper["plan"] = b"{}"
+    rec = w.recorded()
+    F.pin_hashes(monkeypatch, rec)
+    want_code, seams = BASES[base]
+    clean = _swept_run(w, rec, _Calls())
+    assert clean.code == want_code and clean.escaped is None, clean.stdout
+    assert seams <= set(clean.log), sorted(seams - set(clean.log))
+    # the script counts a salt from the moment it asks for one
+    first_salt = clean.log.index("make_salt") if "make_salt" in clean.log else len(clean.log)
+    make = {"OSError": lambda: OSError(INJECTED), "RuntimeError": lambda: RuntimeError(INJECTED),
+            "KeyboardInterrupt": KeyboardInterrupt}[kind]  # fmt: skip
+    sticky = kind != "KeyboardInterrupt"  # an interrupt comes once; a broken file stays broken
+    ids = w.all_ids()
+    faults: list[str] = []
+    for i, seam in enumerate(clean.log):
+        r = _swept_run(w, rec, _Calls(i, make, sticky=sticky))
+        assert r.log[: i + 1] == clean.log[: i + 1], f"call {i}: the run took another path"
+        faults += _faults(i, seam, i >= first_salt, kind, r, ids)
+    assert not faults, f"{len(faults)} of {len(clean.log)} injected runs:\n" + "\n".join(faults)
