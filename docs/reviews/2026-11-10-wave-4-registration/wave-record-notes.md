@@ -72,3 +72,32 @@ refiled once (run 98fe708c failed its gold control before any build; no row was 
   **[hypothesis — `spent_usd` and `left_usd` read from `GET /api/v1/campaigns/<id>` on the served stack through the signed-in browser, apparatus 2.5; the campaign record is not in this repository]**
 - Cobra poster started ~23:30Z, same svc-claude account.
   **[hypothesis — a record of the sessions of 2026-11-11 and 2026-11-12; the rows and the transcripts are not in this repository]**
+
+## 2026-11-12 — test (h) record: field names and values, read from the served code
+
+Recorded by the delivery manager before the script of R5 is committed, as R5 item 2 test (h)
+and Amendment 4 ask. Every line is read from the served code at `7bb03d6c`. None is read from
+a run, a row, an event or a kept request.
+**[hypothesis — the delivery manager's statement of what was read on 2026-11-12; the session is not in this repository]**
+
+- The run record is `GET /api/v1/runs/{run_id}`, schema `RunOut`, built by `run_out`. The
+  filing time is `created`. The end time is `finished`, null until the run ends. The status
+  is `status`. The row count is `counts.rows`. The commits are `task_ids`. The kind is `kind`.
+  **[measured — n = 6 fields, method: read-only `git show` of `src/crb/server/schemas.py` 601-643 and `src/crb/server/routes/runs.py` 547-597 at the served commit `7bb03d6c`, apparatus 2.5; a property of the product's code, not a graded row]**
+- `RunOut` carries no `arm`, no `test_author` and no campaign field.
+  **[measured — n = 1 schema, method: read-only `git show` of `src/crb/server/schemas.py` 601-643 at the served commit `7bb03d6c`, apparatus 2.5; a property of the product's code, not a graded row]**
+- `test_author` is stored as sent, with outer whitespace removed, and only when `arm` is
+  sent.
+  **[measured — n = 1 code path, method: read-only `git show` of `src/crb/server/routes/runs.py` 772-776 at the served commit `7bb03d6c`, apparatus 2.5; a property of the product's code, not a graded row]**
+- The value of Amendment 4 point 3, `editblock:gpt-oss-120b`, has no outer whitespace, so
+  sent and stored are the same string. The code reads it as builder `editblock`, model
+  `gpt-oss-120b`, and an empty provider.
+  **[measured — n = 2 functions, method: read-only `git show` of `src/crb/builders/adapter.py` 457-479 and `src/crb/factory/author.py` 394-421 at the served commit `7bb03d6c`, apparatus 2.5; a property of the product's code, not a graded row]**
+- The campaign record is `GET /api/v1/campaigns/{campaign_id}`. Each admitted run is listed
+  with `runs[].run_id` and `runs[].s1`. `s1` is set at admission and is true when the request
+  carried an `arm` field.
+  **[measured — n = 2 fields, method: read-only `git show` of `src/crb/server/campaigns.py` 455-531 and `src/crb/server/routes/runs.py` 1246 and 1290 at the served commit `7bb03d6c`, apparatus 2.5; a property of the product's code, not a graded row]**
+- The test author's event is `author.attempt`. Its `provider` field holds the provider of
+  the endpoint that was called. The value for an endpoint in the `cerebras.ai` domain is
+  `cerebras`. An author call that raises writes no such event.
+  **[measured — n = 1 event and 1 value, method: read-only `git show` of `src/crb/factory/author.py` 326-348 and `src/crb/builders/openai_client.py` 530-544 at the served commit `7bb03d6c`, apparatus 2.5; a property of the product's code, not a graded row]**

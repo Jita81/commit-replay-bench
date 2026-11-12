@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Wave 4's fourth amendment: where the order check reads what the product does not serve**
+  ([#131](https://github.com/Jita81/commit-replay-bench/pull/131)). The served run record
+  shows no request body, campaign or test author provider, so the check that must pass before
+  the read could not be made as written. Amendment 4, in force by Paul's written yes, names
+  the sources: the poster's two files, two fields of the campaign record, one fixed
+  `test_author` label, and the provider stamp on each author call. No number, threshold or
+  decision word changes. The methodologist's ruling is committed beside it, and the wave
+  record gains the field names read from the served code.
+
 - **Wave 4's second and third amendments: the cut, the orders and the rules of the read**
   ([#129](https://github.com/Jita81/commit-replay-bench/pull/129)). Amendment 2, written
   before the first wave run, records the pilot runs, each pilot gate (two did not hold as
