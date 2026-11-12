@@ -788,14 +788,18 @@ def main(
                          read_bytes=read_bytes)  # fmt: skip
         except (R.OutputFileError, OutputFileError):
             raise
-        except Exception as exc:  # no traceback, no message text, no row data: the class only
+        except (Exception, KeyboardInterrupt) as exc:
+            # No traceback, no message text, no row data: the class only. An interrupt is
+            # held here too, so a salted run still ends with the DO NOT RERUN line.
             unexpected = type(exc).__name__
             code = 5 if state.salted else 4
         _close_left(files)
         if unexpected is not None:
-            with contextlib.suppress(OSError):  # a broken stdout: nothing more can be shown
-                out.line(UNEXPECTED.format(cls=unexpected))
-                out.line(state.last_line())
+            # Each line on its own: the file is written before the stream, so a broken
+            # stdout on the first line does not keep the last line out of the file.
+            for text in (UNEXPECTED.format(cls=unexpected), state.last_line()):
+                with contextlib.suppress(OSError, ValueError):
+                    out.line(text)
         out.close()
     except R.OutputFileError:
         _abandon(out, files)

@@ -832,6 +832,45 @@ def test_an_unexpected_error_names_its_class_only(
     assert res.key.closed_text == "" and res.audit.closed_text == ""
 
 
+def test_an_interrupt_after_the_salts_still_says_do_not_rerun(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review of #136: Ctrl-C in the sync of the key file is not an ``Exception``; the run
+    still ends exit 5 with the class name and DO NOT RERUN."""
+    w = world()
+
+    def sync(_f: Any) -> None:
+        raise KeyboardInterrupt
+
+    res = run(w, monkeypatch, sync=sync)
+    line = D.UNEXPECTED.format(cls="KeyboardInterrupt") + "\n"
+    assert res.code == 5 and res.out.endswith(line + SALTED_TAIL), res.out
+    assert "Review list" not in res.out
+
+
+def test_a_broken_stdout_still_leaves_do_not_rerun_in_the_output_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review of #136: stdout fails while the list prints; the output file is written before
+    the stream, so it still ends with the class line and DO NOT RERUN."""
+    w = world()
+
+    class Broken(io.StringIO):
+        def write(self, text: str) -> int:
+            if text.startswith("Review list"):
+                self.dead = True
+            if getattr(self, "dead", False):
+                raise BrokenPipeError
+            return super().write(text)
+
+    res = run(w, monkeypatch, check=False, stdout=Broken())
+    assert res.code == 5
+    line = D.UNEXPECTED.format(cls="BrokenPipeError") + "\n"
+    (filed,) = w.outputs.values()
+    assert filed.closed_text.endswith(line + SALTED_TAIL), filed.closed_text
+    assert D.DO_NOT_RERUN not in res.out
+
+
 def test_a_run_without_exactly_five_rows_stops_the_draw(monkeypatch: pytest.MonkeyPatch) -> None:
     """Finding 6: the order check holds the run record's counts.rows, not the rows fetched
     afterwards from /grades; a short run stops the draw, counts only."""

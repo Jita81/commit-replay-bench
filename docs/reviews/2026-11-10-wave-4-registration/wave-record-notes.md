@@ -494,6 +494,7 @@ none changes the decision word, which the seats signed for any count
 The draw of Amendment 3 Part B is made by `scripts/wave4_review_draw.py`. This entry is
 written before the script is merged and before any draw exists. No row has been read for
 the draw.
+**[hypothesis — the delivery manager's statement of 2026-11-12; the script was not merged and had not been run when this entry was written]**
 
 - **B1, confirmed in writing by the delivery manager.** The primary read was made once and
   both seats signed it, as the entry "Signatures on the primary read" above records. The
@@ -541,6 +542,9 @@ the draw.
   drawn patches before the review. The two lists are the same only if every drawn patch is
   reviewed. If one is not, the audit order is computed again over the reviewed patches and
   the change is recorded here.
+  This rule is about the blinded reviewer's list alone. A shortfall in Paul's own check
+  is a different case, and the deviation log entry below governs it: the audit order is
+  not computed again for it.
   **[hypothesis — the seat's note on B3 item 1, 2026-11-12]**
 
 - **A leak that stays, from the registered B3 hash.** An independent check of the script
