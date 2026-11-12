@@ -46,7 +46,9 @@ refiled once (run 98fe708c failed its gold control before any build; no row was 
 
 ## Other things the wave record must state
 - runs from click-3/1 onward were filed by the `svc-claude` operator account;
+  **[hypothesis — a record of the sessions of 2026-11-11 and 2026-11-12; the rows and the transcripts are not in this repository]**
 - a poster crash / login-verify timeout before batch 3 (no run lost);
+  **[hypothesis — a record of the sessions of 2026-11-11 and 2026-11-12; the rows and the transcripts are not in this repository]**
 - both pilot gates failed and waived (Amendment 2).
   **[hypothesis — a record of the sessions of 2026-11-11 and 2026-11-12; the rows and the transcripts are not in this repository]**
 
