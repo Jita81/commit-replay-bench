@@ -412,7 +412,8 @@ class Res:
 
 def run(w: Any, monkeypatch: pytest.MonkeyPatch, *, argv: list[str] | None = None,
         exists: bool = False, key_error: OSError | None = None,
-        audit_error: OSError | None = None) -> Res:  # fmt: skip
+        audit_error: OSError | None = None, key_cls: type[Any] | None = None,
+        audit_cls: type[Any] | None = None, check: bool = True, **kw: Any) -> Res:  # fmt: skip
     for log in (w.calls, w.opened, w.reads, w.outputs):
         log.clear()
     rec = w.recorded()
@@ -425,26 +426,30 @@ def run(w: Any, monkeypatch: pytest.MonkeyPatch, *, argv: list[str] | None = Non
             raise key_error
         assert not w.calls and not w.opened, "key opened after a request"
         assert all(r == F.LOGIN for r in w.reads), "key opened after a poster file read"
-        keys[path] = F.FakeOutput()
+        keys[path] = (key_cls or F.FakeOutput)()
         return keys[path]
 
     def open_audit(path: str) -> Any:
         if audit_error is not None:
             raise audit_error
         assert not w.calls and not w.opened, "audit file opened after a request"
-        keys[path] = F.FakeOutput()
+        keys[path] = (audit_cls or F.FakeOutput)()
         return keys[path]
 
-    buf = io.StringIO()
-    code = D.main(
-        argv if argv is not None else list(ARGV),
-        read_file=w.read_file, open_getter=w.open_getter, open_output=w.open_output,
-        open_key=open_key, open_audit=open_audit, path_exists=lambda p: p in exists_paths,
-        make_salt=salts(), stdout=buf, recorded=rec, self_bytes=b"fixture-self",
-        read_bytes=b"fixture-read",
-    )  # fmt: skip
-    F.check_output_file(w, buf.getvalue())
-    return Res(code, buf.getvalue(), w, keys.get(KEYF), keys.get(AUDF))
+    args: dict[str, Any] = {
+        "read_file": w.read_file, "open_getter": w.open_getter, "open_output": w.open_output,
+        "open_key": open_key, "open_audit": open_audit,
+        "path_exists": lambda p: p in exists_paths, "make_salt": salts(),
+        "sync": lambda _f: None, "stdout": io.StringIO(), "recorded": rec,
+        "self_bytes": b"fixture-self", "read_bytes": b"fixture-read",
+    }  # fmt: skip
+    args |= kw
+    code = D.main(argv if argv is not None else list(ARGV), **args)
+    text = args["stdout"].getvalue()
+    if check:
+        F.check_output_file(w, text)
+    assert "Traceback" not in text
+    return Res(code, text, w, keys.get(KEYF), keys.get(AUDF))
 
 
 def world() -> Any:
@@ -644,30 +649,231 @@ def test_rows_not_as_the_records_state_stop_the_draw(monkeypatch: pytest.MonkeyP
     assert "Review list" not in res.out
 
 
-def test_key_write_failure_exits_5(monkeypatch: pytest.MonkeyPatch) -> None:
+def _broken(stage: str) -> type[Any]:
+    """A key or audit file whose write, fsync or close fails."""
+
+    class Broken(F.FakeOutput):
+        broken = True
+
+        def write(self, text: str) -> int:
+            if stage == "write" and text:
+                raise OSError("disk full")
+            return super().write(text)
+
+        def fileno(self) -> int:
+            if stage == "sync":
+                raise OSError("fsync failed")
+            return -1
+
+        def close(self) -> None:
+            if stage == "close":
+                raise OSError("close failed")
+            super().close()
+
+    return Broken
+
+
+def _sync_by_fileno(f: Any) -> None:
+    """The fsync seam on a fake: the broken file's fileno is where its fsync fails."""
+    if getattr(f, "broken", False):
+        f.fileno()
+
+
+SALTED_TAIL = D.DO_NOT_RERUN + "\n"
+UNSALTED_TAIL = D.NO_SALT + "\n"
+
+
+@pytest.mark.parametrize("which", ["key", "audit"])
+@pytest.mark.parametrize("stage", ["write", "sync", "close"])
+def test_key_or_audit_failure_prints_nothing_of_the_list_and_says_do_not_rerun(
+    monkeypatch: pytest.MonkeyPatch, which: str, stage: str
+) -> None:
+    """Finding 1 and 2: both files are closed before the list; a failure on either (write,
+    fsync or close) shows no line of the list and no sha256, and ends DO NOT RERUN."""
     w = world()
+    cls = _broken(stage)
+    res = run(w, monkeypatch, check=False, sync=_sync_by_fileno,
+              **({"key_cls": cls} if which == "key" else {"audit_cls": cls}))  # fmt: skip
+    assert res.code == 5, res.out
+    msg = D.KEY_NOT_WRITTEN if which == "key" else D.AUDIT_NOT_WRITTEN
+    assert res.out.endswith(msg + "\n" + SALTED_TAIL)
+    assert "Review list" not in res.out
+    for printed in ("review list sha256", "key file sha256", "audit file sha256"):
+        assert printed not in res.out, printed
+    assert "no draw is filed" not in res.out and "filed output is incomplete" not in res.out
+    # the output file holds exactly what stdout held before the two exit-5 lines
+    (outf,) = w.outputs.values()
+    assert res.out == outf.text + msg + "\n" + SALTED_TAIL
+
+
+def test_key_and_audit_are_synced_and_closed_before_any_line_of_the_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finding 1: at the first line of the list (or any sha256), both files are already
+    written, fsynced and closed."""
+    w = world()
+    events: list[str] = []
+
+    class Watch(io.StringIO):
+        def write(self, s: str) -> int:
+            if s.startswith(("Review list", "review list sha256", "key file sha256")):
+                events.append(f"print {s.split()[0]}")
+            return super().write(s)
+
+    class Tracked(F.FakeOutput):
+        def close(self) -> None:
+            events.append(f"close {'key' if ' key: ' in self.text else 'audit'}")
+            super().close()
+
+    def sync(f: Any) -> None:
+        events.append(f"sync {'key' if ' key: ' in f.text else 'audit'}")
+
+    res = run(w, monkeypatch, key_cls=Tracked, audit_cls=Tracked, sync=sync, stdout=Watch())
+    assert res.code == 0, res.out
+    assert events[:4] == ["sync key", "close key", "sync audit", "close audit"]
+    assert events[4:] == ["print Review", "print review", "print key"]
+
+
+def test_the_real_fsync_syncs_the_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[int] = []
+    monkeypatch.setattr(D.os, "fsync", seen.append)
+    f = D._open_new(str(tmp_path / "k.txt"))
+    D._fsync(f)
+    assert seen == [f.fileno()]
+    f.close()
+
+
+def _output_world(fail_on: str) -> tuple[Any, list[Any]]:
+    """The world whose --output file fails at a write starting with ``fail_on`` (or, with
+    "close", at close)."""
+    w = world()
+    made: list[Any] = []
 
     class Broken(F.FakeOutput):
         def write(self, text: str) -> int:
-            raise OSError("disk full")
+            if fail_on != "close" and fail_on in text:
+                raise OSError("disk full")
+            return super().write(text)
 
-    keys: list[Any] = []
+        def close(self) -> None:
+            if fail_on == "close":
+                raise OSError("close failed")
+            super().close()
 
-    def open_key(_p: str) -> Any:
-        keys.append(Broken())
-        return keys[-1]
+    def open_output(path: str) -> Any:
+        made.append(Broken())
+        w.outputs[path] = made[-1]
+        return made[-1]
 
-    rec = w.recorded()
-    F.pin_hashes(monkeypatch, rec)
-    buf = io.StringIO()
-    code = D.main(list(ARGV), read_file=w.read_file, open_getter=w.open_getter,
-                  open_output=w.open_output, open_key=open_key,
-                  open_audit=lambda _p: F.FakeOutput(), path_exists=lambda _p: False,
-                  make_salt=salts(), stdout=buf, recorded=rec,
-                  self_bytes=b"s", read_bytes=b"r")  # fmt: skip
-    assert code == 5
-    assert buf.getvalue().endswith(D.KEY_NOT_WRITTEN + "\n")
-    assert "Review list" not in buf.getvalue()
+    w.open_output = open_output  # type: ignore[method-assign]
+    return w, made
+
+
+@pytest.mark.parametrize(
+    ("fail_on", "msg", "tail"),
+    [
+        ("campaign:", D.OUTPUT_NOT_WRITTEN, UNSALTED_TAIL),
+        ("Order check passed", D.OUTPUT_NOT_WRITTEN, UNSALTED_TAIL),
+        ("  click-03", D.OUTPUT_PART_OF_LIST, SALTED_TAIL),
+        ("close", D.OUTPUT_NOT_CLOSED, SALTED_TAIL),
+    ],
+)
+def test_output_failures_say_what_is_true_and_whether_to_rerun(
+    monkeypatch: pytest.MonkeyPatch, fail_on: str, msg: str, tail: str
+) -> None:
+    """Finding 2: the exit-5 text on --output depends on how far the list got; before any
+    salt a later run is the first draw, after one it must not be rerun."""
+    w, _made = _output_world(fail_on)
+    res = run(w, monkeypatch, check=False)
+    assert res.code == 5, res.out
+    assert res.out.endswith(msg + "\n" + tail)
+    assert "filed output is incomplete" not in res.out
+    if fail_on == "close":  # stdout holds the full list
+        assert "audit file sha256 " in res.out and "click: " in res.out
+    if fail_on == "  click-03":
+        assert "  click-02  " in res.out and "  click-03  " not in res.out
+        assert "review list sha256" not in res.out
+    if tail == UNSALTED_TAIL:
+        assert "Review list" not in res.out
+
+
+def test_a_key_close_failure_before_any_salt_says_the_next_run_is_the_first_draw(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The safety net: an exit 2 leaves the empty key file open; its close failing is exit 5
+    with no salt made."""
+    w = world()
+    w.tamper["plan"] = b"{}"
+    res = run(w, monkeypatch, check=False, key_cls=_broken("close"))
+    assert res.code == 5, res.out
+    assert res.out.endswith(D.KEY_NOT_WRITTEN + "\n" + UNSALTED_TAIL)
+    assert "part T1: 1 failure(s)" in res.out
+
+
+@pytest.mark.parametrize("where", ["draw", "key_text"])
+def test_an_unexpected_error_names_its_class_only(
+    monkeypatch: pytest.MonkeyPatch, where: str
+) -> None:
+    """Finding 5: no traceback, no exit 1, no message text; exit 4 before any salt, exit 5
+    and DO NOT RERUN after one."""
+    w = world()
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("LEAK-SECRET-MESSAGE")
+
+    monkeypatch.setattr(D, where, boom)
+    res = run(w, monkeypatch)  # the output file holds stdout byte for byte
+    line = D.UNEXPECTED.format(cls="RuntimeError") + "\n"
+    if where == "draw":  # before the salts
+        assert res.code == 4 and res.out.endswith(line + UNSALTED_TAIL), res.out
+    else:  # after the salts
+        assert res.code == 5 and res.out.endswith(line + SALTED_TAIL), res.out
+    assert "LEAK" not in res.out and "Review list" not in res.out
+    assert res.key.closed_text == "" and res.audit.closed_text == ""
+
+
+def test_a_run_without_exactly_five_rows_stops_the_draw(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Finding 6: the order check holds the run record's counts.rows, not the rows fetched
+    afterwards from /grades; a short run stops the draw, counts only."""
+    w = world()
+    rid = w.key_id("click", 2, 1)
+    gone = w.grades[rid].pop()
+    res = run(w, monkeypatch)
+    assert res.code == 4, res.out
+    assert res.out.endswith(D.ROW_COUNT_BAD.format(per=5, n=1) + "\n")
+    assert rid not in res.out and rid[:8] not in res.out and gone["task_id"] not in res.out
+    assert "Review list" not in res.out and res.key.closed_text == ""
+
+
+def test_an_attempt_2_patch_from_step_3_is_in_the_key_and_not_in_the_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finding 7: one cobra commit is clean under both S1 runs and no other cobra S1 row is
+    clean, so step 3 draws attempt 2 of it."""
+    w = world()
+    s1 = sorted(w.s1_of("cobra", 1), key=lambda i: w.runs[i]["created"])
+    commit = w.grades[s1[0]][0]["task_id"]
+    for repo, b in W.BATCH_KEYS:
+        if repo == "cobra":
+            for rid in w.s1_of(repo, b):
+                for g in w.grades[rid]:
+                    g["clean"] = rid in s1 and g["task_id"] == commit
+    d = expected_draw(w)
+    got = [(p.commit, p.attempt, p.step) for p in d.cells[("cobra", "S1")].patches]
+    assert got[-1] == (commit, 2, 3) and len(got) == 2
+    res = run(w, monkeypatch)
+    assert res.code == 0, res.out
+    lines = [ln for ln in res.key.closed_text.splitlines() if f"  cobra  S1  {commit}  " in ln]
+    assert len(lines) == 2
+    assert any(f"attempt 2  run {s1[1]}  step 3  " in ln for ln in lines)
+    # the output lists the commit once per drawn patch (both S1 attempts, and A0's if drawn),
+    # each under its own label, and nothing more of it
+    listed = [ln for ln in res.out.splitlines() if commit in ln]
+    n = sum(1 for p in d.ordered["cobra"] if p.commit == commit)
+    assert n >= 2 and len(listed) == n and all(re.fullmatch(r"  cobra-\d\d  cobra  [0-9a-f]{40}", ln)
+                                    for ln in listed)  # fmt: skip
+    assert "attempt" not in res.out and "step 3" not in res.out
+    assert s1[1] not in res.out and s1[1][:8] not in res.out
 
 
 def test_no_figure_of_the_primary_read_is_computed() -> None:
@@ -830,6 +1036,20 @@ def test_docstring_matches_the_labels_and_records_the_rulings() -> None:
     assert "signed by the methodologist on 2026-11-12" in doc
     assert "docs/reviews/2026-11-10-wave-4-registration/wave-record-notes.md" in doc
     assert "Check in this sequence" not in (ROOT / "scripts" / "wave4_review_draw.py").read_text()
+
+
+def test_the_docstrings_state_the_residual_b3_leak_and_no_stronger_claim() -> None:
+    """Findings 3 and 4: the script adds no arm information, but B3's public hash (which
+    includes the arm) still lets a reader guess arms and the audit set better than chance."""
+    src = (ROOT / "scripts" / "wave4_review_draw.py").read_text()
+    assert "nobody holding it can recompute anything" not in src
+    for text in (D.__doc__ or "", D.audit_text.__doc__ or ""):
+        flat = " ".join(text.split())
+        assert "adds no arm information" in flat
+        assert "public and includes the arm" in flat
+        assert "guess arms better than chance" in flat
+        assert "recorded in the wave record" in flat and "without changing B3" in flat
+    assert "guess the audit set better than chance" in " ".join((D.__doc__ or "").split())
 
 
 def test_a_read_module_loaded_from_elsewhere_is_refused(

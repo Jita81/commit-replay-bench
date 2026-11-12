@@ -33,8 +33,10 @@ order check must pass again before any row is read; on a failure this script pri
 Clean for the draw (ruling Q4): a row is clean only when its ``clean`` field is ``true`` (A3:
 "Clean is read from the row's own field ... Nobody re-grades a row") AND it carries no error. A
 null or empty-string ``error`` means no error; any other value is an error. A row whose
-``error`` field is absent altogether stops the draw (exit 4, counts only). A missing row is not
-clean. Rows whose ``clean`` is true but which carry an error are not drawn; the key file counts
+``error`` field is absent altogether stops the draw (exit 4, counts only). A run that did not
+return exactly its five rows (``ROWS_PER_RUN``, test (a)'s ``counts.rows``) stops the draw
+(exit 4, counts only): the order check holds the run record's count, not the rows fetched
+after it. Rows whose ``clean`` is true but which carry an error are not drawn; the key file counts
 them per repository and arm and in total, and the blinded output prints only the wave-wide
 total.
 
@@ -43,6 +45,13 @@ the reviewer's list come from a secret salt (``sha256("crb.wave4.reviewer|" + sa
 "|" + A + "|" + commit + "|" + attempt)``, ascending), never from the public audit hash of B3: a
 list in B3 order would let anyone hash the four (arm, attempt) candidates of each listed commit
 and read most arms off the label order. B3's audit order is kept exactly, in the key file only.
+
+What the outputs still let a reader guess. The script itself adds no arm information: the
+labels and the audit file's order are salted. A residual leak remains from the registered B3
+hash, which is public and includes the arm: membership of Paul's set, read with the commits,
+lets a reader guess arms better than chance, and the filed list lets a reader guess the audit
+set better than chance. This is recorded in the wave record and cannot be removed without
+changing B3.
 
 Paul's ten (B3 item 1, R8): the first five of each repository in the audit order, computed
 exactly as registered. B3 item 1 orders "reviewed patches"; this script orders the drawn
@@ -64,8 +73,11 @@ for the reviewer and for filing): one line per patch with its label, repository 
 only, in label order; the sha256 of that list's own lines (B2 item 4: "The drawn list and its
 sha256 are filed"); the sha256 of the key file and of the audit file; the wave-wide total of
 clean rows that carry an error; the totals per repository. stdout is ``--output`` byte for byte
-(the read's ``Out``: each line is written and flushed to the file before it is printed).
-Nothing that names an arm, an attempt, a run id or the audit set is ever printed.
+(the read's ``Out``: each line is written and flushed to the file before it is printed),
+except the exit-5 lines, which go to stdout alone. The key and audit files are written,
+flushed, fsynced and closed, and their sha256 taken, before the first line of the list is
+printed, so a failure on either shows the reviewer nothing. Nothing that names an arm, an
+attempt, a run id or the audit set is ever printed.
 
 B2 item 3's per-(repository, arm) step counts ("The report prints, for each repository and arm,
 how many patches each of the three steps gave") are held in the key file (ruling Q3). "The
@@ -77,9 +89,14 @@ Exit codes: 0 the draw was made; 1 not ready (a recorded constant, an argument o
 file is not as expected, an output file exists, or a module other than ``READ_PATH`` is loaded
 as the read), no request made; 2 the order check failed
 (counts only); 4 the draw was not made (a row request failed, or the rows are not as the run
-records state: the read's added integrity stop, or a row has no ``error`` field (ruling Q4);
-counts only); 5 the ``--output``,
-``--key-out`` or ``--audit-out`` file could not be written or closed after it was opened.
+records state: the read's added integrity stop, a run without exactly five rows, or a row
+with no ``error`` field (ruling Q4); counts only; or an unexpected error before any salt was
+made, named by its class only); 5 the ``--output``, ``--key-out`` or ``--audit-out`` file
+could not be written or closed after it was opened, or an unexpected error came after a salt
+was made. Every exit 5, and the exit 4 on an unexpected error, ends with one fixed line:
+before any salt, ``NO_SALT`` (a later run is the first draw); after one, ``DO_NOT_RERUN`` (a
+key file may exist that no filed output binds; a second run would make different labels;
+escalate to the delivery manager).
 
 Navigation
 ----------
@@ -95,7 +112,7 @@ What it does: Runs the read's order check again (T1-T5, (a)-(h), section 4); on 
 How:          Standard library only. The rule itself is the pure ``draw`` over plain rows
               (repository, commit, arm, attempt, clean). All I/O goes through injected
               callables (``read_file``, ``open_getter``, ``open_output``, ``open_key``,
-              ``open_audit``, ``path_exists``, ``make_salt``); the getter is the read's
+              ``open_audit``, ``path_exists``, ``make_salt``, ``sync``); the getter is the read's
               (urllib, no redirect, no retry).
 Layer:        tooling — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
@@ -175,9 +192,37 @@ ORDER_FAIL_FOOTER = (
     "No row was read and no draw is made. The read prints the order check's failures in "
     "full; this script prints counts only."
 )
-OUTPUT_NOT_WRITTEN = "output file could not be written (--output); the filed output is incomplete"
-KEY_NOT_WRITTEN = "key file could not be written (--key-out); no draw is filed"
-AUDIT_NOT_WRITTEN = "audit file could not be written (--audit-out); no draw is filed"
+#: The last line of every exit 5 (and of an unexpected exit 4) before any salt was made.
+NO_SALT = "no salt was made; a later run is the first draw"
+#: The last line of every exit after a salt was made.
+DO_NOT_RERUN = (
+    "salts were made; a key file may exist at --key-out that no filed output binds; "
+    "DO NOT RERUN; escalate to the delivery manager; a second run would make different labels"
+)
+#: Exit 5 on the ``--output`` file, by how far the list had got.
+OUTPUT_NOT_WRITTEN = "output file could not be written or closed (--output); no list was printed"
+OUTPUT_PART_OF_LIST = (
+    "output file could not be written (--output); the output file and stdout hold only part "
+    "of the list"
+)
+OUTPUT_NOT_CLOSED = (
+    "output file could not be closed (--output); the output file may be incomplete; stdout "
+    "holds the full list"
+)
+#: Exit 5 on the key or audit file; both are closed before any line of the list is printed.
+KEY_NOT_WRITTEN = (
+    "key file could not be written, synced or closed (--key-out); no line of the list was printed"
+)
+AUDIT_NOT_WRITTEN = (
+    "audit file could not be written, synced or closed (--audit-out); no line of the list was "
+    "printed"
+)
+#: An exception nobody expected: its class only, no message text, no row data.
+UNEXPECTED = "draw stopped: unexpected error ({cls})"
+ROW_COUNT_BAD = "draw not made: runs that did not return exactly {per} rows: {n}"
+#: Test (a) of the read holds each standing run record's ``counts.rows`` to 5 (a literal
+#: there, no named constant); the rows fetched afterwards are held to the same number here.
+ROWS_PER_RUN = 5
 STEP_COUNTS_NOTE = (
     "B2 item 3 counts by repository and arm: in the key file; the wave report prints them after "
     "the review, from the key file bound by its sha256 on this list."
@@ -470,11 +515,14 @@ def key_text(d: Draw, lab: Labels, run_of: Mapping[tuple[str, str, str, int], st
 def audit_text(d: Draw, lab: Labels, salt: str, file_id: str) -> str:
     """Paul's audit file (NOT for the reviewer; ruling Q2): his ten patches as reviewer label,
     repository and commit, in the salted order of ``audit_file_order``. It holds no B3 order or
-    position, no arm, attempt, run id or step, and not the salt (key file only), so nobody
-    holding it can recompute anything (R9). ``file_id`` is a fresh random line that orders
-    nothing: without it the file would hold no secret, and its sha256 on the filed list could
-    be matched by trying every audit set and order, which would show which patches Paul
-    checks."""
+    position, no arm, attempt, run id or step, and not the salt (key file only), so the file
+    itself adds no arm information (R9). A residual leak remains from the registered B3 hash,
+    which is public and includes the arm: membership of this set, read with the commits, lets
+    a reader guess arms better than chance; this is recorded in the wave record and cannot be
+    removed without changing B3. ``file_id`` is a fresh random line that orders nothing:
+    without it the file would hold no secret, and its sha256 on the filed list could be
+    matched by trying every audit set and order, which would show which patches Paul checks
+    outright."""
     if not file_id:
         raise ValueError("the audit-file id is empty")
     lines = [
@@ -613,6 +661,23 @@ class OutputFileError(Exception):
     the fixed texts above; no path, no value."""
 
 
+@dataclass
+class _State:
+    """How far the run got, so every exit 4 or 5 says what is true of it."""
+
+    salted: bool = False  # a salt was made: a later run would make different labels
+    listing: bool = False  # the first line of the blinded list is being printed
+    listed: bool = False  # every line of the blinded list was printed
+
+    def last_line(self) -> str:
+        return DO_NOT_RERUN if self.salted else NO_SALT
+
+    def output_message(self) -> str:
+        if self.listed:
+            return OUTPUT_NOT_CLOSED
+        return OUTPUT_PART_OF_LIST if self.listing else OUTPUT_NOT_WRITTEN
+
+
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     ap = R._Parser(prog=SCRIPT_NAME, description="Wave 4 review draw (Amendment 3 Part B).")
     ap.add_argument("--poster-dir", required=True, help="folder holding the poster's files")
@@ -640,6 +705,40 @@ def _make_salt() -> str:
     return secrets.token_hex(32)
 
 
+def _fsync(f: Any) -> None:
+    """The key or audit file's bytes to disk before it is closed."""
+    os.fsync(f.fileno())
+
+
+def _close_left(files: dict[str, Any]) -> None:
+    """Close a key or audit file still open (an exit before the draw wrote it); a failure is
+    exit 5 with that file's fixed text. After the list is printed none is left open."""
+    for name, msg in (("key", KEY_NOT_WRITTEN), ("audit", AUDIT_NOT_WRITTEN)):
+        f = files.pop(name, None)
+        if f is not None:
+            try:
+                f.close()
+            except OSError:
+                raise OutputFileError(msg) from None
+
+
+def _abandon(out: Any, files: dict[str, Any]) -> None:
+    """The safety net: close whatever is still open, silently (it never prints)."""
+    with contextlib.suppress(R.OutputFileError):
+        out.close()
+    for f in files.values():
+        with contextlib.suppress(OSError):
+            f.close()
+    files.clear()
+
+
+def _emit(out: Any, *lines: str) -> None:
+    """Exit-5 lines, to stdout alone (the output file may be what failed)."""
+    for ln in lines:
+        with contextlib.suppress(OSError):
+            out.stream_only(ln)
+
+
 def print_order_failure(out: Any, failures: Sequence[Any],
                         not_evaluated: Sequence[tuple[str, str]]) -> None:  # fmt: skip
     """Counts only: the parts that failed and how many failures each, the parts not
@@ -665,6 +764,7 @@ def main(
     open_audit: Callable[[str], Any] = _open_new,
     path_exists: Callable[[str], bool] = os.path.lexists,
     make_salt: Callable[[], str] = _make_salt,
+    sync: Callable[[Any], None] = _fsync,
     stdout: Any = None,
     recorded: Any = None,
     self_bytes: bytes | None = None,
@@ -672,20 +772,41 @@ def main(
 ) -> int:
     out = R.Out(stdout if stdout is not None else sys.stdout)
     files: dict[str, Any] = {}
+    state = _State()
+
+    def salt() -> str:
+        state.salted = True  # before the call: from here a rerun would draw other labels
+        return make_salt()
+
     try:
-        code = _main(argv, out, files, read_file=read_file, open_getter=open_getter,
-                     open_output=open_output, open_key=open_key, open_audit=open_audit,
-                     path_exists=path_exists, make_salt=make_salt, recorded=recorded,
-                     self_bytes=self_bytes, read_bytes=read_bytes)  # fmt: skip
+        unexpected: str | None = None
+        try:
+            code = _main(argv, out, files, state, read_file=read_file,
+                         open_getter=open_getter, open_output=open_output, open_key=open_key,
+                         open_audit=open_audit, path_exists=path_exists, make_salt=salt,
+                         sync=sync, recorded=recorded, self_bytes=self_bytes,
+                         read_bytes=read_bytes)  # fmt: skip
+        except (R.OutputFileError, OutputFileError):
+            raise
+        except Exception as exc:  # no traceback, no message text, no row data: the class only
+            unexpected = type(exc).__name__
+            code = 5 if state.salted else 4
+        _close_left(files)
+        if unexpected is not None:
+            with contextlib.suppress(OSError):  # a broken stdout: nothing more can be shown
+                out.line(UNEXPECTED.format(cls=unexpected))
+                out.line(state.last_line())
         out.close()
-    except (R.OutputFileError, OutputFileError) as exc:
-        with contextlib.suppress(R.OutputFileError):
-            out.close()
-        for f in files.values():
-            with contextlib.suppress(OSError):
-                f.close()
-        out.stream_only(str(exc) if isinstance(exc, OutputFileError) else OUTPUT_NOT_WRITTEN)
+    except R.OutputFileError:
+        _abandon(out, files)
+        _emit(out, state.output_message(), state.last_line())
         return 5
+    except OutputFileError as exc:
+        _abandon(out, files)
+        _emit(out, str(exc), state.last_line())
+        return 5
+    finally:
+        _abandon(out, files)
     return code
 
 
@@ -693,6 +814,7 @@ def _main(
     argv: Sequence[str] | None,
     out: Any,
     files: dict[str, Any],
+    state: _State,
     *,
     read_file: Callable[[str], bytes],
     open_getter: Any,
@@ -701,6 +823,7 @@ def _main(
     open_audit: Callable[[str], Any],
     path_exists: Callable[[str], bool],
     make_salt: Callable[[], str],
+    sync: Callable[[Any], None],
     recorded: Any,
     self_bytes: bytes | None,
     read_bytes: bytes | None,
@@ -745,25 +868,17 @@ def _main(
     except R.NotReadyError as exc:
         out.line(f"not ready: {exc}")
         return 1
-    try:
-        return _draw(args, out, files, rec, read_file=read_file, open_getter=open_getter,
-                     make_salt=make_salt, username=username, password=password,
-                     self_sha=hashlib.sha256(own).hexdigest(),
-                     read_sha=hashlib.sha256(read_src).hexdigest())  # fmt: skip
-    finally:
-        for name, msg in (("key", KEY_NOT_WRITTEN), ("audit", AUDIT_NOT_WRITTEN)):
-            f = files.pop(name, None)
-            if f is not None:
-                try:
-                    f.close()
-                except OSError:
-                    raise OutputFileError(msg) from None
+    # A key or audit file left open (any exit before the draw wrote it) is closed by ``main``.
+    return _draw(args, out, files, state, rec, read_file=read_file, open_getter=open_getter,
+                 make_salt=make_salt, sync=sync, username=username, password=password,
+                 self_sha=hashlib.sha256(own).hexdigest(),
+                 read_sha=hashlib.sha256(read_src).hexdigest())  # fmt: skip
 
 
 def _draw(
-    args: argparse.Namespace, out: Any, files: Mapping[str, Any], rec: Any, *,
+    args: argparse.Namespace, out: Any, files: dict[str, Any], state: _State, rec: Any, *,
     read_file: Callable[[str], bytes], open_getter: Any, make_salt: Callable[[], str],
-    username: str, password: str, self_sha: str, read_sha: str,
+    sync: Callable[[Any], None], username: str, password: str, self_sha: str, read_sha: str,
 ) -> int:  # fmt: skip
     # --- T1: the four files, fixed by hash (as the read) ---
     paths = {r: os.path.join(args.poster_dir, str(rec.file_names[r])) for r in R.FILE_ROLES}
@@ -845,6 +960,11 @@ def _draw(
                  f"{bad_set}")  # fmt: skip
         out.line(f"rows with a non-boolean clean: {bad_clean}")
         return 4
+    # Test (a) held each run record's counts.rows to 5; these rows came from another request.
+    off_count = sum(1 for r in chk.standing if len(rows[r]) != ROWS_PER_RUN)
+    if off_count:
+        out.line(ROW_COUNT_BAD.format(per=ROWS_PER_RUN, n=off_count))
+        return 4
     no_error_field = sum(1 for r in chk.standing for x in rows[r] if not has_error_field(x))
     if no_error_field:
         out.line(NO_ERROR_FIELD.format(n=no_error_field))
@@ -857,7 +977,8 @@ def _draw(
     audit_salt = make_salt()
     audit_file_id = make_salt()
 
-    # --- the key, then Paul's audit list (each written, flushed, hashed), then the list ---
+    # --- the key, then Paul's audit list (each written, flushed, fsynced, closed and hashed);
+    # only then the list, so a failure on either shows nothing of the list ---
     header = [
         f"{SCRIPT_NAME} sha256 {self_sha}",
         f"{READ_NAME} sha256 {read_sha}",
@@ -869,14 +990,22 @@ def _draw(
              ("audit", audit_text(d, lab, audit_salt, audit_file_id), AUDIT_NOT_WRITTEN))  # fmt: skip
     sha: dict[str, str] = {}
     for name, text, msg in texts:
+        f = files.pop(name)  # closed here, never again by ``main``
         try:
-            files[name].write(text)
-            files[name].flush()
+            f.write(text)
+            f.flush()
+            sync(f)
+            f.close()
         except OSError:
+            with contextlib.suppress(OSError):
+                f.close()
             raise OutputFileError(msg) from None
         sha[name] = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    for ln in blinded_lines(d, lab, sha["key"], sha["audit"], sum(with_error.values())):
+    lines = blinded_lines(d, lab, sha["key"], sha["audit"], sum(with_error.values()))
+    state.listing = True
+    for ln in lines:
         out.line(ln)
+    state.listed = True
     return 0
 
 

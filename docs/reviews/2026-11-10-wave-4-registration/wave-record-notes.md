@@ -543,6 +543,22 @@ the draw.
   the change is recorded here.
   **[hypothesis — the seat's note on B3 item 1, 2026-11-12]**
 
+- **A leak that stays, from the registered B3 hash.** An independent check of the script
+  on made-up tables found no arm information that the script itself adds. Two leaks remain
+  that no presentation can remove, because B3's hash is public and takes the arm as an
+  input. First, which patches are in Paul's set tells a reader something about their arms:
+  guessing each audited patch's arm as the arm of its smaller audit hash was right for
+  3170 of 4000 patches, against 2000 by chance.
+  **[measured — n = 4000 audited patches in 400 random made-up tables, method: the arm of the smallest-hash candidate compared with the drawn arm, by one verifying agent on 2026-11-12; apparatus n/a, made-up rows, no wave data]**
+  Second, a reader of the filed list can guess which patches Paul checks: ranking labels by
+  their commit's smallest audit hash found Paul's patches at a rate of 0.478, against 0.250
+  by chance.
+  **[measured — n = 400 random made-up tables, method: precision of the ranked guess against the drawn audit set, by the same agent on 2026-11-12; apparatus n/a, made-up rows, no wave data]**
+  R9 therefore holds in what Paul and the reviewer are told, and not against a reader who
+  works the public hash. The wave report says so beside the agreement counts. The next
+  registration should salt the audit order.
+  **[hypothesis — the delivery manager's reading of the verifier's result, recorded before any draw exists; not put to the seat]**
+
 ### Deviation log entry, entered before any draw exists
 
 - 2026-11-12, the methodologist's seat and the delivery manager. **Paul's audit file does
