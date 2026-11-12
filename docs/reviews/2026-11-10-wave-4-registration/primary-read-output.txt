@@ -1,0 +1,118 @@
+wave4_primary_read sha256 8b9bb6afe1a1d9982e3c6f25d3400939ea0b9badf4de8d9e7655464510727a25
+campaign: cmp_88cf9e875edba15371e6d3f7
+input plan: /Users/paulglover/wave4/wave-batches.json sha256 ae705b68e03e1ff58972d34cdb81f5e85095ca88449e23a99a9c5276702fb45a
+input pre_s3: /Users/paulglover/wave4/wave-batches.before-s3.json sha256 a3c592cd9e7a19210888b2f9bd6d3b8c6e05d6ce76169e996a71d36d7b2970fd
+input click_out: /Users/paulglover/wave4/click-out.json sha256 27b2747e044048c6766186a1689cc5749178c46a8dce3c78dacd6ed09a4c4170
+input cobra_out: /Users/paulglover/wave4/cobra-out.json sha256 59d7eefc3361caa5f78fd18bc8b66f5e0e2cc5f36a1e49915ea79033b506e0e1
+filing time: created
+end time: finished
+status: status
+row count: counts.rows
+commits: task_ids
+kind: kind
+L = editblock:gpt-oss-120b (source: DL-378, docs/DECISION-LOG.md line 175, and docs/OPERATOR.md line 1432, at 7bb03d6c)
+file plan: /Users/paulglover/wave4/wave-batches.json sha256 ae705b68e03e1ff58972d34cdb81f5e85095ca88449e23a99a9c5276702fb45a
+file pre_s3: /Users/paulglover/wave4/wave-batches.before-s3.json sha256 a3c592cd9e7a19210888b2f9bd6d3b8c6e05d6ce76169e996a71d36d7b2970fd
+file click_out: /Users/paulglover/wave4/click-out.json sha256 27b2747e044048c6766186a1689cc5749178c46a8dce3c78dacd6ed09a4c4170
+file cobra_out: /Users/paulglover/wave4/cobra-out.json sha256 59d7eefc3361caa5f78fd18bc8b66f5e0e2cc5f36a1e49915ea79033b506e0e1
+Taken on trust
+1. That the poster sent the plan's `body` for place `p` as its `p`th POST of the batch, and sent it unchanged. This rests on the poster's source text (`wave4_post.py` line 150, sha256 `b30ca68e...50b105`) and on the delivery manager's statement that the plan file was not rewritten by the poster.
+2. That the four files are as they were at filing time. The hashes were first recorded on 2026-11-12, after the wave. The script cannot use file times.
+3. Whether any tie was made by inference. No kept file says.
+4. That `refile.py` filed batch 3 again from the same plan entries.
+5. That the poster source text of item 1, at that sha256, is the text that ran for every batch. The deviation log (annex, D4) records a poster crash before batch 3. No kept file shows which text ran after it. T7 rests on the same text.
+Not compared (not served): env_stop, outage_stop, learning.
+Order check passed.
+For all 49 runs the product's `s1` flag agreed with the `arm` field of the body.
+Standing ids: from the slot-free run ledger (built from the poster's out files); id-list sha256 b79c3cbedaf775238e0f74ddb506a7ebb86858d9b20845ca97a65dd6a7bedf3d; T4 is a consistency test.
+test author provider shown as cerebras: 24 of 24 standing S1 runs
+Rows read: 240 of 240 (48 runs x 5); rows missing: 0 (each counted as a miss: row rule, part 6 item 5, A3); first filing 98fe708c: set aside unread (0 rows, A2 item 3).
+Batches (filing order):
+  click batch 1: n = 5; S = -7/2 = -3.5000; without usable test 10/10; author-hit yes
+  click batch 2: n = 5; S = -5/2 = -2.5000; without usable test 10/10; author-hit yes
+  click batch 3: n = 5; S = -5/2 = -2.5000; without usable test 10/10; author-hit yes
+  click batch 4: n = 5; S = 0 = 0.0000; without usable test 10/10; author-hit yes
+  click batch 5: n = 5; S = -3/2 = -1.5000; without usable test 10/10; author-hit yes
+  click batch 6: n = 5; S = -5/2 = -2.5000; without usable test 10/10; author-hit yes
+  cobra batch 1: n = 5; S = -1 = -1.0000; without usable test 10/10; author-hit yes
+  cobra batch 2: n = 5; S = -7/2 = -3.5000; without usable test 10/10; author-hit yes
+  cobra batch 3: n = 5; S = -5/2 = -2.5000; without usable test 10/10; author-hit yes
+  cobra batch 4: n = 5; S = -3 = -3.0000; without usable test 10/10; author-hit yes
+  cobra batch 5: n = 5; S = -5/2 = -2.5000; without usable test 10/10; author-hit yes
+  cobra batch 6: n = 5; S = -5/2 = -2.5000; without usable test 10/10; author-hit yes
+Primary (12 batches):
+  units B = 12; commits N = 60
+  T = -55/2; d = -45.8333 points
+  m = 4 of 2^12 = 4096; p = 4/4096 = 0.0009765625; below 0.05: yes
+  interval: -58.6725 to -32.9942 points (t = 2.2010, df 11)
+  upper end below 15 points: yes
+Blocks result:
+  units: click-1+click-2+click-3+click-4+click-5+click-6, cobra-1+cobra-2+cobra-3+cobra-4+cobra-5+cobra-6
+  units B = 2; commits N = 60
+  T = -55/2; d = -45.8333 points
+  m = 2 of 2^2 = 4; p = 2/4 = 0.5; below 0.05: no
+  interval: -98.7762 to 7.1096 points (t = 12.7063, df 1)
+  upper end below 15 points: yes
+Left-out result:
+  cannot be calculated
+batches with a non-zero summed difference: 11 of 12
+usable tests: 0 of 120 (nine in ten = 108)
+DECISION: Inconclusive (the blocks result falls on the other side of 0.05)
+A rejection says that the arms differ; the direction and size are read from the estimate of item 2.
+No error rate is quoted for the call.
+Under option B the claim is about the average over the listed commits of both repositories together; nothing is claimed for either repository alone.
+This interval is approximate: no interval of this form has guaranteed coverage for every distribution of batch sums, and it is reported as a description, not as a second test.
+Stop (b), as recorded in Amendment 3 Part D (not computed by this script):
+  strict reading: 0
+  git stash only (the count the methodologist signs): 2
+  every refused read-only git command: 4
+  A reader who holds the widest reading should treat every Wave 4 result as coming from a wave that passed its stop (b) on the operator's decision, made after 110 pooled rows were seen.
+Standing run ids (sorted by id; no place, no arm):
+  011c42143bfc42f7b10216b39c54297e
+  0599ec33db3e4426bb33e9dfb8e4d3bc
+  05d4a664263948f9a0152f27ee1e70c2
+  13d2ac417bde44269733dd1aec28a476
+  220e17cd019b4def82ed1415edf9173f
+  22e35037a101456cb05b107e6726a8d3
+  2a8a000ccf494b9ba4b8a896dc9cee31
+  2ad5b7fd77524ac29fc1797ac5c5b436
+  31377ac93e1c48edb482c729ecd1962c
+  3ed31753022c49c78d941ccdad093dce
+  3f17a9b8fd8f4c88992d6d455e6bc8e3
+  3f67a4d0de6344ab8a3dd84015db86ec
+  461a453c518747859fe4c40a88ddc140
+  52f8630ba3ae469583dabf2f43287af7
+  54861a383be9468dac5bd11a38feb5ae
+  5757bed0f75442c4bc4d824e1b23bbb2
+  5a6bd92c96dd4ce3b8c15c92f3651592
+  5a8e8e6ca713460d9316ecafbd48c954
+  5fd4dc4053224b86a3c27103359f3575
+  688a8a4fb25d4ff79ccfbe8480456001
+  6e248c840587422b8058a1e35ee755c2
+  76df3cb7e5374fe38ea40e73afc7d31b
+  78b4d435c1ef4437b2e4dcfd333840d6
+  7f3ee062cf5a4fd4a96c0936de69ad1e
+  8a258976d0d341baaf3196b3d27545aa
+  8f376716f5644484ab07e5ba25e23b7a
+  a2373f8815c843548c5e4529334866b0
+  a774c29e33ec4b23bf1776309c5ee534
+  abcf240a01f64c4c85b49a4c9feb2bb1
+  ae14ae16550c47d29dee66954b9c7c42
+  b49c2e6a85914cc2982d888bf30a2318
+  b560dc5dd5d5471594da65c0e9d4dae2
+  b93cb250772b4ff094636a02310c940d
+  c01474469e7c44bc96d0b8ccb0c49de4
+  c98ee5ba4b904b90a56a18c806dba887
+  ccb5788dd1f7450bbbb6c6a105f814d7
+  d768fea1d0954ed48def2cba0861a216
+  dc085b5a74d04e8ea7f1d860e3a131e8
+  df6fba6c7d7f4b4b88b838cbd464736f
+  e29c211744e74c84a7aa0e6867edf18f
+  e2b449d55f424ed7bb22003e0b4f4a6e
+  e8b9bf2b8f0d477992b6fb41af118bea
+  e8e9638912e1460cacf225c4f6719a8c
+  e9fb1e26078a4e48a4aeddff721fd176
+  ed819b4e863749899c74924401ad1382
+  f24c842e94284f5e98912df45efd5fac
+  f2aaae197a4f40eb87b3d4ec2f48b323
+  ff18647e6afe42eb9e9af2c00d998c25

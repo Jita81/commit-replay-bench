@@ -302,3 +302,151 @@ Written before the primary is read and before any result by arm exists.
 - Part E item 2, the cost gate. It is Paul's to close in writing, as the registration
   says. Nothing in this section closes it.
   **[hypothesis — Part E item 2 of the registration on main]**
+
+## 2026-11-12 — Part E item 2 closed by Paul's word, before the read
+
+- Paul wrote to the delivery manager on 2026-11-12, before 12:52Z, in these words: "read
+  may go ahead on product dollars, unconfirmed". That is the second of the two things Part
+  E item 2 names. The gate is deferred, not passed: no Console figure or export exists, and
+  the product's figures are not confirmed against the provider's bill.
+  **[hypothesis — Paul's message in the session of 2026-11-12; the transcript is not in this repository]**
+- Every cost figure in the wave report carries the label "product dollars, unconfirmed", as
+  item 2 requires.
+  **[aspiration — a rule for the report, which is not yet written]**
+- The script is run once, from a checkout of main at
+  `07125be0ef710fd91af5a273ffaa1c002a21f5a3`, where `scripts/wave4_primary_read.py` has
+  sha256 `8b9bb6afe1a1d9982e3c6f25d3400939ea0b9badf4de8d9e7655464510727a25`, the value
+  recorded above for the merged script.
+  **[measured — n = 1 file, method: `shasum -a 256 scripts/wave4_primary_read.py` in a checkout at `07125be0ef710fd91af5a273ffaa1c002a21f5a3` by the delivery manager on 2026-11-12; apparatus n/a, a file hash, not a graded row]**
+- This entry was committed and pushed before the read script wrote its output. The commit
+  that holds it, `ad5ac9e3a429ebe2eb5deab269f3ad4145e2226f`, has committer time 12:53:03Z.
+  The delivery manager's checkout records its push at 12:53:05Z. The script's output file
+  was last written at 12:53:13Z. These are times on one machine's clock. They show the
+  order of the three events and nothing else.
+  **[measured — n = 3 times, method: `git log --format=%cI` for the commit, `git reflog show origin/docs/wave-4-primary-read --date=iso-strict` for the push, and `stat` of the script's `--output` file for the write, by the delivery manager on 2026-11-12; apparatus n/a, clock times, not graded rows]**
+
+## 2026-11-12 — The primary read: made once, filed unedited
+
+- The read script was run once, at 12:53Z on 2026-11-12, by the delivery manager in a
+  terminal tab, from a checkout whose only change against main
+  `07125be0ef710fd91af5a273ffaa1c002a21f5a3` is the entry above. It printed its own sha256,
+  `8b9bb6afe1a1d9982e3c6f25d3400939ea0b9badf4de8d9e7655464510727a25`, and ended with exit
+  code 0 (the read was made). No deviation file was written.
+  **[measured — n = 1 run of the script, method: `scripts/wave4_primary_read.py` with `--output`, its printed hash and exit code read from the terminal by the delivery manager on 2026-11-12, and a listing of the folder named by `--deviation-out` that shows no deviation file; apparatus n/a, a script run, not a graded row]**
+- There was no earlier run and there is no second one. This is the delivery manager's
+  statement. No record kept here can prove that a script was not run.
+  **[hypothesis — the delivery manager's statement of 2026-11-12; the script keeps no count of its runs]**
+- `primary-read-output.txt` is an artefact fixed by its hash. It carries no claim tags,
+  because adding one would change the file and break the hash. The tagged record of what
+  it says is the entry below, which gives n, method and apparatus. Any later document
+  that quotes a figure from the output tags it there.
+  **[hypothesis — a filing rule stated by the delivery manager for this one artefact]**
+- Its output is filed beside this record as `primary-read-output.txt`, copied byte for byte
+  from the file the script wrote. Its sha256 is
+  `0ffe99026cfefb0ef04ab43529b1ffecdf982dee9a01984889a410020d06dd53` and it has 118 lines.
+  Nothing in it is edited.
+  **[measured — n = 1 file, method: `shasum -a 256` of the script's `--output` file and of the copy filed here, equal, by the delivery manager on 2026-11-12; apparatus n/a, a file hash, not a graded row]**
+- What the output says, in its own figures. The order check passed. 240 of 240 rows were
+  read and none was missing. The difference is `S1` minus `A0`. Over 12 batches and 60
+  commits the summed difference is T = -55/2, which is d = -45.8333 points; p = 4/4096 =
+  0.0009765625; the interval is -58.6725 to -32.9942 points. The blocks result, on 2 units,
+  has p = 2/4 = 0.5. The left-out result cannot be calculated. Usable tests: 0 of 120. The
+  decision word the script printed is **Inconclusive** ("the blocks result falls on the
+  other side of 0.05").
+  **[measured — n = 240 blind rows of 48 runs in 12 batches over 60 commits of click and cobra, method: the one run of `scripts/wave4_primary_read.py` filed as `primary-read-output.txt`, sign-flip test over batches; builder and models as registered in part 2; apparatus 2.5]**
+- The output is not yet signed. The methodologist and the validity engineer sign it, or
+  say why they do not, in the next entry. Until then no seat states a finding from it.
+  **[aspiration — the two signatures are the next step and have not been given]**
+
+## 2026-11-12 — Signatures on the primary read
+
+Both seats read the filed copy in this repository and nothing else. Neither read the
+poster's folder, the product or a row.
+
+- **Methodologist: signs.** The seat signs the filed output (sha256
+  `0ffe99026cfefb0ef04ab43529b1ffecdf982dee9a01984889a410020d06dd53`) as the primary read,
+  with its decision word, Inconclusive. The seat re-did the arithmetic from the printed
+  batch sums: T = -55/2, d = -45.8333 points, m = 4 of 4096, the interval -58.6725 to
+  -32.9942, and the blocks result p = 2/4. Every figure agrees with the output.
+  **[measured — n = 12 printed batch sums, method: recomputation of the sum, the sign-flip count over all 4096 patterns and the interval of part 6 item 2 from the filed output, by the methodologist's seat on 2026-11-12; apparatus n/a, arithmetic on a filed file]**
+- **Validity engineer: signs.** The seat signs the same file, its decision word and its
+  primary figures, after the same recomputation. Inconclusive is the only finding of the
+  wave. The report may describe, and not state as a finding, that on the 60 listed commits
+  of both repositories together the `S1` arm as the product served it had fewer clean rows
+  than `A0`. The output says nothing about test-first as such.
+  **[measured — n = 12 printed batch sums, method: recomputation from the filed output by the validity engineer's seat on 2026-11-12; apparatus n/a, arithmetic on a filed file]**
+- **The decision word does not rest on the usable-test count.** Both seats say so. The
+  primary p is below 0.05 with `S1` behind. Cleared needs `S1` ahead. No 15-point effect
+  needs a p not below 0.05. Neither is reachable, so the word is Inconclusive for any
+  count. The output prints one ground, the blocks result. The seats name a second: the
+  left-out result cannot be calculated.
+  **[hypothesis — the two seats' reading of A9 of the registration, signed 2026-11-12]**
+- **Not signed by either seat: "usable tests: 0 of 120" as a measure of the test author.**
+  The script counts a row whose `error` field is null or absent as failing test (d) of
+  R12. The registered words are "does not begin with `authoring:`". If the product serves
+  a null `error` for a row with no error, every such `S1` row was counted as without a
+  usable test. The count, the 12 author-hit labels, the two-unit blocks result and the
+  left-out result would then come from the counting rule and not from the author. R12 item
+  5 names 0 of 120 as what a fault in the check would produce. The pilot read 5 of 6
+  **[measured — n = 6 pilot `S1` commits of 18 pilot builds, method: each row's labels, stop reason and failure kind read from `GET /api/v1/grades/<row>`, as the gate table of Amendment 2 in `docs/reviews/2026-11-10-wave-4-registration.md` records, apparatus 2.5]**. No
+  seat may call the figure the author's usable-test rate until the served shape of a
+  row's `error` field and of the event's `task` key has been checked against the served
+  code.
+  **[hypothesis — both seats' statements of 2026-11-12; the served shape is not yet checked]**
+- **Two misses, for the deviation log.** The spec's rule that a null `error` fails test
+  (d) was never ruled on in the methodologist's signed readings. The consistency figure
+  that would have shown the fault at once (clean `S1` rows counted without a usable test)
+  was taken out by the delivery manager before the script was committed.
+  **[hypothesis — the seats' account, 2026-11-12; the deviation log entry is not yet written]**
+- **With two units the blocks p can never be below 0.5.** A blocks result needs at least
+  six units before it can fall below 0.05. This is a property of the registered design.
+  The next registration should say so.
+  **[measured — n = 4 sign patterns, method: enumeration of the sign patterns of two units by the methodologist's seat on 2026-11-12; apparatus n/a, arithmetic]**
+- **Reserved to Paul in writing.** Whether a corrected count of usable tests may be
+  computed after filing and reported as description. The read is not run again without
+  that word. Whether more commits are worth their cost is also Paul's, as part 6 says.
+  **[hypothesis — the seats' reading of the read-once rule of the registration]**
+
+## 2026-11-12 — Why the output says "usable tests: 0 of 120"
+
+Paul asked for the cause. The entries below give it, each with its method. No agent read
+a row, a run, an event or the poster's folder.
+
+- **The 0 of 120 is a counting fault in the read script. It is not a measure of the test
+  author.** The product's event emitter takes the `task` key out of an event's payload and
+  stores it as the event's top-level `task_id` (`src/crb/observability/events.py` line 350).
+  `GET /runs/{id}/events/log` serves `task_id` at the top level and the rest as `payload`
+  (`src/crb/server/routes/runs.py` lines 298 to 302). The read script looks for the commit
+  in `payload["task"]` (`scripts/wave4_primary_read.py`, `keep_event`), as R12 item 2 of the
+  registration says. That key is never there, so test (b) of R12 fails for every attempt,
+  whatever the author did. `keep_event` reads the task of each
+  `builder.author_test.failed` event from the payload in the same way. In a run that holds
+  such an event the missing key also makes test (c) fail for every attempt of that run
+  (`usable_attempt`). A correction must mend both lookups.
+  **[measured — n = 3 source passages, method: `git show 7bb03d6c73c8c9e10cbc283049be2ce9740eb19e:<path>` for the two product files and a read of the script as merged, by four agents and then the delivery manager on 2026-11-12; apparatus n/a, a reading of code, not a graded row]**
+- **What follows from it.** The 12 "author-hit" labels, the blocks result on two units and
+  the left-out result that cannot be calculated all come from that count. The decision
+  word does not: the seats signed Inconclusive for any count.
+  **[hypothesis — the delivery manager's reading of the script and of the signatures above]**
+- **The null-`error` theory of the entry above is wrong.** The row's `error` field is a
+  string that defaults to empty (`src/crb/core/ledger.py` line 865,
+  `src/crb/server/schemas.py` line 1072), and an empty string passes test (d).
+  **[measured — n = 2 source lines, method: `git show` at `7bb03d6c73c8c9e10cbc283049be2ce9740eb19e` by one agent on 2026-11-12; apparatus n/a, a reading of code]**
+- **Why nothing caught it.** `docs/API.md` line 565 lists `task` among the payload keys of
+  these events. The script's test fixtures copied that shape. The name check of R12 item 5
+  looked at the key's name and not at where the product stores it. The provider check
+  passed on the same log because `provider` stays in the payload.
+  **[hypothesis — the agents' account of 2026-11-12, for the deviation log]**
+- **The author's real usable-test rate is not known.** The provider line shows only that in
+  each of the 24 `S1` runs at least one author call returned. Some authoring failures did
+  happen (five texts in click batches 1 and 2, recorded above), and a row whose authoring
+  fails skips the builder. How many of the 120 is not in the filed output.
+  **[hypothesis — the agents' reading of the served code; no row was read]**
+- **Still reserved to Paul.** A corrected count needs a second look at the product after
+  filing: the `S1` rows whose `error` begins `authoring:`, or the script with the one-line
+  mend. Neither is done without Paul's written word.
+  **[hypothesis — the read-once rule of the registration, as the seats read it]**
+- **When the read started.** The entry of Part E item 2 gives the time the output was last
+  written, which is the end of the read. The session's transcript logs the terminal call
+  that started the script at 12:53:13Z, after the push at 12:53:05Z.
+  **[hypothesis — one timestamp in the delivery manager's session transcript, which is not in this repository]**
