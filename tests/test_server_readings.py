@@ -253,10 +253,27 @@ def test_the_loop_on_and_off_are_two_arms_on_the_map_and_value(env: Env) -> None
     assert loop_on["context_arm"] == "S3+L" and loop_on["n"] == 6
     # the playbook digests are provenance: two of them, one cell
     assert loop_on["provenance"]["learn_playbook"] == ["p1", "p2"]
-    value = env.get(f"/value?repo={ALPHA}&checks=off").json()
+    value = env.get(f"/value?repo={ALPHA}&checks=off&posture={SEALED}").json()
     xs = [c for c in value["cells"] if (c["capability_class"], c["size"]) == ("bug.fix", "XS")]
     assert sorted((c["context_arm"], c["attempts"]) for c in xs) == [("S3", 4), ("S3+L", 6)]
     assert all(c["first_attempts"]["n"] == c["attempts"] for c in xs)
+
+
+def test_value_serves_only_the_readings_of_the_posture_class_it_reads(env: Env) -> None:
+    """ADR-0019 §8 (P-135): ``/value`` reads one posture class, so the reading outcomes it
+    serves are that class's, each naming it; a reading of another class is counted, never
+    served beside figures it did not read. The cell's budget is one budget across postures
+    and is served unchanged."""
+    reading = _proven(env)
+    sealed = env.get(f"/value?repo={ALPHA}&posture={SEALED}").json()
+    (served,) = sealed["readings"]
+    assert served["reading_id"] == reading["reading_id"]
+    assert served["posture_class"] == SEALED == sealed["posture_class"]
+    assert sealed["readings_other_posture"] == 0
+    host = env.get(f"/value?repo={ALPHA}&posture=local/inplace/host-env").json()
+    assert host["posture_class"] == "local/inplace/host-env"
+    assert (host["readings"], host["readings_other_posture"]) == ([], 1)
+    assert host["reading_budgets"] == sealed["reading_budgets"] != []
 
 
 def test_a_pooled_view_is_refused_for_every_axis(env: Env) -> None:

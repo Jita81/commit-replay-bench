@@ -31,6 +31,12 @@ reader applies K's rule (``statement_mergeable``) to correct them and count the 
 The three cobra patches the 2026-09-13 critical-friend review read are added from
 ``docs/reviews/2026-09-13-critical-friend.md`` §3 unless ``--no-critical-friend``.
 
+The scorecard reads ONE posture class (ADR-0019 §8: a filter, never a blend — P-135):
+``--posture <class>`` names it; by default (``all``) the one class the export holds is read
+and an export holding two is refused (exit 2, the classes named). A pipe-separated row and a
+JSONL row from before 2.3 recorded no posture (``""``); the export carries no run stamp to
+place it by, so narrow ``--apparatus`` to read those rows apart.
+
 Navigation
 ----------
 What it is:   The export reader for the value scorecard — turns an exported ledger and review
@@ -38,14 +44,14 @@ What it is:   The export reader for the value scorecard — turns an exported le
               JSON.
 What it does: Recomputes every row's failure kind with the product's rule (never the export's
               column), refuses an unknown error class, corrects the two flagged review records
-              and says how many it corrected, and renders every figure with its n, its method
-              and its apparatus.
+              and says how many it corrected, and renders every figure with its n, its method,
+              its apparatus and its one posture class (two are refused).
 How:          ``read_ledger`` (JSONL → ``GradeRow`` → ``value_row_from_grade``; PSV →
               ``ERRCLASS`` → ``derive_failure_kind``) + ``read_reviews`` → ``value_report`` →
               ``render_markdown`` / ``json.dumps``. Every percentage is formatted once, from
               the exact ``k / n`` and Wilson bounds — never from a rounded figure.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
-ADRs:         none
+ADRs:         docs/adr/0019-qualification-is-posture-relative.md (§8: one posture class)
 Works with:   src/crb/core/value.py (the report), src/crb/core/ledger.py (the failure rule),
               docs/reviews/2026-09-25-value-baseline.md (the page it regenerates),
               docs/reviews/2026-09-13-critical-friend.md (the three cobra verdicts)
@@ -72,10 +78,11 @@ from crb.core.value import (
     DEFAULT_USD_PER_GBP,
     DEFAULT_WINDOW,
     LOSS_KINDS,
+    POSTURE_ALL,
     REVIEWS_FROM_EXPORT,
+    PosturePoolingError,
     ReviewVerdict,
     ValueRow,
-    select_rows,
     value_report,
     value_row_from_grade,
 )
@@ -254,22 +261,31 @@ def render_markdown(
     corrected: int = 0,
     window: int = DEFAULT_WINDOW,
     usd_per_gbp: float = DEFAULT_USD_PER_GBP,
+    posture: str = POSTURE_ALL,
 ) -> str:
-    """The scorecard as the Markdown the baseline page carries."""
-    rep = value_report(
+    """The scorecard as the Markdown the baseline page carries (``PosturePoolingError`` when
+    ``posture`` is ``all`` and the rows span two classes)."""
+    report = value_report(
         rows,
         verdicts,
         apparatus=apparatus,
         window=window,
         usd_per_gbp=usd_per_gbp,
         reviews_source=REVIEWS_FROM_EXPORT,
-    ).to_dict()
-    # The report's own scope, never a re-derivation: its apparatus rule (`select_rows`) and the
-    # one checks arm its headline reads (ADR-0024 - never two), so every figure below counts
-    # the rows the served figures beside it count (P-407).
-    scoped = [r for r in select_rows(rows, apparatus=apparatus) if r.checks_arm == rep["checks"]]
-    app = f"apparatus {', '.join(rep['apparatus_versions']) or '—'}" + (
-        " (pooled)" if rep["pooled"] else ""
+        posture=posture,
+    )
+    rep = report.to_dict()
+    # The report's own scope, never a re-derivation: its apparatus rule, its one posture class
+    # (ADR-0019 §8) and the one checks arm its headline reads (ADR-0024 - never two), so every
+    # figure below counts the rows the served figures beside it count (P-407, P-135).
+    scoped = list(report.rows)
+    # an empty scope read no class at all ("—", as its apparatus); rows that recorded none
+    # read the one unrecorded class
+    posture_read = rep["posture_class"] or ("not recorded" if scoped else "—")
+    app = (
+        f"apparatus {', '.join(rep['apparatus_versions']) or '—'}"
+        + (" (pooled)" if rep["pooled"] else "")
+        + f"; posture {posture_read}"
     )
     ns, pr, pl = rep["north_star"], rep["precision"], rep["process_loss"]
     lc, rt, rates = rep["learning_curve"], rep["routing"], rep["rates"]
@@ -308,7 +324,7 @@ def render_markdown(
         f"| process loss (budget + protocol + harness + outage) | {pl['rows']} of {pl['all_rows']} rows ({_pct(_frac(pl['rows'], pl['all_rows']))}); {_cash('$', pl['usd'])} of {_cash('$', pl['all_usd'])} ({_pct(loss_share)}) = {_cash('£', pl['gbp'])} | n = {pl['all_rows']} rows; £ at {usd_per_gbp} USD per GBP (fixed) |",
         f"| outage by cause: your login / the provider / not recorded | {pl['outage_causes']['auth']} / {pl['outage_causes']['provider']} / {pl['outage_causes']['unrecorded']} | n = {pl['kinds']['outage']['rows']} outage rows; method: the cause each row pinned at write (apparatus 2.4 and later; a row below 2.4 is not recorded) |",
         f"| budget + protocol, share of valid failures | {_pct(_frac(bp, pl['valid_failures']))} | n = {pl['valid_failures']} non-clean valid rows; {method} |",
-        f"| reviewed clean patches judged mergeable | {_rate(pr['review'])} | n = {pr['review']['n']} reviews (by verdict: {', '.join(f'{k} {v}' for k, v in pr['review']['by_verdict'].items())}); {corrected} stored flag(s) corrected from the statement; reviews from the {rep['reviews_source']} file, not the live store |",
+        f"| reviewed clean patches judged mergeable | {_rate(pr['review'])} | n = {pr['review']['n']} reviews (by verdict: {', '.join(f'{k} {v}' for k, v in pr['review']['by_verdict'].items())}); {corrected} stored flag(s) corrected from the statement; {pr['review']['posture_unplaced']} exported review(s) placed in no single posture class, left out; reviews from the {rep['reviews_source']} file, not the live store |",
         f"| proxy: clean patches lint-clean with no API break | {_rate(pr['proxy'])}; {pr['proxy']['unknown']} unknown (belt 5 not recorded) | n = {pr['proxy']['n']} clean valid rows; method: the deterministic proxy, unknown counted as not working |",
         f"| **working rate, blind** (clean x precision) | {_pct(w[0] if w else None)} ({_pct(w[1] if w else None)}-{_pct(w[2] if w else None)}) | n = {ns['n_valid']} blind valid attempts on {ns['n_tasks']} tasks x n = {ns['precision']['n']} {ns['precision_basis']} verdicts; method: product of two rates and of their Wilson bounds — an estimate, and the range is not a 95% interval |",
         f"| **working changes per pound, blind** | {ns['per_pound'] if ns['per_pound'] is not None else '—'} per £ ({ns['per_pound_low']}-{ns['per_pound_high']}); ≈ {ns['working_estimate']} working of {ns['n_valid']} valid for {_cash('£', ns['spend_gbp'])}; about £{ns['pounds_per_working']} per working change (£{ns['pounds_per_working_low']}-£{ns['pounds_per_working_high']}) | n = {ns['n_attempts']} blind attempts (all spend counted), {ns['n_valid']} valid on {ns['n_tasks']} tasks ({ns['clean']} clean on {ns['clean_tasks']} tasks); £ at {usd_per_gbp} USD per GBP (fixed); range = product of two Wilson bounds, not a 95% interval |",
@@ -335,6 +351,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--ledger", type=Path, required=True)
     ap.add_argument("--reviews", type=Path, default=None)
     ap.add_argument("--apparatus", default="all", help="current | <version> | all (default all)")
+    ap.add_argument(
+        "--posture",
+        default=POSTURE_ALL,
+        help="<class> | all (default all: the one class the export holds; two are refused)",
+    )
     ap.add_argument("--window", type=int, default=DEFAULT_WINDOW)
     ap.add_argument("--usd-per-gbp", type=float, default=DEFAULT_USD_PER_GBP)
     ap.add_argument("--no-critical-friend", action="store_true")
@@ -342,28 +363,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = ap.parse_args(argv)
     rows = read_ledger(args.ledger)
     verdicts, corrected = read_reviews(args.reviews, critical_friend=not args.no_critical_friend)
-    if args.format == "json":
-        rep = value_report(
-            rows,
-            verdicts,
-            apparatus=args.apparatus,
-            window=args.window,
-            usd_per_gbp=args.usd_per_gbp,
-            reviews_source=REVIEWS_FROM_EXPORT,
-        ).to_dict()
-        rep["reviews_corrected"] = corrected
-        print(json.dumps(rep, indent=2, sort_keys=True))
-    else:
-        sys.stdout.write(
-            render_markdown(
+    try:
+        if args.format == "json":
+            rep = value_report(
                 rows,
                 verdicts,
                 apparatus=args.apparatus,
-                corrected=corrected,
                 window=args.window,
                 usd_per_gbp=args.usd_per_gbp,
+                reviews_source=REVIEWS_FROM_EXPORT,
+                posture=args.posture,
+            ).to_dict()
+            rep["reviews_corrected"] = corrected
+            print(json.dumps(rep, indent=2, sort_keys=True))
+        else:
+            sys.stdout.write(
+                render_markdown(
+                    rows,
+                    verdicts,
+                    apparatus=args.apparatus,
+                    corrected=corrected,
+                    window=args.window,
+                    usd_per_gbp=args.usd_per_gbp,
+                    posture=args.posture,
+                )
             )
-        )
+    except PosturePoolingError as exc:
+        ap.error(f"{exc} — name one with --posture <class>")
     return 0
 
 
