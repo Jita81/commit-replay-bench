@@ -101,3 +101,17 @@ a run, a row, an event or a kept request.
   the endpoint that was called. The value for an endpoint in the `cerebras.ai` domain is
   `cerebras`. An author call that raises writes no such event.
   **[measured — n = 1 event and 1 value, method: read-only `git show` of `src/crb/factory/author.py` 326-348 and `src/crb/builders/openai_client.py` 530-544 at the served commit `7bb03d6c`, apparatus 2.5; a property of the product's code, not a graded row]**
+
+## 2026-11-12 — two notes from the outside review of Amendment 4
+
+- The ruling file `r5-arm-source-ruling-v2.txt` is a signed record, fixed by its sha256.
+  It is not edited after signing, and it carries no claim tags of its own. The claims in
+  it that this wave relies on are restated, with tags, in Amendment 4 and in the section
+  above.
+  **[hypothesis — the delivery manager's statement of how the file is kept, 2026-11-12]**
+- Section 9 of that ruling says every failure of sections 3 to 8 is printed "with the run
+  ids and times". Section 6.3 item 4 of the same ruling, and Point 4 of Amendment 4, say a
+  failure of the provider test prints counts only and no run id. The script follows the
+  narrower rule: a provider-test stop prints counts only. The script's tests on made-up
+  rows assert that no run id reaches that output.
+  **[aspiration — a rule for the read script, which is not yet written; fixed before any result by arm exists]**

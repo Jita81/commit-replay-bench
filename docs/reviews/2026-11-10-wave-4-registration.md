@@ -1558,7 +1558,11 @@ answer existed, one sentence of the signature, and the line breaks of one paragr
 claim tag under each quoted block was moved inside it and repeated for each of its
 paragraphs and items, and three tags gained the words "apparatus 2.5". The repository's
 claims check asks for both. No point, no new words of a test and no word of the question
-was changed.
+was changed. After the outside review of the pull request, three more edits were made: the
+ruling's file name in "Why it is Paul's" was corrected from `.md` to `.txt`, the name it is
+committed under; two more tags gained the words "apparatus 2.5"; and the paragraph "How the
+tie is read for run `98fe708c`" was added under Point 1. That paragraph is outside the new
+words and changes none of them.
 **[hypothesis — the delivery manager's statement of the edits made on 2026-11-12; the draft is not in this repository]**
 
 **The ruling this amendment cites.** The methodologist's ruling, version 2, is committed
@@ -1595,7 +1599,7 @@ and the matter goes to Paul."
 the served code". The methodologist can read registered words (topology rule 2). Only Paul
 can add to them (topology rule 1). Points that could be settled as readings are in the
 methodologist's ruling, version 2, and are not repeated here. Where this amendment cites
-that ruling, it means the file `r5-arm-source-ruling-v2.md` with sha256
+that ruling, it means the file `r5-arm-source-ruling-v2.txt` with sha256
 `a4ffb60731b0f56187be62e33cfad6f342d05f2c28af072346392d7aec8e9e22`. A later change to section
 4 of the ruling does not change this amendment. It would need Paul's written word again.
 **[hypothesis — a statement of who decides, by topology rules 1 and 2; Paul's answer is quoted in the status above]**
@@ -1665,6 +1669,17 @@ New words, added to test (e) and to the sources of Part E item 5:
 >    shows which text ran after it. T7 rests on the same text.
 >    **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
 
+**How the tie is read for run `98fe708c`.** The new words above say "each run's `task_ids`
+and its place by test (d) must match its key". Test (d) ranks the 48 standing runs only, so
+run `98fe708c` has no place under it. The words are read with test T5 of the methodologist's
+ruling, version 2, section 3.2, signed before Paul answered: under the key
+`click-3/1#attempt1` the run must hold the `task_ids` of click batch 3 and meet the times
+that test (g) gives run `98fe708c`. Its arm is tested by the words of test (e) in Amendment
+3: it "must carry the arm of place 1 of click batch 3". The place test by test (d) applies
+to the 48 plain keys. This is the reading the cited ruling already holds. It adds no source
+and no test.
+**[hypothesis — a reading, quoted from ruling version 2 section 3.2 (T5) at the sha256 given above and from R5 item 2 test (e) of Amendment 3; no run was read to write it]**
+
 Why no looser. The arm is still read from the body only. The out file gives only the name of
 the run. Every added test can only fail the check. A tie made by matching is tested the same
 way as any other, against the product's own filing times. The added run record fields are
@@ -1721,13 +1736,13 @@ wave:
 - **Spelling A, `editblock:gpt-oss-120b`.** `docs/DECISION-LOG.md` line 175 (DL-378, Paul's
   decision of 2026-10-11): "The `S1` test author is `editblock:gpt-oss-120b` on Cerebras".
   `docs/OPERATOR.md` lines 1404 and 1432. The Wave 3 registration, line 200.
-  **[measured — n = 4 document lines, method: read-only `git grep` for `editblock:gpt-oss-120b` in `docs` at `7bb03d6c`; the lines exist as quoted]**
+  **[measured — n = 4 document lines, method: read-only `git grep` for `editblock:gpt-oss-120b` in `docs` at `7bb03d6c`, apparatus 2.5; the lines exist as quoted]**
 - **Spelling B, `editblock:gpt-oss-120b:cerebras`.**
   `docs/reviews/2026-10-09-wave-3-registration.md` line 1238: "`raw.factory.test_author`
   reads `editblock:gpt-oss-120b:cerebras`". This is a reading of the deployment's own
   setting, dated 2026-11-09 by the checker. It is the more recent record and the only one
   that names the provider.
-  **[measured — n = 1 document line, method: the same read-only `git grep` at `7bb03d6c`; the line exists as quoted]**
+  **[measured — n = 1 document line, method: the same read-only `git grep` at `7bb03d6c`, apparatus 2.5; the line exists as quoted]**
 
 **The choice decides the test.** The test is exact equality. The delivery manager's second
 fact sheet reports that the kept `S1` bodies hold spelling A and no other. If so, A passes
