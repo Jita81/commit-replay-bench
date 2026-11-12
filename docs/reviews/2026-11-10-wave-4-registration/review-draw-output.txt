@@ -1,0 +1,53 @@
+wave4_review_draw sha256 4b18ab0d847d9b00690aa54781ad3a33f18a3253916bd1fecb374d60a521d3d6
+wave4_primary_read sha256 8b9bb6afe1a1d9982e3c6f25d3400939ea0b9badf4de8d9e7655464510727a25 (imported)
+campaign: cmp_88cf9e875edba15371e6d3f7
+input plan: /Users/paulglover/wave4/wave-batches.json sha256 ae705b68e03e1ff58972d34cdb81f5e85095ca88449e23a99a9c5276702fb45a
+input pre_s3: /Users/paulglover/wave4/wave-batches.before-s3.json sha256 a3c592cd9e7a19210888b2f9bd6d3b8c6e05d6ce76169e996a71d36d7b2970fd
+input click_out: /Users/paulglover/wave4/click-out.json sha256 27b2747e044048c6766186a1689cc5749178c46a8dce3c78dacd6ed09a4c4170
+input cobra_out: /Users/paulglover/wave4/cobra-out.json sha256 59d7eefc3361caa5f78fd18bc8b66f5e0e2cc5f36a1e49915ea79033b506e0e1
+Order check passed (the read's order check, made again before any row was read).
+Review list (blinded; label, repository, commit; in label order):
+  click-01  click  6de212151893e4072ca21779b7b6f4cb82452f51
+  click-02  click  ecb99836a44367bad62960045d586e31e4a95766
+  click-03  click  b36e3ede781b388ae8135af61e83269e211acdf1
+  click-04  click  ecb99836a44367bad62960045d586e31e4a95766
+  click-05  click  ac6a2acfdb4550c35ce69ce54db502ba96c96324
+  click-06  click  7d05a59b9d46a415d85937630d1d812cf477f60a
+  click-07  click  6de212151893e4072ca21779b7b6f4cb82452f51
+  click-08  click  becbde5cf416441627f779e8dd34e57738ee1c1f
+  click-09  click  ac6a2acfdb4550c35ce69ce54db502ba96c96324
+  click-10  click  6de212151893e4072ca21779b7b6f4cb82452f51
+  click-11  click  becbde5cf416441627f779e8dd34e57738ee1c1f
+  click-12  click  c326df95e9e3da0425360e030413f6a3ee25fdee
+  click-13  click  91de59c6c8abc8251e7af551cd4546cc964288af
+  click-14  click  ecb99836a44367bad62960045d586e31e4a95766
+  click-15  click  1c20dc6e724cd5625faaa17b715ba928d44c08bf
+  click-16  click  b36e3ede781b388ae8135af61e83269e211acdf1
+  click-17  click  3f91d2154ebc47651f0cd9798250a03821473521
+  cobra-01  cobra  5155946348eed0f79a76f7743407c0c933e3b5f0
+  cobra-02  cobra  95f2f73ed97e57387762620175ccdc277a8597a0
+  cobra-03  cobra  7ce08e227e8c9db9b243dfef1e792af31d19cdd0
+  cobra-04  cobra  8822449c0fb9575f1d2453e80cd3e55ab8fc2844
+  cobra-05  cobra  8822449c0fb9575f1d2453e80cd3e55ab8fc2844
+  cobra-06  cobra  8a63648dd905e5c96bee06e6851a894fc75aa058
+  cobra-07  cobra  df12a0a24975e4c9f278e62927ca08d000b9be71
+  cobra-08  cobra  7ce08e227e8c9db9b243dfef1e792af31d19cdd0
+  cobra-09  cobra  a15d0990180cf0d99905ad41201211f8ac3cab53
+  cobra-10  cobra  22b617914c8890ba20db7ceafcdc2ef4ca4817d3
+  cobra-11  cobra  5bef9d8d87ad1a1c73e74361bad9e38b3469a58e
+  cobra-12  cobra  8a63648dd905e5c96bee06e6851a894fc75aa058
+  cobra-13  cobra  95f2f73ed97e57387762620175ccdc277a8597a0
+  cobra-14  cobra  b4f979ae352828a0153281b590771ce9588d67f8
+  cobra-15  cobra  22b617914c8890ba20db7ceafcdc2ef4ca4817d3
+  cobra-16  cobra  df12a0a24975e4c9f278e62927ca08d000b9be71
+  cobra-17  cobra  b4f979ae352828a0153281b590771ce9588d67f8
+  cobra-18  cobra  5bef9d8d87ad1a1c73e74361bad9e38b3469a58e
+  cobra-19  cobra  a15d0990180cf0d99905ad41201211f8ac3cab53
+  cobra-20  cobra  5155946348eed0f79a76f7743407c0c933e3b5f0
+review list sha256 6fa535d039241094c0abf6abdc56dab043a58f482c9f7e81500ce0c83bbd7cfd
+key file sha256 c79a0815dfd0d5f8fd27a07278bb2b08d26f54a0873cd6b7775029732ad1a825
+audit file sha256 9990eb80be32c0e472614580fa22ced127f8145841727228dddc411a96af54df
+B2 item 3 counts by repository and arm: in the key file; the wave report prints them after the review, from the key file bound by its sha256 on this list.
+clean rows that carry an error (not drawn), wave-wide total: 0
+click: 17 patches drawn of 20; shortfall 3
+cobra: 20 patches drawn of 20; shortfall 0
