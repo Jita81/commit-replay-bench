@@ -450,3 +450,41 @@ a row, a run, an event or the poster's folder.
   written, which is the end of the read. The session's transcript logs the terminal call
   that started the script at 12:53:13Z, after the push at 12:53:05Z.
   **[hypothesis — one timestamp in the delivery manager's session transcript, which is not in this repository]**
+
+## 2026-11-12 — Deviation log entries, entered after the read
+
+The entries of 2026-11-12 above name three misses "for the deviation log". They are entered
+here. Each is a miss in how the read was prepared. None is a change to a filed result, and
+none changes the decision word, which the seats signed for any count
+**[hypothesis — the delivery manager's reading of the two entries of 2026-11-12 above]**.
+
+- 2026-11-12, the delivery manager. **The read script looked for an event's task where the
+  product does not store it.** R12 item 2 of the registration and `docs/API.md` line 565
+  name `task` as a payload key. The product stores it as the event's top-level `task_id`.
+  The script reads the payload for both the start event and the failed event. Test (b) of
+  R12 could not pass for any attempt. In a run that holds a `builder.author_test.failed`
+  event, test (c) could not pass for any attempt of that run. The script's fixtures copied the
+  documented shape, and the name check of R12 item 5 looked at the key's name only. No
+  check against the served shape of an event was made before the read. The output's
+  "usable tests: 0 of 120", its 12 author-hit labels, its two-unit blocks result and its
+  left-out result all rest on this.
+  **[measured — n = 120 `S1` attempts in 12 batches of 10 attempts each, method: line 59 ("usable tests: 0 of 120") and lines 31 to 42 (one "author-hit yes" label a batch) of `primary-read-output.txt`, the one run of `scripts/wave4_primary_read.py`, read by the delivery manager on 2026-11-12; builder and models as registered in part 2; apparatus 2.5. The count is what the faulty check printed and is not a measure of the test author]**
+- 2026-11-12, the delivery manager. **A consistency figure was taken out of the script
+  before it was committed.** The figure counted clean `S1` rows that the script held to be
+  without a usable test. On the filed output it would have been above zero wherever an `S1`
+  row was clean, and that would have shown the fault at once. It was removed so that no
+  figure outside R12 was printed. The removal was the delivery manager's decision and was
+  not put to a seat.
+  **[hypothesis — a deviation of preparation, recorded by the delivery manager from the seats' account in the signatures entry above]**
+- 2026-11-12, the methodologist's seat and the delivery manager. **One rule of the read
+  spec was never ruled on.** The spec said a null `error` fails test (d) of R12. The
+  registered words are "does not begin with `authoring:`". The methodologist's signed
+  readings do not cover the rule, and the delivery manager did not ask for a reading. The
+  rule turned out not to bite, because the product serves an empty string and never a
+  null. It is logged because a spec rule reached the script without a signed reading.
+  **[hypothesis — a deviation of process, recorded by the delivery manager from the seats' statements of 2026-11-12 and the two source lines cited above]**
+- **What the next registration takes from these.** A named event key is checked against
+  the served shape of one real event before the read script is committed. A consistency
+  figure may be removed only with a seat's signed word. Every rule of a read spec is
+  listed against the signed reading that covers it.
+  **[aspiration — the delivery manager's proposal for the next registration; nothing is registered yet]**
