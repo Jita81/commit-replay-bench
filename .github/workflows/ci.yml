@@ -28,7 +28,11 @@
 #             an aggregator over `fresh-clone-gates` (every gate but the suite) and the N
 #             `fresh-clone-shard` jobs (the suite, split as `test-shard` is), which proves the
 #             partition like `test`. On main's required-checks list since 2026-10-07
-#             (DL-101)
+#             (DL-101). Its gates include scripts/check_ui_types_drift.py --check:
+#             ui/src/api/types.ts against the OpenAPI schema the app builds offline, failing
+#             on drift beyond the reviewed scripts/ui_types_drift_allowlist.txt (no job of its
+#             own; the `test` job runs the same check through
+#             tests/test_check_ui_types_drift.py)
 #   ui-unit   the UI's own gates: `npm ci`, `npm run typecheck` (tsc -b) and `npx vitest run`.
 #             The hint ratchet, the native-`title=` allowlist and every screen suite run
 #             there, so a hint-registry, a copy or a type regression fails a build instead of
@@ -485,6 +489,7 @@ jobs:
           .venv/bin/python scripts/code_map.py --check
           .venv/bin/python scripts/dod_check.py --check
           .venv/bin/python scripts/claims_check.py --check
+          .venv/bin/python scripts/check_ui_types_drift.py --check
           (cd ui && npm ci --no-audit --no-fund --legacy-peer-deps && npm run typecheck && npx vitest run)
           GATES
           sudo --preserve-env=DOD_BASE,SRC,PYTHONDONTWRITEBYTECODE \

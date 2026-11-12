@@ -1,0 +1,86 @@
+# The UI-types drift check's coverage: every ui/src/api/types.ts shape it compares, and the
+# OpenAPI schema component it compares it against, one `Interface Component` per line.
+#
+# Read by scripts/check_ui_types_drift.py --check (CI's `fresh-clone-gates`, and the `test`
+# job through tests/test_check_ui_types_drift.py). It fails when a line here no longer holds
+# (a response model renamed on the server would otherwise drop its interface from the
+# comparison in silence: add an ALIASES entry after reading the route) and when a shape maps
+# that is not listed (add its line). So this list is the coverage, exactly.
+AdequacyPolicy AdequacyPolicyOut
+ApiErrorEnvelope ErrorEnvelope
+ArmReading ArmReadingOut
+BaselineRead BaselineRead
+Belts Belts
+CandidateDecision CandidateDecisionOut
+CapabilityMap CapabilityMapWithControlsOut
+CapabilitySummary CapabilitySummary
+CellStandard CellStandardOut
+ChainVerify ChainVerifyOut
+ConfigCandidate ConfigCandidateOut
+ConfigCandidates ConfigCandidatesOut
+CsrfToken CsrfToken
+DecisionCount DecisionCount
+DecisionList DecisionList
+Economics EconomicsOut
+EventsVerify EventsVerifyOut
+EvidenceResponse EvidenceResponse
+FactoryBacklog FactoryBacklogOut
+FactoryBacklogItem BacklogItemOut
+FactoryCatalogue FactoryCatalogueOut
+FactoryRefusal RefusalOut
+FactoryTask FactoryTaskOut
+FactoryWayForward WayForwardOut
+Flow FlowOut
+ForecastBuild ForecastBuildOut
+ForecastMixItem ForecastMixItem
+ForecastReadiness ForecastReadinessOut
+GitHubInstallation InstallationOut
+GoLive GoLiveOut
+GoLiveLine GoLiveLineOut
+GradeRow GradeRowOut
+HeldOutRecord HeldOutRecordOut
+Intake IntakeOut
+IntakeConnection IntakeConnectionOut
+IntakeListener IntakeListenerOut
+IntakePoll IntakePollOut
+IntakeRow IntakeRowOut
+Invitation InvitationOut
+InvitationCreated InvitationCreated
+InviteRequest InviteRequest
+LadderRung LadderRung-Input
+LeadTime LeadTimeOut
+LedgerDisqualifiedBuilder DisqualifiedBuilderOut
+LedgerVerify LedgerVerifyOut
+LibraryIndex LibraryIndexOut
+LoginRequest LoginRequest
+NotCaptured NotCapturedOut
+OracleCell OracleCellOut
+OracleReport OracleReportOut
+OracleTask OracleTaskOut
+Principal Principal
+ProfileCell ProfileCell
+RepoCreateRequest RepoCreateRequest
+RepoDetail RepoDetail
+RepoLastRun RepoLastRun
+RepoPool RepoPool
+RepoProbe RepoProbe
+RepoProfile RepoProfile
+RepoSummary RepoSummary
+RepoTaskCounts RepoTaskCounts
+RoutingPolicy RoutingPolicyWithControlsOut
+Run RunOut
+RunBudget RunBudget-Input
+RunCounts RunCounts
+RunCreateRequest RunCreateRequest
+RunFactory RunFactoryOut
+RunProgress RunProgress
+RunTaskRow RunTaskRow
+Shortfall ShortfallOut
+Spend SpendOut
+StepEvent StepEventOut
+StreamFlow StreamFlowOut
+TaskDetail TaskDetail
+TaskSpec TaskSpecOut
+TwoPersonReadiness TwoPersonReadinessOut
+User UserOut
+WorkTypePage WorkTypePageOut
