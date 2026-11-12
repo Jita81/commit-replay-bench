@@ -237,3 +237,68 @@ Written before the primary is read and before any result by arm exists.
   every kept body carries every registered fixed setting, and failing a body that sends
   `arm: "A0"`. As registered, there is no such test, and test (e) accepts `arm: "A0"`.
   **[hypothesis — the methodologist's reading, items 6 and 8 of the readings file, 2026-11-12]**
+
+## 2026-11-12 — Part E record: the script as merged, and the outcome decisions
+
+Written before the primary is read and before any result by arm exists.
+**[hypothesis — the delivery manager's statement of when this section was written, 2026-11-12]**
+
+### The read script as merged (Part E item 1)
+
+- The read script was merged to main at commit
+  `ddf061a2cfdb1724dc7bccecc44196b9a1bec620` (pull request 132). At that commit
+  `scripts/wave4_primary_read.py` has sha256
+  `8b9bb6afe1a1d9982e3c6f25d3400939ea0b9badf4de8d9e7655464510727a25`. That is the same
+  value the file had at the reviewed head of the pull request,
+  `8a3d4fc45aa18d64ec365100163abfe37243da24`.
+  **[measured — n = 2 commits, one file, method: `git show ddf061a2cfdb1724dc7bccecc44196b9a1bec620:scripts/wave4_primary_read.py | shasum -a 256` and `git show 8a3d4fc45aa18d64ec365100163abfe37243da24:scripts/wave4_primary_read.py | shasum -a 256`, each commit named by its full id, by the delivery manager on 2026-11-12; apparatus n/a, file hashes, not graded rows]**
+- The registration file was not changed by that merge. At the same commit its sha256 is
+  `6f6d9c9b71712c988e39a3962cc9522400d3bf98c5f887cf55e2822b8746c03e`, the same value it
+  has at `dd52bc8456330cdd2187b3233685a3a0f96b2d76`, the commit that merged Amendment 4.
+  **[measured — n = 2 commits, one file, method: `git show ddf061a2cfdb1724dc7bccecc44196b9a1bec620:docs/reviews/2026-11-10-wave-4-registration.md | shasum -a 256` and `git show dd52bc8456330cdd2187b3233685a3a0f96b2d76:docs/reviews/2026-11-10-wave-4-registration.md | shasum -a 256`, each commit named by its full id, by the delivery manager on 2026-11-12; apparatus n/a, file hashes, not graded rows]**
+- The read is run from that commit of the script and from no other. If the script is
+  changed before the read, the new commit and hash are recorded here first.
+  **[aspiration — the operator's rule for the one run of the read, which has not happened]**
+
+### The product owner's outcome decisions (Part E item 6)
+
+- The document is `.context/crb-programme/first-tasks/1a-wave4-outcome-decisions.md` in
+  the repository Jita81/AthenaClaude. It is committed at
+  `366c799fe000207161c0909be802ea3a0e4b7269` on the branch `docs/crb-programme-records`,
+  which is pushed. Its sha256 at that commit is
+  `e8d9ac170cef0fd139a30843b6da73f3d55c4fa0fd86e33c3e7ec36f85581e80`.
+  **[measured — n = 1 file, method: `git show HEAD:<path> | shasum -a 256` at that commit by the delivery manager on 2026-11-12, and the same value from the working file; apparatus n/a, a file hash, not a graded row]**
+- That branch is not merged to that repository's main. Its pull request is still open and
+  its checks are red on failures the branch did not cause. The commit and the hash fix the
+  text all the same. If the document is changed before the read, the new commit and hash
+  are recorded here first.
+  **[hypothesis — the state of that pull request as the delivery manager read it on 2026-11-12; it is not in this repository]**
+- The document is not copied into this repository. It is a product decision record of the
+  programme and lives with the programme's records.
+  **[hypothesis — the delivery manager's decision of 2026-11-12 on where the record lives]**
+- The document's own pin names the registration as it stood at the head of pull request
+  129, commit `32630d12`, sha256
+  `dceff4ffe13116c36b76178900c55babeeaba9b03814ed359ed1438a69e02a30`, and says the pin is
+  restated when that pull request merges. It has merged. The 809 lines of the registration
+  at that head are the first 809 lines of the registration on main today, with no
+  difference. Amendments 3 and 4 follow them and were added later. So every part 6 and
+  Amendment 2 passage the document quotes stands on main as quoted.
+  **[measured — n = 809 lines, method: `diff` of the file at `32630d12` against the first 809 lines of the file at `ddf061a2`, by the delivery manager on 2026-11-12, no difference printed; apparatus n/a, a text comparison, not a graded row]**
+- The document was written before Amendments 3 and 4 and does not cite them. It is not
+  edited to add them: its hash is fixed here. The wave report reads the outcome name from
+  the registration as it stands on main, and takes from the document only what the product
+  owner will do in each outcome.
+  **[aspiration — the delivery manager's rule for the wave report, which is not yet written]**
+
+### The served code (Part E item 4)
+
+- The served checkout is at `7bb03d6c73c8c9e10cbc283049be2ce9740eb19e`, the commit noted
+  at the second restart. It was read after the last blind run and after the cobra `S3`
+  runs.
+  **[measured — n = 1 checkout, method: `git rev-parse HEAD` in the served checkout by the delivery manager on 2026-11-12, read only; apparatus 2.5 is the apparatus that commit serves]**
+
+### What is still open before the read
+
+- Part E item 2, the cost gate. It is Paul's to close in writing, as the registration
+  says. Nothing in this section closes it.
+  **[hypothesis — Part E item 2 of the registration on main]**
