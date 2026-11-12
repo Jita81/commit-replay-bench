@@ -119,6 +119,7 @@ a run, a row, an event or a kept request.
 ## 2026-11-12 — the read script, recorded before it is committed
 
 Written before the primary is read and before any result by arm exists.
+**[hypothesis — the delivery manager's statement of when this section was written, 2026-11-12]**
 
 ### The methodologist's readings
 
@@ -130,6 +131,18 @@ Written before the primary is read and before any result by arm exists.
 - The six script changes the readings require (C1 to C6) are made in the committed script
   `scripts/wave4_primary_read.py`, each with a test on made-up records.
   **[measured — n = 6 changes, method: `pytest tests/test_wave4_primary_read.py` on the branch, apparatus 2.5; a property of the script, not a graded row]**
+- The readings cite the read spec by open-point number. The spec the methodologist read is
+  `r5-read-script-spec.txt`, beside this file, sha256
+  `6b827a754b0b271dc5d2a30c64101aac605ba3a0c68e5622b610403056885c64`. It is copied unedited
+  from the delivery manager's working folder, which is the path line 11 of the readings
+  names. It is a spec, not the script: where the two differ, the script's opening text
+  lists the departure.
+  **[measured — n = 1 file, method: `shasum -a 256` by the delivery manager on 2026-11-12; apparatus n/a, a file hash, not a graded row]**
+- The readings file carries no claim tags of its own. It is a signed record, so none is
+  added. Its statements are the methodologist's readings of the registered text and of the
+  draft script, signed 2026-11-12. Each one this record relies on is restated in this
+  section under a tag.
+  **[hypothesis — the delivery manager's statement of how the readings are to be taken, 2026-11-12]**
 
 ### What the poster kept, as the script reads it
 
@@ -139,12 +152,12 @@ Written before the primary is read and before any result by arm exists.
   (`a3c592cd9e7a19210888b2f9bd6d3b8c6e05d6ce76169e996a71d36d7b2970fd`), `click-out.json`
   (`27b2747e044048c6766186a1689cc5749178c46a8dce3c78dacd6ed09a4c4170`) and `cobra-out.json`
   (`59d7eefc3361caa5f78fd18bc8b66f5e0e2cc5f36a1e49915ea79033b506e0e1`).
-  **[measured — n = 4 files, method: `shasum -a 256` by the delivery manager on 2026-11-12; file hashes, not graded rows]**
+  **[measured — n = 4 files, method: `shasum -a 256` by the delivery manager on 2026-11-12; apparatus n/a, file hashes, not graded rows]**
 - The place of a run in its batch is the `slot` number of its plan entry. The out key is
   the batch name, a slash, and that number. This is read from the poster's source text
   (`wave4_post.py`, sha256 `b30ca68ea35e7659b720011af690c6cc3713dfd8f6ce1777523f4651b850b105`,
   lines 102 to 150).
-  **[measured — n = 1 rule, method: reading of the poster's source text by the delivery manager; a property of the poster, not a graded row]**
+  **[measured — n = 1 rule, method: reading of the poster's source text by the delivery manager; apparatus n/a, a property of the poster, not a graded row]**
 - In the out files the `run` value under each key is an object, not a run id. The ruling
   assumed an id. The object's key names are `id`, `status`, `progress`, `clean`, `errors`,
   `stopped_reason`, `stopped_code`, `cost_usd` and `error`. The script reads `run.id` and
@@ -161,7 +174,7 @@ Written before the primary is read and before any result by arm exists.
   the run ids the poster recorded in its out files. The sha256 of the list, one id a line
   in sorted order, is `b79c3cbedaf775238e0f74ddb506a7ebb86858d9b20845ca97a65dd6a7bedf3d`.
   The script checks that hash before it opens any file.
-  **[measured — n = 48 ids, method: `shasum -a 256` of the id list by the delivery manager on 2026-11-12; a file hash, not a graded row]**
+  **[measured — n = 48 ids, method: `shasum -a 256` of the id list by the delivery manager on 2026-11-12; apparatus n/a, a file hash, not a graded row]**
 - So test T4 is not independent of the out files. It shows that the out files still agree
   with the ledger as issued. That each id is the right run rests on tests (a) and (b) on
   the run records and on campaign membership. The script prints this, and the wave report
@@ -183,10 +196,10 @@ Written before the primary is read and before any result by arm exists.
   deviation file line that names a run also carries that run's two served times. A
   transport failure names only the run whose request failed.
   **[aspiration — a rule for the one run of the read, which has not happened; fixed before any result by arm exists]**
-- The script departs from the read spec in four places, all recorded in its opening
+- The script departs from the read spec in five places, all recorded in its opening
   text: its name and its `--poster-dir` and `--output` arguments; an absent row is a miss;
   no figure for "clean without a usable test" is printed (R12 governs); the provider-stop
-  deviation file keeps the two times.
+  deviation file keeps the two times; exit code 5 for a failed `--output` write.
   **[hypothesis — the delivery manager's decisions of 2026-11-12, made before any result by arm exists]**
 
 ### Deviation log entries, entered before the read
@@ -213,6 +226,13 @@ Written before the primary is read and before any result by arm exists.
   nobody runs the script again. The stop goes into the deviation log. Whether the primary
   is then read, and whether that run is a second read, is for Paul in writing.
   **[aspiration — the operator's rule for the one run of the read, from item 13 of the readings file; fixed before any result by arm exists]**
+- Exit 5 (added after outside review of the pull request, before any result by arm
+  exists): the `--output` file could not be written or closed after it was opened. Each
+  line goes to the file before the screen, so the screen never shows a line the file does
+  not hold. The script stops at once and prints one fixed line to the screen only. Exit 5
+  is treated as exit 2, 3 or 4: nobody runs the script again, and the rest is for Paul in
+  writing.
+  **[aspiration — the operator's rule for the one run of the read, which has not happened; fixed before any result by arm exists]**
 - Two more points are left to Paul in writing and are not in the script: a new test that
   every kept body carries every registered fixed setting, and failing a body that sends
   `arm: "A0"`. As registered, there is no such test, and test (e) accepts `arm: "A0"`.

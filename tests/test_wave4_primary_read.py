@@ -2719,3 +2719,103 @@ def test_pass_wave_makes_no_request_but_through_the_injected_getter(
     assert res.code == 0
     assert w.opened == [API]
     assert all(p.startswith("/api/v1/") for p, _ in w.calls)
+
+
+# ---------------------------------------------------------------------------
+# the --output file fails after it was opened: exit 5, nothing printed that is not filed
+# ---------------------------------------------------------------------------
+
+
+class _FailingFile:
+    """An output file that takes ``good`` writes, then raises; ``close`` may raise too."""
+
+    def __init__(self, good: int, *, close_fails: bool = False) -> None:
+        self.good = good
+        self.close_fails = close_fails
+        self.text = ""
+        self.closed = 0
+
+    def write(self, text: str) -> int:
+        if self.good <= 0:
+            raise OSError(28, "No space left on device", "/secret/dir/read.txt")
+        self.good -= 1
+        self.text += text
+        return len(text)
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed += 1
+        if self.close_fails:
+            raise OSError(5, "Input/output error", "/secret/dir/read.txt")
+
+
+def _run_with_file(monkeypatch: pytest.MonkeyPatch, fh: _FailingFile) -> tuple[int, str]:
+    w = make_world()
+    rec = w.recorded()
+    pin_hashes(monkeypatch, rec)
+    buf = io.StringIO()
+    code = W.main(list(ARGV), read_file=w.read_file, open_getter=w.open_getter,
+                  write_deviation=w.write_deviation, open_output=lambda _p: fh,
+                  path_exists=lambda _p: False, stdout=buf, recorded=rec,
+                  self_bytes=b"fixture-self")  # fmt: skip
+    return code, buf.getvalue()
+
+
+def _full_run_lines(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    fh = _FailingFile(10**6)
+    code, text = _run_with_file(monkeypatch, fh)
+    assert code == 0 and fh.text == text
+    return text.splitlines(keepends=True)
+
+
+def test_output_write_failure_stops_with_exit_5_and_prints_no_unfiled_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    full = _full_run_lines(monkeypatch)
+    # the first write is the held lines in one piece; each later write is one line
+    for good in (0, 1, 3, len(full) - 3):
+        fh = _FailingFile(good)
+        code, text = _run_with_file(monkeypatch, fh)
+        assert code == 5
+        lines = text.splitlines(keepends=True)
+        assert lines[-1] == W.OUTPUT_NOT_WRITTEN + "\n"
+        # after the file is attached, stdout holds exactly what the file holds
+        if good:
+            assert "".join(lines[:-1]) == fh.text
+        assert "/secret" not in text and "No space" not in text and "Traceback" not in text
+        assert fh.closed == 1
+
+
+def test_output_failure_before_the_result_prints_no_result_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    full = _full_run_lines(monkeypatch)
+    passed = next(i for i, ln in enumerate(full) if ln.startswith("Order check passed."))
+    # the first line written after the file is attached
+    held = next(i for i, ln in enumerate(full) if ln.startswith("input "))
+    fh = _FailingFile(1 + passed - held + 1)  # fails on the line after "Order check passed."
+    code, text = _run_with_file(monkeypatch, fh)
+    assert code == 5
+    assert "DECISION:" not in text
+    assert text == fh.text + W.OUTPUT_NOT_WRITTEN + "\n"
+
+
+def test_output_close_failure_is_exit_5_with_one_fixed_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fh = _FailingFile(10**6, close_fails=True)
+    code, text = _run_with_file(monkeypatch, fh)
+    assert code == 5
+    assert text == fh.text + W.OUTPUT_NOT_WRITTEN + "\n"
+    assert "/secret" not in text and fh.closed == 1
+
+
+def test_output_write_and_close_both_failing_is_still_exit_5(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fh = _FailingFile(2, close_fails=True)
+    code, text = _run_with_file(monkeypatch, fh)
+    assert code == 5
+    assert text.count(W.OUTPUT_NOT_WRITTEN) == 1 and fh.closed == 1

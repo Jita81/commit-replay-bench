@@ -20,13 +20,19 @@ not made (a request after the order check passed failed, or a row named another 
 unlisted commit or one commit twice, or had a non-boolean clean: an added integrity stop;
 counts only). A missing row is not a stop: it is counted as a miss (A3). If the
 ``--deviation-out`` file cannot be created or written at a stop, one fixed line says so (no
-path, no traceback) and the stop keeps its exit code.
+path, no traceback) and the stop keeps its exit code. 5 the ``--output`` file could not be
+written or closed after it was opened: the filed output is incomplete, and the run stops at
+once.
 
 ``--output`` names a new file (created 0600, refused if it exists, before any request); every
-line printed to stdout is also written to it, byte for byte, flushed line by line, so the
-output that is filed is the output that was printed.
+line printed to stdout is also written to it, byte for byte, so the output that is filed is
+the output that was printed. Each line is written to the file and flushed before it is
+printed, so stdout never shows a line the file does not hold. If the file cannot be written,
+the line is not printed; one fixed line (no path, no traceback) goes to stdout only and the
+exit code is 5.
 
-Departures from the spec (``r5-read-spec.md``), each decided before commit:
+Departures from the spec (``r5-read-script-spec.txt`` beside the ruling), each decided before
+commit:
 
 - The provider-test deviation file carries each run's two served times beside its id
   (Amendment 4 point 4 applies test (i), which puts the ids and the two times in the log).
@@ -36,6 +42,7 @@ Departures from the spec (``r5-read-spec.md``), each decided before commit:
   and uses the standard library only (no httpx).
 - A missing row is a miss, not a stop (the methodologist's reading of 2026-11-12, items 1
   and 4): it is counted as a miss, and each missing row is listed after the decision word.
+- Exit code 5 (a failed write or close of the ``--output`` file) is added.
 
 What it keeps. Every parsed document goes straight to an extractor that returns only the
 fields listed in ``KEPT``; the rest is never stored, logged or printed. No table of arms by
@@ -76,6 +83,7 @@ Touch when:   never for a new repository; Wave 4's registration or ruling change
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import math
@@ -451,10 +459,16 @@ class TransportError(Exception):
     """A request was not answered as expected. The message names no response value."""
 
 
+class OutputFileError(Exception):
+    """Exit 5: the ``--output`` file could not be written or closed. No path, no value."""
+
+
 class Out:
-    """Writes each stdout line to the stream as soon as it is made, and the same line to the
-    ``--output`` file once it is attached. Lines made before the file is opened are held and
-    written to it first, so the file is the stdout text byte for byte."""
+    """Writes each line to the ``--output`` file, once it is attached, and then to the stream.
+    Lines made before the file is opened are held and written to it first, so the file is the
+    stdout text byte for byte. The file is written and flushed before the stream, so the
+    stream never shows a line the file does not hold; a failed file write raises
+    ``OutputFileError`` and the line is not printed."""
 
     def __init__(self, stream: Any) -> None:
         self.stream = stream
@@ -463,24 +477,37 @@ class Out:
 
     def attach(self, file: Any) -> None:
         self.file = file
-        for text in self.held:
-            file.write(text)
-        file.flush()
+        self._to_file("".join(self.held))
         self.held.clear()
+
+    def _to_file(self, text: str) -> None:
+        try:
+            self.file.write(text)
+            self.file.flush()
+        except OSError:
+            raise OutputFileError from None
 
     def line(self, text: str = "") -> None:
         text += "\n"
-        self.stream.write(text)
-        self.stream.flush()
         if self.file is None:
             self.held.append(text)
         else:
-            self.file.write(text)
-            self.file.flush()
+            self._to_file(text)
+        self.stream.write(text)
+        self.stream.flush()
+
+    def stream_only(self, text: str) -> None:
+        """A line for the stream alone: used only to say the file could not be written."""
+        self.stream.write(text + "\n")
+        self.stream.flush()
 
     def close(self) -> None:
-        if self.file is not None:
-            self.file.close()
+        file, self.file = self.file, None
+        if file is not None:
+            try:
+                file.close()
+            except OSError:
+                raise OutputFileError from None
 
 
 # ---------------------------------------------------------------------------
@@ -1838,11 +1865,16 @@ def main(
 ) -> int:
     out = Out(stdout if stdout is not None else sys.stdout)
     try:
-        return _main(argv, out, read_file=read_file, open_getter=open_getter,
+        code = _main(argv, out, read_file=read_file, open_getter=open_getter,
                      write_deviation=write_deviation, open_output=open_output,
                      path_exists=path_exists, recorded=recorded, self_bytes=self_bytes)  # fmt: skip
-    finally:
         out.close()
+    except OutputFileError:
+        with contextlib.suppress(OutputFileError):
+            out.close()
+        out.stream_only(OUTPUT_NOT_WRITTEN)
+        return 5
+    return code
 
 
 def _main(
@@ -2074,6 +2106,10 @@ def _main(
         out, build_batches(chk, rows, events), chk.standing, rows_read, missing_rows(chk, rows)
     )
 
+
+#: Printed to stdout only when the --output file cannot be written or closed after it was
+#: opened: no traceback and no path. The run stops at once with exit code 5.
+OUTPUT_NOT_WRITTEN = "output file could not be written (--output); the filed output is incomplete"
 
 #: Printed (stdout and --output) when the deviation file cannot be created or written at a
 #: stop: no traceback and no path; the stop keeps its own exit code.
