@@ -871,7 +871,7 @@ under both arms" (part 6 item 5). Clean is read from the row's own field in the 
 Nobody re-grades a row. A row that carries an error is a miss, not a gap. The 240 rows all
 exist, so the primary runs on 240 rows, 60 commits and 12 batches. No row is dropped, replaced
 or run again.
-**[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+**[hypothesis — the row count is from the blinded run ledger, read from the served stack on 2026-11-12, which is not in this repository; the rest is a rule for the read, fixed before any result by arm exists]**
 
 **A4. Harness-class rows stay in.** A miss classed harness under part 7 is still a miss in the
 primary, under both arms. The table "that leaves out harness-caused misses" is description, and
@@ -1037,9 +1037,64 @@ item 2, and the report words it so" (item 1). "Nothing is claimed for either rep
 > say how. Reading:
 > 1. One script computes A5 to A9. It is written and tested on made-up rows only. It is
 >    committed, and its sha256 recorded, before it touches a Wave 4 row.
-> 2. The script first checks, from the run bodies, that every run's arm is the arm Amendment 2's
->    order gives its place in its batch, and that the 48 run ids are the standing runs. If any
->    check fails it stops and prints no figure.
+> 2. The script first makes the order check below. For it the script reads run records and
+>    run bodies only, and no row. If any part fails, or a field it needs is absent, it stops,
+>    prints which part failed with the run ids and times concerned, and prints no figure.
+>    - (a) **The runs.** The script carries the 48 standing run ids as a fixed list. Each must
+>      be a blind run of the Wave 4 campaign with status `succeeded` and 5 rows (status and
+>      row count are read from the run record's own fields, not by reading rows), whose
+>      `task_ids` are exactly the five commits of one batch of Amendment 2. Each of the 12
+>      batches must have exactly four such runs. The four of click batch 3 must be the runs
+>      named in A2 item 3. A run named by a short id, anywhere in this item or in A2 item 3,
+>      is the one run of the campaign whose id begins with those characters. No match, or
+>      more than one, fails the check.
+>      **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+>    - (b) **No other filing.** Among all blind runs of the campaign whose `task_ids` name any
+>      of the 60 listed commits there must be exactly one more: run `98fe708c`, with status
+>      `failed`, 0 rows (both read as in (a)) and the `task_ids` of click batch 3.
+>      **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+>    - (c) **Two times.** A run's filing time is the time its record was created. Its end time
+>      is the time it reached its final status. Both are read from the run record as the
+>      product serves it. Nothing else is used as a time, and no seat types one in. Times are
+>      compared as instants, with their time zone, at the precision the record serves. A
+>      time served without a zone counts as a field that is absent.
+>      **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+>    - (d) **Place.** A run's place in its batch, 1 to 4, is its rank by filing time among the
+>      four standing runs of that batch. Two equal filing times in one batch fail the check.
+>      **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+>    - (e) **Arm.** A run's arm is read from its body only. It is `S1` when the body carries
+>      `arm: "S1"` and `test_author` set to the Cerebras `gpt-oss-120b` rung. It is `A0` when
+>      the body carries no `arm` field, or `arm: "A0"`, and no `test_author`. Any other body
+>      fails the check. A field that is absent or whose value is null counts as absent. The
+>      `S1` value of `test_author` is the one recorded under (h), compared by exact
+>      equality. The arm so read must be the arm Amendment 2's order gives that place in
+>      that batch. Run `98fe708c` must carry the arm of place 1 of click batch 3.
+>    - (f) **One after another.** In each batch the end time of the run in place 1 must be no
+>      later than the filing time of the run in place 2, and the same for places 2 and 3, and
+>      for places 3 and 4. Equal times pass.
+>    - (g) **Batches in order.** In each repository, for batches 1 to 5, the end time of the
+>      place 4 run of a batch must be no later than the filing time of the place 1 run of the
+>      next batch. The filing time of run `98fe708c` must be no earlier than the end time of
+>      the place 4 run of click batch 2, and its end time no later than the filing time of the
+>      place 1 run of click batch 3. The end time of the place 4 run of click batch 6 must be
+>      no later than the filing time of the place 1 run of cobra batch 1.
+>    - (h) **A check on names.** Before the script is committed, the delivery manager confirms
+>      from the served code which fields of the run record hold the two times of (c), the
+>      status and the row count, and the exact value the served code stores in `test_author`
+>      for the Cerebras `gpt-oss-120b` rung. The confirmed names and value are recorded in
+>      the wave record before the script is committed. The script prints them. If the record
+>      holds no such field for any of the four, or no such value is confirmed, the check
+>      fails.
+>      **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+>    - (i) **If it fails.** A stop here is not the read of item 3: no row was read. The read
+>      waits. The failure goes into the deviation log with the run ids and the two times. No
+>      run is dropped, no batch is filed again and no row is set aside because of it. The
+>      lists and this check are not changed to make it pass. A fault in the script itself is
+>      corrected under a new commit and sha256, recorded before any row is read. Only Paul, in
+>      writing, can say whether the primary is then read (Part E).
+>      **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
+>
+>    `S3` runs are not part of this check. Their filing after the blind runs is annex row D7.
 > 3. It is run once on the 240 rows. Its whole output is filed unedited with the 48 run ids.
 > **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
 > 4. The delivery manager runs it. The methodologist and the validity engineer each sign the
@@ -1048,8 +1103,23 @@ item 2, and the report words it so" (item 1). "Nothing is claimed for either rep
 >    by batch: "no comparison between the arms is computed, on click or anywhere" (item 1).
 >
 > **The text does not settle the method; this is the reading that leaves the least room.** A
-> second run, or a figure seen before the script is fixed, would be a second read.
+> second run, or a figure seen before the script is fixed, would be a second read. The order
+> check of item 2 is registered matter: "Each batch is four blind runs filed one after
+> another, never in parallel"; "A batch's number is its place in that filing order within its
+> repository"; "A batch that is filed again keeps the order of its first filing"; "All blind
+> batches of click run first" (part 2, "Run order"). "Never in parallel" could mean only that
+> no two runs execute at once. **The text does not settle it, so the harder reading is
+> taken**: a run is filed only after the run before it has ended, within a batch and from one
+> batch to the next. Within a batch this reads "filed one after another, never in parallel".
+> Between batches the text gives only the filing order and "All blind batches of click run
+> first, then, after the image switch, all blind batches of cobra". It does not say in words
+> that one batch ends before the next is filed. The same harder reading is carried across
+> batches, because "filed one after another" read over the whole sequence of runs leaves no
+> room for overlap, and overlap would let one outage reach the runs of two batches. So test
+> (g) rests on this reading, not on quoted words. Item 2 was widened after outside review,
+> before any result by arm existed; every test it held before is kept.
 > **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
+> **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
 
 ---
 
@@ -1078,9 +1148,12 @@ It needs the clean and arm fields, so it cannot run earlier.
    **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
 3. Walk that order and take one patch a commit: the clean row of arm `A` with the lower attempt
    number. First take commits clean under both arms. If that gives fewer than ten, carry on
-   with the other commits that have a clean row under `A`. If still fewer than ten, walk the
-   order again and take second clean rows. If still fewer than ten, review all there are and
-   report the shortfall as a count.
+   with the other commits that have a clean row under `A`. If still fewer than ten, take
+   second clean rows: the attempt 2 row of each commit that has two clean rows under `A`.
+   Walk the order for commits clean under both arms first, then walk it again for the others.
+   At every step stop as soon as there are ten. If still fewer than ten, review all there are
+   and report the shortfall as a count. The report prints, for each repository and arm, how
+   many patches each of the three steps gave.
 4. The drawn list and its sha256 are filed before the reviewer sees a patch. The reviewer is
    not told the arm.
 
@@ -1096,8 +1169,19 @@ It needs the clean and arm fields, so it cannot run earlier.
 > text gives no order. Reading: B2 items 2 and 3. One commit order serves both arms, so the
 > same commits are reviewed under both arms where possible. One patch a commit comes first, so
 > ten patches are not ten views of three commits. The lower attempt is taken, so no one picks
-> between two clean rows. **The text does not settle it; nothing in this order uses a result
-> beyond the clean field the registered rule already requires.**
+> between two clean rows. A one-sided commit is taken before any second row. "drawn where
+> possible from commits clean under both arms" says which commits to prefer; it does not say
+> that a commit gives two patches to one arm. Two clean rows of one commit are not two
+> independent patches, and commits clean under both arms are the easier ones (by the
+> reasoning of R6), so a second row in place of a one-sided commit would give a more
+> flattering sample. Among second rows the registered preference does apply, so commits
+> clean under both arms come first there too. **The text does not settle it, so the harder
+> reading is taken; nothing in this order uses a result beyond the clean field the
+> registered rule already requires.** The review draw moves no outcome name. The decision
+> words of A9 are fixed by A5 to A9 only: the primary test and interval, its two recomputed
+> results, the count of batches with a summed difference that is not zero, and the R12
+> count. The draw is an input to none of them. The second-row step was made exact after
+> outside review, before any result by arm existed.
 > **[reading, signed by the methodologist 2026-11-12, before any result by arm exists]**
 > **[aspiration — a rule for the read, fixed before any result by arm exists; the read is not yet made]**
 
@@ -1378,8 +1462,13 @@ put right or Paul rules in writing.
 4. **The served code did not change during the wave** (stop (c), part 6 item 9). The served
    commit is checked to be the same from the second amendment to the last blind run. The notes
    show `7bb03d6c`, unchanged, at the second restart.
-5. **The filing order is checked by the script**, from run bodies, as R5 item 2 says. No seat
-   does this by hand from a ledger.
+5. **The filing order is checked by the script**, from run bodies and from each run record's
+   status, row count, filing time and end time, as R5 item 2 says: the 48 standing run ids
+   and no other blind filing on the 60 listed commits but the one earlier filing of click
+   batch 3, the arm for each place, the four runs of each batch one after another with no
+   overlap, the batches in order within each repository, that earlier filing in its place,
+   and click before cobra. No seat does this by hand from a ledger. If the check fails the
+   primary is not read, nothing is dropped, and the matter goes to Paul.
 6. **The product owner's outcome decisions are committed** and their hash recorded, as that
    document itself requires before the primary is read.
 7. **No seat-facing ledger carries a slot label.** From now on any ledger given to a seat

@@ -48,19 +48,25 @@ refiled once (run 98fe708c failed its gold control before any build; no row was 
 - runs from click-3/1 onward were filed by the `svc-claude` operator account;
 - a poster crash / login-verify timeout before batch 3 (no run lost);
 - both pilot gates failed and waived (Amendment 2).
+  **[hypothesis — a record of the sessions of 2026-11-11 and 2026-11-12; the rows and the transcripts are not in this repository]**
 
 ## 2026-11-11 23:27:59Z — second stack restart (cobra builder image), granted once by Paul
 
 - `~/crb-stack/env.sh` line 22 changed from `export CRB_BUILDER__IMAGE=crb-builder:local` to
   `export CRB_BUILDER__IMAGE=crb-builder-go:local` (image Id 77b43c312c7a, built 2026-10-11);
   backup beside it: `env.sh.bak-20261111T232545Z`. Lines 20 and 23 unchanged.
+  **[hypothesis — a record of the sessions of 2026-11-11 and 2026-11-12; the rows and the transcripts are not in this repository]**
 - Preconditions met: every click batch filed (24 succeeded runs + 1 refiled gold-control failure,
   120 rows), no active run, worker idle.
   **[hypothesis — a record of the sessions of 2026-11-11 and 2026-11-12; the rows and the transcripts are not in this repository]**
 - `CRB_SKIP_UI_BUILD=1 ~/crb-stack/restart.sh` finished 2026-11-11T23:27:59Z: api pid 25906,
   worker pid 25907, apparatus 2.5, served commit 7bb03d6c (unchanged), database at 0018.
+  **[hypothesis — a record of the sessions of 2026-11-11 and 2026-11-12; the rows and the transcripts are not in this repository]**
 - After restart: cobra posture id `pst_a308788d88899137d5fae9c7` (unchanged, not stale, class
   docker/copy/sealed, sandbox image crb-sandbox-go:main-8ab88ad, 74 of 86 qualified); no
   re-qualify needed. Each run checks its own gold control before any build.
+  **[hypothesis — a record of the sessions of 2026-11-11 and 2026-11-12; the rows and the transcripts are not in this repository]**
 - Campaign before the first cobra run: spent $28.848331 of $95, left $66.151669.
+  **[hypothesis — `spent_usd` and `left_usd` read from `GET /api/v1/campaigns/<id>` on the served stack through the signed-in browser, apparatus 2.5; the campaign record is not in this repository]**
 - Cobra poster started ~23:30Z, same svc-claude account.
+  **[hypothesis — a record of the sessions of 2026-11-11 and 2026-11-12; the rows and the transcripts are not in this repository]**
