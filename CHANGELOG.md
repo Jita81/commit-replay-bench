@@ -20,6 +20,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   12 batches) with each cut list's sha256, every batch's seeded arm order, and the power
   simulation rerun on the cut lists with its script and output beside the page.
 
+- **The ledger's heads can be anchored to a file kept off the machine**
+  ([#130](https://github.com/Jita81/commit-replay-bench/pull/130)).
+  `crb ledger anchor --out <dir>` writes a deterministic, never-overwritten JSON file holding
+  each chain's row count and head, chained to the directory's previous anchor. It refuses a
+  directory inside the ledger's data directory and warns when the directory shares its
+  filesystem. `crb ledger verify --anchor <file-or-dir>` fails, naming the first anchor that no
+  longer holds, when the ledger was cut at its end or rebuilt. A lock on the directory lets one
+  command write at a time, so two cannot both write a first anchor; a platform with no `fcntl`
+  is refused. docs/LEDGER-ANCHORS.md says who should hold anchors and what one cannot prove.
+
 - **The value scorecard reads one posture class** (P-135, G-991, ADR-0019 §8;
   [#128](https://github.com/Jita81/commit-replay-bench/pull/128)). `GET /value` summed spend
   and counted working changes over every posture class, so a sealed row and a host row shared

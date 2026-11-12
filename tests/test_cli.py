@@ -838,11 +838,14 @@ def test_unexpected_exception_maps_to_exit_two_unless_debug(
     garbage = tmp_path / "garbage.jsonl"
     garbage.write_text("{not json\n")
     monkeypatch.delenv("CRB_DEBUG", raising=False)
-    code, _, err = run(["ledger", "verify", "--path", str(garbage)])
+    code, _, err = run(["ledger", "stats", "--path", str(garbage)])
     assert code == 2 and "JSONDecodeError" in err and "Traceback" not in err
     monkeypatch.setenv("CRB_DEBUG", "1")
     with pytest.raises(json.JSONDecodeError):
-        run(["ledger", "verify", "--path", str(garbage)])
+        run(["ledger", "stats", "--path", str(garbage)])
+    # verify reads the same line as a finding, not an error: a broken chain, exit 1
+    code, out, _ = run(["ledger", "verify", "--path", str(garbage)])
+    assert code == 1 and "CHAIN BROKEN" in out and "row 1" in out
 
 
 def test_cli_never_leaks_operator_env_into_test_runs(
