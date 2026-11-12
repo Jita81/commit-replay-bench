@@ -468,7 +468,7 @@ none changes the decision word, which the seats signed for any count
   check against the served shape of an event was made before the read. The output's
   "usable tests: 0 of 120", its 12 author-hit labels, its two-unit blocks result and its
   left-out result all rest on this.
-  **[measured — n = 120 `S1` attempts in 12 batches of 24 standing `S1` runs, method: line 59 ("usable tests: 0 of 120") and lines 31 to 42 (one "author-hit yes" label a batch) of `primary-read-output.txt`, the one run of `scripts/wave4_primary_read.py`, read by the delivery manager on 2026-11-12; builder and models as registered in part 2; apparatus 2.5. The count is what the faulty check printed and is not a measure of the test author]**
+  **[measured — n = 120 `S1` attempts in 12 batches of 10 attempts each, method: line 59 ("usable tests: 0 of 120") and lines 31 to 42 (one "author-hit yes" label a batch) of `primary-read-output.txt`, the one run of `scripts/wave4_primary_read.py`, read by the delivery manager on 2026-11-12; builder and models as registered in part 2; apparatus 2.5. The count is what the faulty check printed and is not a measure of the test author]**
 - 2026-11-12, the delivery manager. **A consistency figure was taken out of the script
   before it was committed.** The figure counted clean `S1` rows that the script held to be
   without a usable test. On the filed output it would have been above zero wherever an `S1`
