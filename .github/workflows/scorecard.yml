@@ -1,0 +1,66 @@
+# OpenSSF Scorecard: scores this repository's supply-chain practices (pinned dependencies,
+# token permissions, branch protection, dangerous workflow patterns, signed releases, …) and
+# uploads the findings to the repository's code scanning as SARIF.
+#
+# The repository is public (`gh repo view --json visibility`, 2026-11-11), so the SARIF upload
+# to code scanning is valid and `publish_results: true` publishes the score to the OpenSSF
+# API (the public badge). Publishing makes the action verify this file: no top-level `env` or
+# `defaults`, no write permission at the top level, no `run:` step, and only the steps it
+# allows (checkout, upload-artifact, upload-sarif, scorecard-action, harden-runner). Keep it
+# that way, or the publish step fails.
+#
+# What it cannot see with the default GITHUB_TOKEN: classic branch-protection rules need a
+# token with Administration: read, which GITHUB_TOKEN cannot be granted, so the
+# Branch-Protection check scores inconclusive (-1, not a 0) unless the branch uses rulesets.
+# `repo_token` is left at its default on purpose: the admin-read BRANCH_PROTECTION_TOKEN
+# stays in branch-protection.yml, not in a job holding id-token: write.
+#
+# When: weekly, on every push to main, and when a branch-protection rule changes. It is not a
+# pull-request check, so scripts/check_branch_protection.py does not hold it to the required
+# checks list.
+#
+# Pins: actions are pinned by major tag like every other workflow (ci.yml), except
+# ossf/scorecard-action, which publishes no major tag: it is pinned to the commit of v2.5.0,
+# and Dependabot's github-actions block bumps the SHA and its comment together.
+
+name: scorecard
+
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: "23 6 * * 1"
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  analysis:
+    name: scorecard (OpenSSF supply-chain checks, SARIF to code scanning)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # checkout
+      actions: read # read the workflow runs the checks score
+      security-events: write # upload the SARIF to code scanning
+      id-token: write # publish_results: the OIDC token the OpenSSF API verifies
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Run the Scorecard checks
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+      - name: Keep the SARIF as an artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 5
+      - name: Upload the SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: results.sarif

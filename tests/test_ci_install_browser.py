@@ -29,6 +29,10 @@ What it does: Pins that a quick install succeeds on attempt 1; that a silent att
               that was still printing when the budget ran out (P-810). Every run, failed or
               not, leaves its time and budget in ``$GITHUB_ENV`` under the names the job-budget
               guard reads, by default, and no test here writes to the real job's (P-813).
+              The default install downloads the browser alone and starts it: one that
+              starts never reaches apt or its timeouts, one that does not sends the next
+              attempt down the ``--with-deps`` path, and a command after ``--`` is never
+              probed (P-816).
 How:          Calls ``main``/``run_attempt`` with ``sys.executable -c`` commands, a recording
               cleanup, a recording ``record`` and a no-op apt writer, with ``GITHUB_ENV``
               unset, or pointed at a temporary file to check the default ``record``; reads
@@ -36,7 +40,7 @@ How:          Calls ``main``/``run_attempt`` with ``sys.executable -c`` commands
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   scripts/ci_install_browser.py (the wrapper), .github/workflows/ci.yml (the jobs),
-              docs/PREVENTION.md (P-751, P-809, P-810, P-813), scripts/ci_job_budget.py (the
+              docs/PREVENTION.md (P-751, P-809, P-810, P-813, P-816), scripts/ci_job_budget.py (the
               guard that reads the record), tests/test_ci_job_budget.py (the job parser this
               mirrors)
 Tested by:    (this is a test file)
@@ -363,6 +367,214 @@ def test_the_default_command_is_the_playwright_install_with_system_deps() -> Non
     assert _mod().DEFAULT_COMMAND == ("npx", "playwright", "install", "--with-deps", "chromium")
 
 
+def _default_install(
+    outcomes: list[str], starts: list[bool], argv: list[str] | None = None
+) -> tuple[int, str, list[list[str]], list[str]]:
+    """Run ``main`` with no command of its own, so the default install: each attempt ends as
+    the next of ``outcomes`` and each probe answers the next of ``starts``. Returns the exit
+    code, the output, the commands run and the order of effects (``apt``, ``run``, ``probe``,
+    ``cleanup``)."""
+    m = _mod()
+    commands: list[list[str]] = []
+    effects: list[str] = []
+    left, answers = list(outcomes), list(starts)
+
+    def run(cmd: list[str], **_kw: object) -> object:
+        commands.append(list(cmd))
+        effects.append("run")
+        outcome = left.pop(0)
+        return m.Attempt(outcome, 0 if outcome == "ok" else 1, 1.0)
+
+    out = io.StringIO()
+    rc = m.main(
+        argv or [],
+        run=run,
+        apt=lambda: effects.append("apt") is None,
+        cleanup=lambda: effects.append("cleanup"),
+        sleep=lambda _s: None,
+        clock=lambda: 1000.0,
+        out=out,
+        record=lambda _seconds, _budget: None,
+        probe=lambda _left: (effects.append("probe"), answers.pop(0))[1],
+    )
+    return rc, out.getvalue(), commands, effects
+
+
+def test_a_browser_that_starts_is_the_whole_install_and_apt_is_never_run() -> None:
+    # 11 Nov 2026, run 43042027976: no Ubuntu mirror resolved, every library Chromium needs was
+    # already on the image, and apt spent the whole budget on nine font packages (P-816).
+    m = _mod()
+    rc, out, commands, effects = _default_install(["ok"], [True])
+    assert rc == 0
+    assert commands == [list(m.BROWSER_ONLY_COMMAND)]
+    assert "--with-deps" not in commands[0]
+    assert effects == ["run", "probe"], "no apt config, no apt cleanup, when the browser starts"
+    assert "::warning" not in out and "::error" not in out
+
+
+def test_a_browser_that_does_not_start_gets_its_system_libraries_next() -> None:
+    m = _mod()
+    rc, out, commands, effects = _default_install(["ok", "ok"], [False, True])
+    assert rc == 0
+    assert commands == [list(m.BROWSER_ONLY_COMMAND), list(m.DEFAULT_COMMAND)]
+    # apt's timeouts are written before the first attempt that can call apt, and the install
+    # with system libraries is probed too before it is called a success.
+    assert effects == ["run", "probe", "apt", "run", "probe"]
+    assert "attempt 1 of 5 downloaded Chromium" in out
+    assert "does not start on this image without its system libraries" in out
+    assert "attempt 2 of 5 succeeded" in out
+    assert "::error" not in out
+
+
+def test_a_browser_that_does_not_start_with_its_libraries_is_not_a_success() -> None:
+    # A cache mounted noexec, say: no library fixes it, and the job after this one would fail.
+    m = _mod()
+    rc, out, commands, effects = _default_install(["ok", "ok", "ok"], [False, False, True])
+    assert rc == 1
+    assert commands == [list(m.BROWSER_ONLY_COMMAND), list(m.DEFAULT_COMMAND)], "no third install"
+    assert effects == ["run", "probe", "apt", "run", "probe"]
+    assert "attempt 2 of 5 installed Chromium and its system libraries" in out
+    assert "the browser still does not start" in out
+    assert "a rerun meets the same error" in out
+    assert "not answering" not in out and "rerun the job" not in out
+
+
+def test_a_failed_browser_download_is_retried_without_apt() -> None:
+    m = _mod()
+    rc, _out, commands, effects = _default_install(["failed", "stalled", "ok"], [True])
+    assert rc == 0
+    assert commands == [list(m.BROWSER_ONLY_COMMAND)] * 3
+    assert "apt" not in effects
+    assert effects.count("probe") == 1, "only an install that succeeded is probed"
+
+
+def test_a_browser_that_never_starts_with_no_attempt_left_is_its_own_error() -> None:
+    rc, out, _commands, _effects = _default_install(["ok"], [False], ["--attempts", "1"])
+    assert rc == 1
+    assert "Chromium was downloaded but does not start" in out
+    assert "not answering" not in out and "rerun the job" not in out
+
+
+def test_a_system_library_install_that_fails_every_time_is_not_called_a_network_fault() -> None:
+    # The first attempt downloaded a browser that does not start; every later one is apt
+    # exiting non-zero. That is the deterministic error P-751 names, not a silent mirror.
+    rc, out, _commands, _effects = _default_install(
+        ["ok", "failed", "failed"], [False], ["--attempts", "3"]
+    )
+    assert rc == 1
+    assert "the install exited non-zero every time" in out
+    assert "not answering" not in out
+
+
+def _timed_install(
+    download_s: float, budget: float, probe_s: float = 0.0, starts: bool = True
+) -> tuple[int, str, list[float]]:
+    """Run the default install with a clock the download advances by ``download_s`` and each
+    probe by ``probe_s``; returns the exit code, the output and the time each probe was given."""
+    m = _mod()
+    now = [1000.0]
+    given: list[float] = []
+
+    def run(_cmd: list[str], **_kw: object) -> object:
+        now[0] += download_s
+        return m.Attempt("ok", 0, download_s)
+
+    def probe(left: float) -> bool:
+        given.append(left)
+        now[0] += probe_s
+        return starts
+
+    out = io.StringIO()
+    rc = m.main(
+        ["--budget", str(budget), "--attempts", "1"],
+        run=run,
+        apt=lambda: True,
+        cleanup=lambda: None,
+        sleep=lambda _s: None,
+        clock=lambda: now[0],
+        out=out,
+        record=lambda _seconds, _budget: None,
+        probe=probe,
+    )
+    return rc, out.getvalue(), given
+
+
+def test_the_probe_is_given_only_what_is_left_of_the_install_budget() -> None:
+    m = _mod()
+    rc, _out, given = _timed_install(download_s=95.0, budget=100.0)
+    assert rc == 0 and given == [5.0]
+    rc, _out, given = _timed_install(download_s=10.0, budget=600.0)
+    assert rc == 0 and given == [m.HELPER_TIMEOUT_S]
+
+
+def test_a_download_that_used_the_whole_budget_is_not_probed_and_is_not_a_success() -> None:
+    rc, out, given = _timed_install(download_s=100.0, budget=100.0)
+    assert rc == 1 and given == []
+    assert "completed, but only after the install budget ran out, at 100 s" in out
+    assert "was stopped" not in out and "still printing" not in out
+
+
+def test_a_probe_that_passes_after_the_budget_ended_is_not_a_success() -> None:
+    # The probe's timeout bounds the browser, not the time around it: the clock is read again.
+    rc, out, given = _timed_install(download_s=95.0, budget=100.0, probe_s=6.0)
+    assert rc == 1 and given == [5.0]
+    # Nothing was stopped, and the time reported is the download's and the probe's together.
+    assert "completed, but only after the install budget ran out, at 101 s" in out
+    assert "ran to its end, but only after the budget had ended" in out
+    assert "was stopped" not in out and "still printing" not in out
+    # A probe that ends exactly on the deadline is still inside the budget.
+    rc, _out, _given = _timed_install(download_s=95.0, budget=100.0, probe_s=5.0)
+    assert rc == 0
+
+
+def test_a_probe_that_fails_as_the_budget_ends_is_out_of_time_not_a_broken_browser() -> None:
+    # One second left gives the probe a one-second timeout; its expiry says "slow", no more.
+    rc, out, given = _timed_install(download_s=99.0, budget=100.0, probe_s=1.0, starts=False)
+    assert rc == 1 and given == [1.0]
+    assert "completed, but only after the install budget ran out, at 100 s" in out
+    assert "does not start" not in out and "a rerun meets the same error" not in out
+    # The same failure with time to spare is the browser's own, and is reported as that.
+    rc, out, _given = _timed_install(download_s=10.0, budget=100.0, probe_s=1.0, starts=False)
+    assert rc == 1 and "does not start" in out
+
+
+def test_a_command_of_its_own_is_run_as_written_and_never_probed() -> None:
+    out = io.StringIO()
+    probes: list[int] = []
+    rc = _mod().main(
+        ["--no-apt-timeouts", *_py("print('ok')")],
+        cleanup=lambda: None,
+        sleep=lambda _s: None,
+        out=out,
+        record=lambda _seconds, _budget: None,
+        probe=lambda _left: probes.append(1) is None,
+    )
+    assert rc == 0 and probes == []
+
+
+def test_the_probe_reads_the_browsers_own_exit_and_echoes_why_it_did_not_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    m = _mod()
+    out = io.StringIO()
+    code = "import sys; print('error while loading shared libraries: libnss3.so'); sys.exit(1)"
+    monkeypatch.setattr(m, "PROBE_COMMAND", (PY, "-c", code))
+    assert m.browser_starts(out=out) is False
+    assert "libnss3.so" in out.getvalue()
+    monkeypatch.setattr(m, "PROBE_COMMAND", (PY, "-c", "pass"))
+    assert m.browser_starts(out=io.StringIO()) is True
+    monkeypatch.setattr(m, "PROBE_COMMAND", ("crb-no-such-node-binary",))
+    assert m.browser_starts(out=io.StringIO()) is False
+
+
+def test_the_probe_starts_the_browser_the_ui_tests_use() -> None:
+    m = _mod()
+    assert m.PROBE_COMMAND[0] == "node"
+    assert "require('@playwright/test').chromium.launch()" in m.PROBE_COMMAND[-1]
+    assert "@playwright/test" in json.loads(UI_PACKAGE.read_text("utf-8"))["devDependencies"]
+    assert m.BROWSER_ONLY_COMMAND == ("npx", "playwright", "install", "chromium")
+
+
 def test_the_apt_timeouts_keep_apt_silent_for_less_than_the_idle_timeout() -> None:
     m = _mod()
     timeout_m = re.search(r'Acquire::https::Timeout "(\d+)"', m.APT_CONF)
@@ -385,7 +597,15 @@ def _defaults() -> dict[str, float]:
 
     now = 1000.0
     out = io.StringIO()
-    _mod().main([], run=run, apt=lambda: True, cleanup=lambda: None, clock=lambda: now, out=out)
+    _mod().main(
+        [],
+        run=run,
+        apt=lambda: True,
+        cleanup=lambda: None,
+        clock=lambda: now,
+        out=out,
+        probe=lambda _left: True,
+    )
     attempts = re.search(r"attempt 1 of (\d+)", out.getvalue())
     assert attempts is not None
     seen["attempts"] = float(attempts.group(1))

@@ -17,7 +17,11 @@
  *               label names the Operate path as a hint trigger and every chrome id in
  *               `SHELL_CHROME_HINTS` renders (G-396); and that the ledger health probe's
  *               `false_q1` drives the "Delivery halted" banner — plural, singular, and none
- *               at zero or with no probe (G-564). jsdom applies no CSS, so
+ *               at zero or with no probe (G-564); and Home's "n of 8" with its Continue for
+ *               an operator off Home, for the page's ?repo= and linking Home to it,
+ *               "unavailable" when a task stands on a failed read (not for /health alone),
+ *               never for a viewer.
+ *               jsdom applies no CSS, so
  *               the fold is asserted as the `max-sm:hidden` class; the 375-px walkthrough
  *               (11-screens) asserts what a phone actually shows.
  * How:          Pure calls for the helper; the shell rendered as a layout route with one
@@ -43,7 +47,7 @@ import type { Probe } from '../api/types'
 import { hintText } from '../help/hints'
 import { SHELL_CHROME_HINTS } from '../help/hints-ratchet.shell'
 import { AuthProvider } from '../lib/auth'
-import { PRINCIPAL, mockApi } from '../test/utils'
+import { PRINCIPAL, envelope, mockApi } from '../test/utils'
 import { JOURNEY_STEPS, Layout, SHELL_MENU_IDS, journeyEyebrow } from './Layout'
 
 /** The shell as the app mounts it: a layout route with one child screen. */
@@ -446,5 +450,96 @@ describe('Layout: the phone menu (F26)', () => {
     expect(await screen.findByRole('heading', { name: 'Baseline' })).toBeInTheDocument()
     // the menu was opened on /results, but it was closed by leaving: coming back is not a press
     expect(screen.getByRole('button', { name: 'Menu' })).toHaveAttribute('aria-expanded', 'false')
+  })
+})
+
+describe('Layout: the set-up progress in the header', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  /** An operator on a deployment with no repository: task 2 is the first Continue stops at. */
+  function mockSetup(role: 'viewer' | 'operator' | 'admin', overrides: Record<string, unknown> = {}) {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role },
+      'GET /health': { status: 'ok', probes: [] },
+      'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_enabled: false },
+      'GET /decisions': { total: 0, by_role: {}, errors: [] },
+      'GET /repos': { items: [], total: 0, limit: 100, offset: 0 },
+      'GET /github/app': { configured: false, installations: [] },
+      'GET /two-person-readiness': { ready: false, reason_code: 'single_person', reason: 'only one person', approvers_active: 0, approvers_signed_in: 0, other_active_accounts: 0, accounts_signed_in: 1, invitations_pending: 0 },
+      ...overrides,
+    })
+  }
+
+  it('shows Home\'s "n of 8" and a Continue to the next task for an operator on another screen', async () => {
+    mockSetup('operator')
+    renderShell('/results', '/results', <h1>Baseline</h1>)
+    const progress = await screen.findByTestId('shell-get-started')
+    const count = within(progress).getByRole('link', { name: '0 of 8' })
+    expect(count).toHaveAttribute('href', '/home')
+    expect(count).toHaveAttribute('data-hint', 'stat.shell.get_started')
+    const go = within(progress).getByRole('link', { name: 'Continue to task 2: Choose a repository' })
+    expect(go).toHaveAttribute('href', '/connect')
+    expect(go).toHaveAttribute('data-hint', 'button.shell.continue')
+  })
+
+  it.each([
+    ['?repo=', '/results?repo=beta', '/results'],
+    ['path (a repository-scoped page)', '/connect/beta/measure', '/connect/:name/measure'],
+    ['path (the task page)', '/tasks/beta/abc123', '/tasks/:repo/:taskId'],
+    ['encoded path, over a conflicting ?repo=,', '/library/%62eta?repo=alpha', '/library/:repo'],
+  ])("counts the page's %s repository and links Home to it, so the two show the same count", async (_how, route, path) => {
+    const repo = (name: string, updated: string) => ({ name, language: 'python', runner: 'pytest', url: `https://github.com/acme/${name}`, clone_path: '', probe: { status: 'ok', run_id: 'r1', checked: 'x', detail: 'pytest 8' }, task_counts: { total: 0, standard: 0, hard: 0, gold_clean: 0, gold_failed: 0, unchecked: 0 }, last_run: null, created: updated, updated, config: {} })
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /health': { status: 'ok', probes: [] },
+      'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_enabled: false },
+      'GET /decisions': { total: 0, by_role: {}, errors: [] },
+      // alpha is the most recently updated: without ?repo= it is the one Home would count
+      'GET /repos': { items: [repo('alpha', '2026-11-02T00:00:00Z'), repo('beta', '2026-11-01T00:00:00Z')], total: 2, limit: 100, offset: 0 },
+      'GET /repos/beta': repo('beta', '2026-11-01T00:00:00Z'),
+      'GET /capability-map': { repo: 'beta', by: ['capability_class', 'size'], classes: [], sizes: [], languages: [], models: [], cells: [], summary: { trusted_autonomy_coverage: 0, total_cells: 0, measured_cells: 0, deliver_cells: 0, n_total: 0, false_q1_total: 0, apparatus_versions: [] } },
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /factory/beta/tasks': [],
+      'GET /runs': { items: [], total: 0, limit: 20, offset: 0 },
+      'GET /github/app': { configured: false, installations: [] },
+      'GET /two-person-readiness': { ready: false, reason_code: 'single_person', reason: 'only one person', approvers_active: 0, approvers_signed_in: 0, other_active_accounts: 0, accounts_signed_in: 1, invitations_pending: 0 },
+    })
+    renderShell(route, path, <h1>Baseline</h1>)
+    const progress = await screen.findByTestId('shell-get-started')
+    const count = within(progress).getByRole('link', { name: /^beta: \d of 8$/ })
+    expect(count).toHaveAttribute('href', '/home?repo=beta')
+    expect(calls.some((c) => c.path === '/repos/alpha')).toBe(false)
+  })
+
+  it('says "unavailable" when a read the tasks stand on failed — never a count (G-164)', async () => {
+    mockSetup('admin', { 'GET /github/app': () => envelope(500, 'internal', 'boom') })
+    renderShell('/results', '/results', <h1>Baseline</h1>)
+    const progress = await screen.findByTestId('shell-get-started')
+    expect(progress).toHaveTextContent('Get started: unavailable')
+    expect(progress).toHaveAttribute('href', '/home')
+    expect(screen.queryByRole('link', { name: /^Continue to task/ })).toBeNull()
+    expect(screen.queryByText(/ of 8$/)).toBeNull()
+  })
+
+  it('a failed read no task stands on (health) leaves the count, not "unavailable"', async () => {
+    mockSetup('operator', { 'GET /health': () => envelope(500, 'internal', 'boom') })
+    renderShell('/results', '/results', <h1>Baseline</h1>)
+    const progress = await screen.findByTestId('shell-get-started')
+    expect(within(progress).getByRole('link', { name: '0 of 8' })).toHaveAttribute('href', '/home')
+    expect(screen.queryByText('Get started: unavailable')).toBeNull()
+  })
+
+  it('is not shown on Home, where the full list is the page', async () => {
+    mockSetup('operator')
+    renderShell('/home', '/home', <h1>Home</h1>)
+    await waitFor(() => expect(screen.getByTestId('user-chip')).toHaveTextContent('operator'))
+    expect(screen.queryByTestId('shell-get-started')).toBeNull()
+  })
+
+  it('is not shown to a viewer, who reads the tasks on Home as a report, not a to-do list', async () => {
+    mockSetup('viewer')
+    renderShell('/results', '/results', <h1>Baseline</h1>)
+    await waitFor(() => expect(screen.getByTestId('user-chip')).toHaveTextContent('viewer'))
+    expect(screen.queryByTestId('shell-get-started')).toBeNull()
   })
 })
