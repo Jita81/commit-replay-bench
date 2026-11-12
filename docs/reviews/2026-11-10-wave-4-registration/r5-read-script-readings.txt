@@ -1,0 +1,412 @@
+# Wave 4: readings on the R5 read script, before commit
+
+Seat: methodologist. Date: 2026-11-12. These are readings. They change no registered word.
+Where a point would change, waive or loosen a registered word, I do not rule. I name it for Paul.
+
+Short names used below:
+
+- REG = `/Users/paulglover/crb-worktrees/w4-r5-read/docs/reviews/2026-11-10-wave-4-registration.md`
+- RUL = `/Users/paulglover/crb-worktrees/w4-r5-read/docs/reviews/2026-11-10-wave-4-registration/r5-arm-source-ruling-v2.txt`
+- SCRIPT = `/Users/paulglover/crb-worktrees/w4-r5-read/scripts/wave4_primary_read.py`
+- SPEC = `/private/tmp/claude-501/-Users-paulglover-AthenaClaude/c72f7b3c-7c75-4542-ac6d-6ecc2f79d1a3/scratchpad/wave-close/r5-read-spec.md`
+- NOTES = `/Users/paulglover/crb-worktrees/w4-r5-read/docs/reviews/2026-11-10-wave-4-registration/wave-record-notes.md`
+
+## Summary
+
+- The pin holds. Both sha256 values match (see "The pin").
+- Of the 13 items, the script meets the registered words on 7 as written (items 1, 5, 6, 7, 8, 9, 13).
+- Items 2, 3, 4, 10 and 11 need a script change before commit. There are six changes. All are small.
+  None touches the statistic, a threshold or a decision word.
+- Item 12 needs a deviation log entry and no script change.
+- Three points are Paul's and I do not rule them: a rerun after any stop that made a request
+  (item 13); a new test that each body carries the registered fixed settings (item 6); failing a
+  body that sends `arm: "A0"` (item 8).
+- One disclosure of my own. NOTES lines 1-30 came into my context whole during this work. They hold
+  outcome-level text by run. It needs its own deviation log entry (see the signature block).
+
+## The pin
+
+- REG sha256: `6f6d9c9b71712c988e39a3962cc9522400d3bf98c5f887cf55e2822b8746c03e`
+- RUL sha256: `a4ffb60731b0f56187be62e33cfad6f342d05f2c28af072346392d7aec8e9e22`
+
+Both were computed with `shasum -a 256` on the worktree files on 2026-11-12. Both equal the expected values.
+
+---
+
+## Item 1. The added integrity stop
+
+**Words relied on.**
+
+- REG 870-873 (A3): "Clean is read from the row's own field in the product ledger. Nobody re-grades a
+  row. A row that carries an error is a miss, not a gap. ... No row is dropped, replaced or run again."
+- REG 859-860 (A2 item 2): "the rows from that arm's two runs in the commit's batch".
+- REG 1040-1042: "If any part fails, or a field it needs is absent, it stops ... and prints no figure."
+- REG 1102-1103: "Until the output is filed, nobody computes a clean count by arm, by repository, by cell or by batch".
+
+**Reading.** The stop is not written in the registered text. It is still within it. A row that names
+another run, a task not on the list, a second row for one task, or a `clean` that is not a boolean
+cannot be scored without someone choosing a row or a value. A3 forbids that choice. The only act
+that makes no choice is to stop and print no figure. The stop can never produce a result or move
+one. It narrows; it loosens nothing. The text does not settle it, so the harder reading is taken:
+stop, exit 4, no figure.
+
+Two limits go with it.
+
+1. A row that is merely absent is not an integrity fault. It is a miss (REG 217, 385-386). The script
+   keeps these apart (SCRIPT 1525-1548 and the comment at 1855). That is right.
+2. Rows were read before this stop. So what follows it is not mine to rule. See item 13.
+
+**Does the script meet it?** Yes. `main`, SCRIPT 1855-1884: two counts, no figure, ids to the
+deviation file, exit 4. The deviation lines lack the two times; that is item 3.
+
+## Item 2. T1-T3 stops print no run id and no time
+
+**Words relied on.**
+
+- REG 1041-1042: "it stops, prints which part failed with the run ids and times concerned, and prints no figure."
+- REG 1056-1058 (c): "Both are read from the run record as the product serves it. Nothing else is used as a time, and no seat types one in."
+- RUL 506-509: every failure prints its part with the run ids and times.
+
+**Reading.** "Concerned" limits the duty to runs the failure is about. T1, T2 and the shape test fail
+on a file or a key. No run record has been read at that point, so no served time exists. Test (c)
+bars any other time: the script may not print `posted` or `ended` from an out file, nor a typed
+time. Printing none is the only reading that keeps (c). The text settles it.
+
+The harder reading adds one thing. The output must say so in words, so that a reader does not take
+the silence for a dropped line.
+
+**Does the script meet it?** In substance yes: `main`, SCRIPT 1720-1756, calls `print_failures` with
+an empty run map before any request. It does not print the explaining line.
+
+**Change (C1).** On every stop made before the first request (T1, shape, T3, T2, and T4 when no
+record was fetched), print one fixed line after the failed part:
+`No run record was read. No run id and no time is concerned.`
+Where T3 or T4 names a well-formed run id, the id is printed and its times read `NOT KEPT`, as
+`_times` (SCRIPT 1334-1340) already does.
+
+## Item 3. Does test (i)'s rule on times reach the deviation files of E4, E5 and integrity stops?
+
+**Words relied on.**
+
+- REG 1089-1091 (i): "A stop here is not the read of item 3: no row was read. The read waits. The failure goes into the deviation log with the run ids and the two times."
+- REG 1801-1810 (Point 4): the provider stop "writes the run ids to a file for the deviation log ... Test (i) applies."
+- RUL 565-573: the run record keep-list holds `created` and `finished`.
+
+**Reading.** "A stop here" is a stop of the order check. Point 4 carries test (i) to the provider
+stop by name. The words do not reach a transport stop (E4, E5) or the added integrity stop. So the
+text does not require the times there.
+
+The harder reading is taken all the same. A deviation entry with a run id and no time is a weaker
+record. The two times are run-record fields the script already keeps. They are not outcomes. Writing
+them costs nothing and shows nothing by arm. So every deviation file line that names a run carries
+that run's two served times, or `NOT KEPT` when no record was fetched.
+
+This reading adds to what is written to a file. It prints nothing new on the screen and no figure.
+
+**Does the script meet it?** Partly. The provider stop writes times (SCRIPT 1832-1833). E4 (1799-1816),
+E5 (1839-1853) and the integrity stop (1855-1884) write the id and a reason only.
+
+**Change (C2).** At SCRIPT 1814, 1851 and 1881-1882, write `_times(run)` beside each run id in the
+deviation file. Add a test on made-up records that each such line holds both times.
+
+## Item 4. The line "Rows read: N of 240 (48 runs x 5); rows missing: M (each counted as a miss, A3); first filing 98fe708c: set aside unread."
+
+**Words relied on.**
+
+- REG 859-860: "That is 4 rows a commit, 240 rows in all."
+- REG 846-847 (A1): "48 standing runs, each `succeeded` with 5 of 5 rows".
+- REG 217: "After that, a row that is still missing counts as a miss."
+- REG 385-386 (part 6 item 5): "Disqualified rows, missing rows, outages ... all count as misses, under both arms."
+- REG 868-873 (A3) quotes item 5 and then says: "The 240 rows all exist".
+- REG 862-864 (A2 item 3): "The first filing (run `98fe708c`, failed, 0 rows) is "set aside unread" (part 2, row rule). It holds no row, so nothing is set aside in practice."
+- REG 200-202: "Rows still missing after the batch is filed again count as misses and can move the primary result, so the report lists every such row with its batch and arm."
+
+**Reading, word by word.**
+
+- "of 240 (48 runs x 5)": supported (REG 846-847, 860).
+- "Rows read: N" and "rows missing: M": allowed. They are totals over all 48 runs. They are not by
+  arm, repository, cell or batch, and they are not clean counts. They sit inside the one output.
+- "each counted as a miss": supported, but the citation is thin. A3 only quotes the rule. The rule
+  itself is the row rule (REG 217) and part 6 item 5 (REG 385-386). The line must cite those.
+- "first filing 98fe708c: set aside unread": these are the registered words of A2 item 3. Supported.
+  The short id is the one the registration prints. The harder reading adds the registered
+  qualifier, so nobody reads the line as rows put aside: it held 0 rows.
+- If M is above 0, the line alone is not enough. A3 records that all 240 rows exist, so M above 0
+  departs from a recorded fact. REG 200-202 also makes the report list each such row with its
+  batch and arm. The script runs once (REG 1098), so the list must come out of that one run.
+
+**Does the script meet it?** Not fully. `print_read`, SCRIPT 1611-1612, cites A3 alone and prints no
+list of missing rows.
+
+**Change (C3).** Print the line as:
+`Rows read: N of 240 (48 runs x 5); rows missing: M (each counted as a miss: row rule, part 6 item 5, A3); first filing 98fe708c: set aside unread (0 rows, A2 item 3).`
+When M is above 0, print next: `A3 records that all 240 rows exist. M do not. This goes into the deviation log.`
+Then, after the decision word, list each missing row with its run id, task, batch and arm
+(REG 200-202). The list goes after the decision word so that it stays part of the filed output and
+nothing by arm is printed ahead of the result.
+
+## Item 5. Spec open point 5: t quantiles rounded up to 4 decimals
+
+**Words relied on.**
+
+- REG 329-330: "the 97.5% point of Student's t with `B − 1` degrees of freedom".
+- REG 915: "Student's t with 11 degrees of freedom (2.2010)".
+- REG 916-917: ""Below 15 points" is compared without rounding."
+- REG 363-366: *No 15-point effect* needs "the upper end below 15 points of the primary interval and of both recomputed intervals".
+
+**Reading.** For 11 degrees of freedom the registration prints the value, 2.2010. The script uses it.
+The text settles that. For fewer degrees of freedom (the recomputed results) the text names the
+point and prints no digits. A table needs some rounding. Rounding up makes the interval a little
+wider. A wider interval can only block *No 15-point effect*. It cannot help *Cleared*, which rests
+on p and the sign. The text does not settle it, so the harder reading is taken: round up. "Without
+rounding" (REG 916-917) is about the comparison with 15, and the script keeps it.
+
+**Does the script meet it?** Yes. Table at SCRIPT 212-226; used in `compute` 1433-1448 and
+`upper_end_below` 1417-1420. The comment at 212 states the rule. No change. The report states the
+rule in one sentence beside the interval.
+
+## Item 6. Spec open point 14: no test that the registered fixed settings are in each kept body
+
+**Words relied on.**
+
+- REG 152-154: "Every run names the Wave 4 campaign, a `max_cost_usd`, and the stop settings `env_stop: 2` and `outage_stop: 3`".
+- REG 158: the `A0` body, with `learning: "off"` and `budget: {max_turns: ...}`.
+- REG 759-760: "Every wave run carries the body of part 2 with `budget: {max_turns: 50}`, the campaign id above, `env_stop: 2`, `outage_stop: 3` and `max_cost_usd: 6`."
+- REG 1040-1041: the order check is "the order check below", tests (a) to (i).
+- REG 1092: "The lists and this check are not changed to make it pass."
+- REG 1598-1600: "The methodologist can read registered words (topology rule 2). Only Paul can add to them (topology rule 1)."
+
+**Reading.** REG 759-760 says what the bodies carry. It does not make the read script test it. The
+order check is a closed list of tests. A test that each body holds every fixed setting would be a
+new part of that check, and a new way for the read to stop. That adds registered matter. I do not
+rule it. It is for Paul in writing.
+
+**Does the script meet the words as they stand?** Yes. `check_section4`, SCRIPT 1161-1216, compares
+each key the body carries, fails an unknown key and requires the campaign id. No change now.
+
+**What the report must say.** The fixed settings were compared only where a kept body carried them.
+No test required every body to carry all of them. Settings the product does not serve back were
+not compared at all.
+
+## Item 7. Spec open point 16: time precision
+
+**Words relied on.** REG 1058-1060 (c): "Times are compared as instants, with their time zone, at the
+precision the record serves. A time served without a zone counts as a field that is absent."
+
+**Reading.** The text settles it. The script must not truncate, round or pad a served time. It
+compares the two instants as served. A time without a zone is an absent field and fails the check.
+Where one time is served to the microsecond and the other to the second, the comparison is of those
+two instants as they stand. No tolerance is added. A tolerance would be a new word.
+
+**Does the script meet it?** Yes. `aware`, SCRIPT 860-870, requires a zone and does not truncate.
+Comparisons in `check_d` 1101-1110, `check_f_g` 1265-1290 and `_check_id98_times` 1132-1145.
+No change. The report states the precision each field was served at, and that a `finished` served
+to the whole second can fail (f) or (g) against a `created` in the same second. That failure would
+be a stop under test (i), not a reason to add a tolerance.
+
+## Item 8. Spec open point 24: test (e) accepts an explicit `arm: "A0"`
+
+**Words relied on.**
+
+- REG 1065-1071 (e): "It is `A0` when the body carries no `arm` field, or `arm: "A0"`, and no `test_author`. Any other body fails the check."
+- RUL 88-90: the served code accepts only `"S1"` for `arm`; "The words describe what was sent".
+
+**Reading.** The text settles it. The registered words name `arm: "A0"` as an `A0` body. The script
+must accept it. To fail such a body would strike the words "or `arm: "A0"`". That is a change to a
+registered word. I do not rule it. It is for Paul in writing, if he wants it.
+
+For the record: the product would have refused such a body (RUL 88-90), so none is expected. The
+plan body is what was sent, and the campaign's `s1` flag is compared with it (Point 2), so an odd
+body would still be caught there.
+
+**Does the script meet it?** Yes. `read_arm`, SCRIPT 1219-1229. No change.
+
+## Item 9. "The run value" is an object, not a run id; the script reads only `run.id`
+
+**Words relied on.**
+
+- REG 1642-1644 (Point 1): "From an out file the script reads the run id under each key and nothing else."
+- RUL 138-140 (T4): "The 49 `run` values must be 49 different full run ids."
+- RUL 262-267: "For each of the 49 keys, the `run` value. Nothing else. The script drops `arm`, `posted`, `ended` and `clean_end` as it parses, and never stores, logs or prints one."
+- RUL 271: "**Nothing else from that folder.** No response, poll, log or login file."
+- RUL 560-564: the out-file guard keeps `run` only.
+
+**Reading.** The ruling wrote "the `run` value" on the belief that it is the id. In the real file it
+is an object: `id`, `status`, `progress`, `clean`, `errors`, `stopped_reason`, `stopped_code`,
+`cost_usd`, `error`. Every field but `id` is outcome-level. The registered words of Point 1 are the
+later and the narrower: "the run id under each key and nothing else". They govern. Reading
+`run.id` alone is inside both texts. Keeping the whole object would break Point 1, the guards of
+RUL section 5 and REG 1102-1103. So:
+
+1. The script takes `entry["run"]["id"]` and nothing else. It never binds, stores, logs or prints
+   another field of the object, nor the object itself. This holds on failure paths too.
+2. If `run` is not an object, or `id` is not a string, T4 fails. The script must not fall back to
+   reading `run` as a string.
+3. Condition 5 ("nothing else from that folder") is kept: same two files, fewer bytes kept.
+
+**Does the script meet it?** Yes. `extract_out`, SCRIPT 598-624. No change to the code.
+
+**What the wave record must say.** The out files' `run` value is an object. The ruling assumed an id.
+The script reads `run.id` only, under Point 1's words. This is recorded before the read.
+
+## Item 10. Where STANDING_IDS came from
+
+**Words relied on.**
+
+- REG 1043: "The script carries the 48 standing run ids as a fixed list."
+- REG 1474-1475 (Part E item 7): "any ledger given to a seat before the primary is signed is sorted by run id and has no slot column".
+- REG 1645-1647 (Point 1): "the 49 ids must be the 48 standing runs and run `98fe708c`, each once".
+- RUL 138-140 (T4): "The 48 under the plain keys must be exactly the 48 standing ids the script carries."
+
+**Reading.** REG 1043 names no source for the list. The ledger it came from is the one Part E item 7
+allows a seat to hold: sorted by id, no slot, no arm, no clean count. So the script may carry these
+ids. The text settles that.
+
+No registered word says T4 must be independent of the out files. T4 asks only that the ids match.
+Since the ledger was built from the poster's out files, T4 is a test that the out files still agree
+with the ledger as issued. It is not proof that the ids are the right runs. That proof comes from
+test (a) on each run record, from test (b), and from campaign membership. No registered word is
+broken. But a false statement of independence in the script would mislead a reader. That must go.
+
+**Does the script meet it?** The list is fine (SCRIPT 325-376) and the comment at 319-324 tells the
+truth. The docstring at SCRIPT 311 does not: "not taken from an out file or the campaign".
+
+**Change (C4).** Replace SCRIPT 311 with the true statement: the ids are from the delivery manager's
+slot-free run ledger, which was built from the run ids in the poster's out files; T4 holds the out
+files to that ledger; tests (a), (b) and campaign membership check each id against the product.
+
+**Change (C5).** On a pass, print one provenance line, outside the trust lines the ruling fixes:
+`Standing ids: from the slot-free run ledger (built from the poster's out files); id-list sha256 b79c3cbe...; T4 is a consistency test.`
+with the full sha256 the script already carries.
+
+**What the wave record and the report must say.** The same three facts: the source of the list; the
+id-list sha256 `b79c3cbedaf775238e0f74ddb506a7ebb86858d9b20845ca97a65dd6a7bedf3d`; and that T4 is
+not independent of the out files, with independence resting on (a), (b) and campaign membership.
+
+## Item 11. On a T4 failure the script prints the offending out-file string
+
+**Words relied on.**
+
+- REG 1642-1644: "the run id under each key and nothing else."
+- RUL 262-267: the script "never stores, logs or prints" any other out-file field.
+- REG 1041-1042: prints "the run ids and times concerned, and prints no figure."
+
+**Reading.** The script may print run ids. A string that is not 32 hex characters has not been shown
+to be a run id. It could be any text from the file, an outcome field included, if the file's shape
+is not what was recorded. Printing it would print "something else" from the out file. The text
+does not settle what to print for a malformed value, so the harder reading is taken: print the key
+and the fact, never the value. A well-formed id may be printed.
+
+**Does the script meet it?** No. `check_t3_t4`, SCRIPT 980-984, passes every string in `bad_form` as
+a run line. The lines at 985-987 (duplicates), 988-993 (symmetric difference) and 994-997
+(attempt 1) can also carry a string that failed the form test.
+
+**Change (C6).** In `check_t3_t4`: for a value that fails `HEX32`, record the failure as
+`the value under key <key> is not a full run id` and pass no run line. In the three later T4
+failures, pass only values that match `HEX32`. Add a test on a made-up out file whose `run.id` is
+a non-hex string, asserting that the string reaches neither the screen nor the deviation file.
+
+## Item 12. Spec open point 22: the spec writer read NOTES lines 9-18
+
+**Words relied on.**
+
+- RUL 33-34: "the methodologist saw outcome-level text by run, namely authoring errors on named `S1` runs, before the read".
+- REG 1102-1103: nobody computes a clean count by arm before the output is filed.
+
+**Reading.** This is a deviation of exposure, not of the rule. Nothing was computed. It is recorded
+in the same form as the entry RUL section 0 made. The entry must hold:
+
+1. Date: 2026-11-12, before the primary is read and before any result by arm exists.
+2. Seat: the writer of the read spec.
+3. What was read: NOTES lines 9-18.
+4. What those lines hold: eight run ids of click batches 1 and 2; nine build error texts by short
+   run id; five of them begin `authoring:`.
+5. The plain statement: "the spec writer saw outcome-level text by run, namely authoring errors on
+   named `S1` runs, before the read". Only `S1` builds have an author, so an authoring error names
+   the run's arm.
+6. What was done with it: joined to nothing; no clean count; no constant, id or rule in the spec or
+   the script was taken from it.
+7. Where it stands: beside the entry of RUL section 0, and before the read.
+
+No script change.
+
+## Item 13. Spec open point 23: is a rerun after a transport stop a "second read"?
+
+**Words relied on.**
+
+- REG 1098: "It is run once on the 240 rows."
+- REG 1105-1106: "A second run, or a figure seen before the script is fixed, would be a second read."
+- REG 1089-1094 (i): "A stop here is not the read of item 3: no row was read. The read waits. ... Only Paul, in writing, can say whether the primary is then read (Part E)."
+
+**I do not rule this. It is Paul's.** The registered words say "A second run ... would be a second
+read" and name no exception for a run that stopped part-way. To say a rerun after a transport stop
+is not a second run would be to add an exception. Only Paul can add it (topology rule 1).
+
+**Meanwhile, the script.** No retry, no resume, no cache of what was fetched. One run is one
+attempt. It meets this (SCRIPT docstring 14-21; exits in `main` 1690-1887). No change.
+
+**Meanwhile, the operator.**
+
+1. Exit 1 (not ready: a constant, an argument or the login file). No file of the wave was opened
+   and no request was made. Fix the cause and start again. This is not a run of the read.
+2. Exit 2 (order check), including a T1, T2 or T3 stop that made no request. Test (i) governs. The
+   read waits. Do not rerun. Log it. Paul says in writing whether the primary is then read.
+3. Exit 3 (provider test). Point 4 says test (i) applies. Same as 2.
+4. Exit 4 (E4, E5 or the integrity stop). Records were read, and at E5 or the integrity stop rows
+   were read. Do not rerun. Log it. No signing seat opens the deviation file. Ask Paul in writing.
+5. Never run the script a second time to "see if it passes now".
+
+---
+
+## Script changes required before commit
+
+Each is made under a new commit and sha256, recorded before any row is read (REG 1092-1093).
+
+- **C1 (item 2).** On every stop before the first request, print: `No run record was read. No run id and no time is concerned.` (`main`, SCRIPT 1720-1756; `print_failures`, 1343-1356.)
+- **C2 (item 3).** Write the two served times (`_times`) beside every run id in the E4, E5 and integrity deviation files (SCRIPT 1814, 1851, 1881-1882), with a test.
+- **C3 (item 4).** Reword the rows line (SCRIPT 1611-1612) to cite the row rule and part 6 item 5 beside A3, and "(0 rows, A2 item 3)" for `98fe708c`. When rows are missing, print that A3 recorded 240 and, after the decision word, list each missing row with run id, task, batch and arm.
+- **C4 (item 10).** Correct the false docstring at SCRIPT 311 to the true provenance of STANDING_IDS.
+- **C5 (item 10).** Print one provenance line on a pass, with the id-list sha256, saying T4 is a consistency test.
+- **C6 (item 11).** In `check_t3_t4` (SCRIPT 980-997) never print or file an out-file value that is not a 32-hex id; print the key instead. Add a test.
+
+Records, not code:
+
+- Wave record: the out files' `run` is an object and only `run.id` is read (item 9).
+- Wave record and report: the provenance of STANDING_IDS and that T4 is not independent (item 10).
+- Report: the t rounding rule (item 5); the limits of the fixed-settings comparison (item 6); the served time precision (item 7).
+- Deviation log: the spec writer's entry (item 12) and the methodologist's entry (signature block).
+
+## For Paul in writing
+
+1. **A rerun after a stop (item 13).** After an exit 2, 3 or 4, is the primary then read, and is that
+   run a second read? REG 1098, 1105-1106 and test (i) leave this to you. Until you write, nobody reruns.
+2. **A fixed-settings test (item 6).** Should the order check also fail a body that does not carry
+   every registered fixed setting (REG 152-154, 759-760)? It would be a new test. As registered, there is none.
+3. **Explicit `arm: "A0"` (item 8).** Test (e) accepts it by its words (REG 1065-1071). Failing it
+   would strike those words. Only if you want it changed.
+
+---
+
+**[reading, signed by the methodologist 2026-11-12, before the primary is read and before any result by arm exists]**
+
+What I read:
+
+- REG lines 140-229, 300-394, 736-1129 and 1396-1892. Its sha256 is in "The pin".
+- RUL, all 720 lines. Its sha256 is in "The pin".
+- SPEC, all 729 lines.
+- SCRIPT, all 1897 lines. It carries the 48 standing run ids: ids only, sorted, no place and no arm.
+- NOTES. I set out to read lines 31-117 only. After a break in my session the whole file was read
+  back into my context, lines 1-30 included.
+
+What I did not read: the tests file `tests/test_wave4_primary_read.py`; anything under `~/wave4`,
+`~/crb-stack` or `~/crb-backups`; any crb API or tool; any Wave 4 row, run record, event, kept
+request body, out file or plan file; any figure by arm.
+
+**Disclosure, for the deviation log.** NOTES lines 1-30 hold the stop (b) note: eight run ids of click
+batches 1 and 2 and nine build error texts by short run id, five beginning `authoring:`. So, in
+the words of RUL 33-34, the methodologist saw outcome-level text by run, namely authoring errors
+on named `S1` runs, before the read. This is the same text RUL section 0 already records for this
+seat, seen a second time. I joined it to nothing. I computed no count from it. No reading above
+rests on it. It is to be entered beside the spec writer's entry of item 12, before the read.
+
+I wrote one file, this one. I made no commit, no request and no change to any other file.
