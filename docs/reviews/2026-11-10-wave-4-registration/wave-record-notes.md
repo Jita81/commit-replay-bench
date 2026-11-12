@@ -313,12 +313,17 @@ Written before the primary is read and before any result by arm exists.
 - Every cost figure in the wave report carries the label "product dollars, unconfirmed", as
   item 2 requires.
   **[aspiration — a rule for the report, which is not yet written]**
-- This entry was committed and pushed before the read script was run. The script is run
-  once, from a checkout of main at `07125be0ef710fd91af5a273ffaa1c002a21f5a3`, where
-  `scripts/wave4_primary_read.py` has sha256
-  `8b9bb6afe1a1d9982e3c6f25d3400939ea0b9badf4de8d9e7655464510727a25`, the value recorded
-  above for the merged script.
+- The script is run once, from a checkout of main at
+  `07125be0ef710fd91af5a273ffaa1c002a21f5a3`, where `scripts/wave4_primary_read.py` has
+  sha256 `8b9bb6afe1a1d9982e3c6f25d3400939ea0b9badf4de8d9e7655464510727a25`, the value
+  recorded above for the merged script.
   **[measured — n = 1 file, method: `shasum -a 256 scripts/wave4_primary_read.py` in a checkout at `07125be0ef710fd91af5a273ffaa1c002a21f5a3` by the delivery manager on 2026-11-12; apparatus n/a, a file hash, not a graded row]**
+- This entry was committed and pushed before the read script wrote its output. The commit
+  that holds it, `ad5ac9e3a429ebe2eb5deab269f3ad4145e2226f`, has committer time 12:53:03Z.
+  The delivery manager's checkout records its push at 12:53:05Z. The script's output file
+  was last written at 12:53:13Z. These are times on one machine's clock. They show the
+  order of the three events and nothing else.
+  **[measured — n = 3 times, method: `git log --format=%cI` for the commit, `git reflog show origin/docs/wave-4-primary-read --date=iso-strict` for the push, and `stat` of the script's `--output` file for the write, by the delivery manager on 2026-11-12; apparatus n/a, clock times, not graded rows]**
 
 ## 2026-11-12 — The primary read: made once, filed unedited
 
@@ -326,9 +331,16 @@ Written before the primary is read and before any result by arm exists.
   terminal tab, from a checkout whose only change against main
   `07125be0ef710fd91af5a273ffaa1c002a21f5a3` is the entry above. It printed its own sha256,
   `8b9bb6afe1a1d9982e3c6f25d3400939ea0b9badf4de8d9e7655464510727a25`, and ended with exit
-  code 0 (the read was made). No deviation file was written. There was no earlier run and
-  there is no second one.
-  **[measured — n = 1 run of the script, method: `scripts/wave4_primary_read.py` with `--output`, its printed hash and exit code read from the terminal by the delivery manager on 2026-11-12; apparatus n/a, a script run, not a graded row]**
+  code 0 (the read was made). No deviation file was written.
+  **[measured — n = 1 run of the script, method: `scripts/wave4_primary_read.py` with `--output`, its printed hash and exit code read from the terminal by the delivery manager on 2026-11-12, and a listing of the folder named by `--deviation-out` that shows no deviation file; apparatus n/a, a script run, not a graded row]**
+- There was no earlier run and there is no second one. This is the delivery manager's
+  statement. No record kept here can prove that a script was not run.
+  **[hypothesis — the delivery manager's statement of 2026-11-12; the script keeps no count of its runs]**
+- `primary-read-output.txt` is an artefact fixed by its hash. It carries no claim tags,
+  because adding one would change the file and break the hash. The tagged record of what
+  it says is the entry below, which gives n, method and apparatus. Any later document
+  that quotes a figure from the output tags it there.
+  **[hypothesis — a filing rule stated by the delivery manager for this one artefact]**
 - Its output is filed beside this record as `primary-read-output.txt`, copied byte for byte
   from the file the script wrote. Its sha256 is
   `0ffe99026cfefb0ef04ab43529b1ffecdf982dee9a01984889a410020d06dd53` and it has 118 lines.
