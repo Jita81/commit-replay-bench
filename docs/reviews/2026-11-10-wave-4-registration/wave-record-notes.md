@@ -387,7 +387,8 @@ poster's folder, the product or a row.
   a null `error` for a row with no error, every such `S1` row was counted as without a
   usable test. The count, the 12 author-hit labels, the two-unit blocks result and the
   left-out result would then come from the counting rule and not from the author. R12 item
-  5 names 0 of 120 as what a fault in the check would produce. The pilot read 5 of 6. No
+  5 names 0 of 120 as what a fault in the check would produce. The pilot read 5 of 6
+  **[measured — n = 6 pilot `S1` commits of 18 pilot builds, method: each row's labels, stop reason and failure kind read from `GET /api/v1/grades/<row>`, as the gate table of Amendment 2 in `docs/reviews/2026-11-10-wave-4-registration.md` records, apparatus 2.5]**. No
   seat may call the figure the author's usable-test rate until the served shape of a
   row's `error` field and of the event's `task` key has been checked against the served
   code.
@@ -418,7 +419,10 @@ a row, a run, an event or the poster's folder.
   (`src/crb/server/routes/runs.py` lines 298 to 302). The read script looks for the commit
   in `payload["task"]` (`scripts/wave4_primary_read.py`, `keep_event`), as R12 item 2 of the
   registration says. That key is never there, so test (b) of R12 fails for every attempt,
-  whatever the author did.
+  whatever the author did. `keep_event` reads the task of each
+  `builder.author_test.failed` event from the payload in the same way. In a run that holds
+  such an event the missing key also makes test (c) fail for every attempt of that run
+  (`usable_attempt`). A correction must mend both lookups.
   **[measured — n = 3 source passages, method: `git show 7bb03d6c73c8c9e10cbc283049be2ce9740eb19e:<path>` for the two product files and a read of the script as merged, by four agents and then the delivery manager on 2026-11-12; apparatus n/a, a reading of code, not a graded row]**
 - **What follows from it.** The 12 "author-hit" labels, the blocks result on two units and
   the left-out result that cannot be calculated all come from that count. The decision
