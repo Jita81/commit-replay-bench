@@ -979,6 +979,9 @@ backup rehearsal, the digest check, the alert rules and the penetration test are
       same chain (`GET /api/v1/ledger/export` for grades; `crb ledger verify --store --json`
       on the API host prints both heads) and the chain must verify: a store cut at its end
       or replaced wholesale fails this, though its own walk reads intact.
+      `crb ledger anchor --store --out <dir>` writes both heads to an anchor file and
+      `crb ledger verify --store --anchor <dir>` makes this check; where the anchor
+      directory lives and who holds it is [LEDGER-ANCHORS.md](LEDGER-ANCHORS.md).
 - [ ] **`sign-in`** · product proves — OIDC login works with a role-mapped user; `CRB_LOCAL_AUTH_ENABLED=false`; the
       bootstrap admin password has been rotated (`PUT /users/{id}/password`, or
       `crb users set-password <admin>` on the API host) or the account deactivated
