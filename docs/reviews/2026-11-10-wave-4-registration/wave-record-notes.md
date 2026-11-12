@@ -357,3 +357,51 @@ Written before the primary is read and before any result by arm exists.
 - The output is not yet signed. The methodologist and the validity engineer sign it, or
   say why they do not, in the next entry. Until then no seat states a finding from it.
   **[aspiration — the two signatures are the next step and have not been given]**
+
+## 2026-11-12 — Signatures on the primary read
+
+Both seats read the filed copy in this repository and nothing else. Neither read the
+poster's folder, the product or a row.
+
+- **Methodologist: signs.** The seat signs the filed output (sha256
+  `0ffe99026cfefb0ef04ab43529b1ffecdf982dee9a01984889a410020d06dd53`) as the primary read,
+  with its decision word, Inconclusive. The seat re-did the arithmetic from the printed
+  batch sums: T = -55/2, d = -45.8333 points, m = 4 of 4096, the interval -58.6725 to
+  -32.9942, and the blocks result p = 2/4. Every figure agrees with the output.
+  **[measured — n = 12 printed batch sums, method: recomputation of the sum, the sign-flip count over all 4096 patterns and the interval of part 6 item 2 from the filed output, by the methodologist's seat on 2026-11-12; apparatus n/a, arithmetic on a filed file]**
+- **Validity engineer: signs.** The seat signs the same file, its decision word and its
+  primary figures, after the same recomputation. Inconclusive is the only finding of the
+  wave. The report may describe, and not state as a finding, that on the 60 listed commits
+  of both repositories together the `S1` arm as the product served it had fewer clean rows
+  than `A0`. The output says nothing about test-first as such.
+  **[measured — n = 12 printed batch sums, method: recomputation from the filed output by the validity engineer's seat on 2026-11-12; apparatus n/a, arithmetic on a filed file]**
+- **The decision word does not rest on the usable-test count.** Both seats say so. The
+  primary p is below 0.05 with `S1` behind. Cleared needs `S1` ahead. No 15-point effect
+  needs a p not below 0.05. Neither is reachable, so the word is Inconclusive for any
+  count. The output prints one ground, the blocks result. The seats name a second: the
+  left-out result cannot be calculated.
+  **[hypothesis — the two seats' reading of A9 of the registration, signed 2026-11-12]**
+- **Not signed by either seat: "usable tests: 0 of 120" as a measure of the test author.**
+  The script counts a row whose `error` field is null or absent as failing test (d) of
+  R12. The registered words are "does not begin with `authoring:`". If the product serves
+  a null `error` for a row with no error, every such `S1` row was counted as without a
+  usable test. The count, the 12 author-hit labels, the two-unit blocks result and the
+  left-out result would then come from the counting rule and not from the author. R12 item
+  5 names 0 of 120 as what a fault in the check would produce. The pilot read 5 of 6. No
+  seat may call the figure the author's usable-test rate until the served shape of a
+  row's `error` field and of the event's `task` key has been checked against the served
+  code.
+  **[hypothesis — both seats' statements of 2026-11-12; the served shape is not yet checked]**
+- **Two misses, for the deviation log.** The spec's rule that a null `error` fails test
+  (d) was never ruled on in the methodologist's signed readings. The consistency figure
+  that would have shown the fault at once (clean `S1` rows counted without a usable test)
+  was taken out by the delivery manager before the script was committed.
+  **[hypothesis — the seats' account, 2026-11-12; the deviation log entry is not yet written]**
+- **With two units the blocks p can never be below 0.5.** A blocks result needs at least
+  six units before it can fall below 0.05. This is a property of the registered design.
+  The next registration should say so.
+  **[measured — n = 4 sign patterns, method: enumeration of the sign patterns of two units by the methodologist's seat on 2026-11-12; apparatus n/a, arithmetic]**
+- **Reserved to Paul in writing.** Whether a corrected count of usable tests may be
+  computed after filing and reported as description. The read is not run again without
+  that word. Whether more commits are worth their cost is also Paul's, as part 6 says.
+  **[hypothesis — the seats' reading of the read-once rule of the registration]**
