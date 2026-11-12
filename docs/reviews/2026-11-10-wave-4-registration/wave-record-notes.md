@@ -302,3 +302,20 @@ Written before the primary is read and before any result by arm exists.
 - Part E item 2, the cost gate. It is Paul's to close in writing, as the registration
   says. Nothing in this section closes it.
   **[hypothesis — Part E item 2 of the registration on main]**
+
+## 2026-11-12 — Part E item 2 closed by Paul's word, before the read
+
+- Paul wrote to the delivery manager on 2026-11-12, before 12:52Z, in these words: "read
+  may go ahead on product dollars, unconfirmed". That is the second of the two things Part
+  E item 2 names. The gate is deferred, not passed: no Console figure or export exists, and
+  the product's figures are not confirmed against the provider's bill.
+  **[hypothesis — Paul's message in the session of 2026-11-12; the transcript is not in this repository]**
+- Every cost figure in the wave report carries the label "product dollars, unconfirmed", as
+  item 2 requires.
+  **[aspiration — a rule for the report, which is not yet written]**
+- This entry was committed and pushed before the read script was run. The script is run
+  once, from a checkout of main at `07125be0ef710fd91af5a273ffaa1c002a21f5a3`, where
+  `scripts/wave4_primary_read.py` has sha256
+  `8b9bb6afe1a1d9982e3c6f25d3400939ea0b9badf4de8d9e7655464510727a25`, the value recorded
+  above for the merged script.
+  **[measured — n = 1 file, method: `shasum -a 256 scripts/wave4_primary_read.py` in a checkout at `07125be0ef710fd91af5a273ffaa1c002a21f5a3` by the delivery manager on 2026-11-12; apparatus n/a, a file hash, not a graded row]**
