@@ -362,7 +362,8 @@ B2 item 3 counts and step counts, by repository and arm (key file; RDO line 50):
 | cobra | A0 | 10 | 0 | 0 | 10 | 0 |
 | cobra | S1 | 10 | 0 | 0 | 10 | 0 |
 
-Clean rows that carry an error: 0 in each of the four rows.
+Clean rows that carry an error: 0 in each of the four rows **[hypothesis — the key file, held
+by the delivery manager, not in this repository]**.
 
 Paul's audit agreement with the reviewer: 8 of 10 the same verdict, 2 of 10 different. B3 allows
 the count of agreement and nothing more, so no further split is given here.
