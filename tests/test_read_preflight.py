@@ -1154,6 +1154,16 @@ UNFOLLOWED_HANDOFFS = {
         "                return super().g(body)\n"
         "        tasks.add(R().run())\n"
     ),
+    # ... and an alias of it made before the call is the same method.
+    "an alias of a method whose name is also a loop variable": (
+        "        for g in ():\n"
+        "            pass\n"
+        "        class R(Get):\n"
+        "            def run(self):\n"
+        "                callback = self.g\n"
+        "                return list(map(callback, [body]))\n"
+        "        tasks.add(R().run())\n"
+    ),
     "a function kept on an attribute": (
         "        class R:\n"
         "            def run(self):\n"

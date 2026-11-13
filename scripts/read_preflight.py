@@ -923,11 +923,12 @@ def _fnref(
 
 
 def _function_values(
-    tree: ast.Module, funcs: Mapping[str, list[_Callee]], methods: set[int]
+    tree: ast.Module, funcs: Mapping[str, list[_Callee]], methods: set[int], seed: set[str]
 ) -> tuple[set[str], set[int]]:
     """``(fnish, returns_fn)`` to a fixpoint (see ``_Analysis``); a class of this module that
-    defines a function holds one, and so does an instance of it."""
-    fnish = {
+    defines a function holds one, and so does an instance of it. ``seed`` is in ``fnish``
+    from the start, so an alias of a seeded name (``callback = self.g``) is found too."""
+    fnish = set(seed) | {
         c.name
         for c in ast.walk(tree)
         if isinstance(c, ast.ClassDef)
@@ -1013,10 +1014,10 @@ def _analyse(tree: ast.Module) -> _Analysis:
     }
     every_def = set(funcs)
     funcs = {k: v for k, v in funcs.items() if kinds.get(k, set()) <= {"def", "lambda"}}
-    fnish, returns_fn = _function_values(tree, funcs, methods)
     # A method whose name is also bound another way (``for g in ...``) is still a method:
-    # ``super().g(b)`` reaches it, so the attribute name stays a function (``_attr_fn``).
-    fnish |= {f".{k}" for k in every_def}
+    # ``super().g(b)`` reaches it, so the attribute name stays a function (``_attr_fn``). It
+    # is seeded before the fixpoint so an alias of it (``callback = self.g``) is one as well.
+    fnish, returns_fn = _function_values(tree, funcs, methods, {f".{k}" for k in every_def})
     handed: dict[int, dict[str, str]] = {id(s): {} for s, _nodes, _parent in scopes}
     while True:
         envs: dict[int, dict[str, str]] = {}
