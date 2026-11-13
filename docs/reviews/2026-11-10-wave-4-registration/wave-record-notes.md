@@ -580,3 +580,32 @@ the draw.
   order in which they are shown to Paul departs from the registered words, and the
   departure can only lower the counted number.
   **[hypothesis — a deviation of presentation order, ruled by the methodologist's seat on 2026-11-12 before any draw exists; no patch has been drawn or checked]**
+
+## 2026-11-12 — The review draw is made and its list is filed
+
+The script was merged with pull request
+[#136](https://github.com/Jita81/commit-replay-bench/pull/136) and was then run once, from a
+checkout of main at the merge commit `9ccc6ee99a0a642a08601d3c32e03343c94b1210`, against
+the served product. It ended with exit code 0. There was no earlier run and there is no
+second one.
+**[hypothesis — the delivery manager's statement of 2026-11-12; the script keeps no count of its runs]**
+
+- Its output is filed beside this record as `review-draw-output.txt`, copied byte for byte
+  from the file the script wrote. Its sha256 is
+  `91a155629843d8e5eef3d73a764ea673b378045945a37851fc22d6db73dae328` and it has 53 lines.
+  Nothing in it is edited. Like the read's output it carries no claim tags, because a tag
+  would change the file and break the hash.
+  **[measured — n = 1 file, method: `shasum -a 256` of the script's `--output` file and of the copy filed here, equal, by the delivery manager on 2026-11-12; apparatus n/a, a file hash, not a graded row]**
+- What the output says, in its own figures. The order check passed. The draw gave 17
+  patches of 20 for click, a shortfall of 3, and 20 patches of 20 for cobra, 37 patches in
+  all. The output names the hashes of the review list, the key file and the audit file.
+  **[measured — n = 240 blind rows of 48 runs in 12 batches over 60 commits of click and cobra, method: the one run of `scripts/wave4_review_draw.py` on 2026-11-12, last three lines of `review-draw-output.txt`; apparatus 2.5, blind mode]**
+- Clean rows that carry an error: the wave-wide total is 0. Reading 4 and the read's own
+  count of the clean field therefore give the same draw, and no deviation-log entry is
+  needed for it.
+  **[measured — n = 240 blind rows, method: the line "clean rows that carry an error (not drawn), wave-wide total" of `review-draw-output.txt`; apparatus 2.5, blind mode]**
+- The key file and the audit file are held by the delivery manager outside this
+  repository. The reviewer is given the label, the repository and the commit of each
+  patch and nothing else. No patch had been shown to the reviewer when this entry was
+  written.
+  **[hypothesis — the delivery manager's statement of 2026-11-12]**
