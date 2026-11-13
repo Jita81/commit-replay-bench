@@ -35,8 +35,8 @@ exist yet), and a gate whose own folder and the folders it reads (``ui`` and ``d
 UI gates) hold no changed file. The gates check what is checked out, so a push that sends
 anything but this checkout's ``HEAD`` (another branch, several refs, a tag on an older
 commit) is stopped with exit 3, and so is a push from a checkout with uncommitted or
-untracked files, which the gates would read in place of what the commit holds. Once the hook has found an interpreter, a push that only
-deletes refs runs no gate. A worktree whose branch does not carry ``scripts/hooks`` has no
+untracked files, which the gates would read in place of what the commit holds. Once the
+hook has found an interpreter, a push that only deletes refs runs no gate. A worktree whose branch does not carry ``scripts/hooks`` has no
 hook to run. ``git push --no-verify`` skips every git hook, this one included, and nothing
 local can stop that: CI remains the gate. A run outside the hook says so when the hook is not
 installed.
