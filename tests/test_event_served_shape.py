@@ -25,7 +25,8 @@ What it does: Emits ``builder.author_test.*`` through ``builders.base.emit`` →
 How:          A seeded app (``fixtures.server_seed.make_env``) and its TestClient, no network;
               the lifted and refused sets are probed on live emitters over a ``MemorySink``,
               the names read with ``inspect``; the emit calls are read with ``ast``; the table
-              is split on unescaped pipes, parentheses and the prose after " — " dropped.
+              is split on unescaped pipes and every code span in a payload cell is checked —
+              after " — ", inside parentheses, nested — none of its text dropped.
 Layer:        tests — docs/ARCHITECTURE.md#72-observability
 ADRs:         none
 Works with:   src/crb/observability/events.py (``Emitter.on_event``, the lift),
@@ -38,7 +39,9 @@ Works with:   src/crb/observability/events.py (``Emitter.on_event``, the lift),
 Tested by:    tests/test_event_served_shape.py
 Touch when:   never for a new repository; the emitter's lift or the served envelope changes,
               an event is written outside ``Emitter.on_event`` with an envelope-named payload
-              key (add an exemption with its reason), or a new emit call shape is added.
+              key (add an exemption with its reason), a payload cell names a value or a
+              nested key that is also an envelope name (add it to NOT_KEYS with its reason),
+              or a new emit call shape is added.
 """
 
 from __future__ import annotations
@@ -78,10 +81,33 @@ EXEMPT: dict[str, tuple[set[str], str]] = {
     ),
     "`run.reclaimed`": ({"status"}, "store/jobs.py append_event(payload=…)"),
     "`legacy.tasks`": ({"task"}, "the CLI's own callback; never the Emitter, never stored"),
+    "`deployment.first_healthy`": (
+        {"status"},
+        "server/flow_record.py record_first_healthy: append_system_event(payload={'status': …})",
+    ),
 }
 
-#: Code spans in a payload cell that are values, not keys (``by`` ∈ ``admin`` | ``self``).
-VALUES = {"self"}
+#: Code spans in one row's payload cell that are not payload keys — a value, or a key of a
+#: nested dict — though the emitter would not keep that name as a payload key. Key: (a code
+#: span in the row's action cell, the span text). Narrow on purpose: never a global word list,
+#: so ``status`` or ``error`` documented as a key on any other row is still checked.
+NOT_KEYS: dict[tuple[str, str], str] = {
+    ("`run.halted`", "status"): (
+        "a key of the nested ``detail`` dict (the reserver's run_not_owned halt in "
+        "server/worker.py Worker._reserver, passed whole as detail=dict(reserved.detail) by "
+        "core/run.py), never a top-level payload key"
+    ),
+    ("`reading.reserved`", "self"): (
+        "a value of ``pinned_by`` (server/worker.py Worker._reserver: pinned_by or 'self')"
+    ),
+    ("`build.held_out_graded`", "error"): (
+        "a value of ``result`` (core/acceptance.py RESULT_ERROR, returned by "
+        "factory/build.py run_held_out)"
+    ),
+    ("`user.password_set`", "self"): (
+        "a value of ``by`` (server/routes/admin.py: record_user_event(..., by='self'))"
+    ),
+}
 
 
 @pytest.fixture(autouse=True)
@@ -196,18 +222,42 @@ def _rows() -> list[list[str]]:
 
 
 def _keys(cell: str) -> list[tuple[str, bool]]:
-    """``(key, on_envelope)`` for each code span in a payload cell, prose and asides dropped."""
-    head = cell.split(" — ", 1)[0]
-    while True:
-        bare = re.sub(r"\([^()]*\)", "", head)
-        if bare == head:
-            break
-        head = bare
-    out = []
-    for m in re.finditer(r"`([^`]+)`(" + ENVELOPE + ")?", head):
-        if re.fullmatch(r"[a-z_][a-z0-9_]*", m.group(1)) and m.group(1) not in VALUES:
-            out.append((m.group(1), bool(m.group(2))))
-    return out
+    """``(key, on_envelope)`` for every identifier code span in a payload cell, wherever it
+    sits — after " — ", inside parentheses, nested: no text of the cell is dropped, so a key
+    declared in an aside is checked like any other."""
+    return [
+        (m.group(1), bool(m.group(2)))
+        for m in re.finditer(r"`([^`]+)`(" + ENVELOPE + ")?", cell)
+        if re.fullmatch(r"[a-z_][a-z0-9_]*", m.group(1))
+    ]
+
+
+def problems(rows: list[list[str]]) -> tuple[list[str], set[str], set[tuple[str, str]]]:
+    """``(wrong, exemptions used, NOT_KEYS entries used)`` for event-table ``rows``: a payload
+    key the emitter would not keep, or an "… on the envelope" key that is no served envelope
+    field. The real table and the planted cells both go through this one function."""
+    wrong: list[str] = []
+    used: set[str] = set()
+    used_not: set[tuple[str, str]] = set()
+    for stage, action, _status, payload, by, _consumed in rows:
+        exempt: set[str] = set()
+        for span, (keys, _why) in EXEMPT.items():
+            if span in action:
+                exempt |= keys
+                used.add(span)
+        for key, on_env in _keys(payload):
+            if on_env:
+                if key not in EVENT_KEYS:
+                    wrong.append(f"{stage} {action[:60]}: `{key}` on the envelope — not served")
+                continue
+            if key in exempt or _probe(key) == "kept":
+                continue
+            not_key = [(span, k) for span, k in NOT_KEYS if k == key and span in action]
+            if not_key:
+                used_not.update(not_key)
+                continue
+            wrong.append(f"{stage} {action[:60]}: `{key}` — {_fix(by, key)}")
+    return wrong, used, used_not
 
 
 def test_the_table_parses() -> None:
@@ -216,20 +266,57 @@ def test_the_table_parses() -> None:
 
 
 def test_no_documented_payload_key_is_one_the_emitter_lifts() -> None:
-    wrong, used = [], set()
-    for stage, action, _status, payload, by, _consumed in _rows():
-        exempt: set[str] = set()
-        for span, (keys, _why) in EXEMPT.items():
-            if span in action:
-                exempt |= keys
-                used.add(span)
-        for key, on_env in _keys(payload):
-            if on_env or key in exempt:
-                continue
-            if _probe(key) != "kept":
-                wrong.append(f"{stage} {action[:60]}: `{key}` — {_fix(by, key)}")
+    wrong, used, used_not = problems(_rows())
     assert not wrong, "a documented payload key the emitter lifts:\n" + "\n".join(wrong)
     assert used == set(EXEMPT), f"stale exemptions: {set(EXEMPT) - used}"
+    assert used_not == set(NOT_KEYS), f"stale NOT_KEYS: {set(NOT_KEYS) - used_not}"
+
+
+def _planted(cell: str) -> list[str]:
+    row = ["system", "`probe.planted`", "ok", cell, "core/x.py", "LOG"]
+    return problems([row])[0]
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "`item` — and `task`",  # after an em dash
+        "`item` (`task`)",  # inside parentheses
+        "`item` (`reason` (`task`))",  # nested parentheses
+        "`item` (`reason` — the `task`)",  # inside parentheses that hold an em dash
+        "`moment` (`observed` on a fresh database — never dated) / `status`",  # the cut it hid
+    ],
+)
+def test_a_lifted_key_in_any_position_of_a_cell_is_reported(cell: str) -> None:
+    [hit] = _planted(cell)
+    assert "probe.planted" in hit and ("`task`" in hit or "`status`" in hit)
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "`item` — and `task_id` on the envelope",
+        "`item` (`task_id` on the envelope)",
+        "`item` (`reason` (`task_id` on the envelope))",
+        "`item` (`reason` — the `task_id` on the envelope)",
+        "`moment` (`observed` — never dated) / `status` on the envelope",
+    ],
+)
+def test_the_same_key_written_on_the_envelope_passes(cell: str) -> None:
+    assert _planted(cell) == []
+
+
+def test_an_envelope_key_that_is_no_served_field_is_reported() -> None:
+    [hit] = _planted("`item` (`reason` — the `task` on the envelope)")
+    assert "`task` on the envelope — not served" in hit
+
+
+def test_not_keys_is_per_row_not_global() -> None:
+    # ``status`` is allowed in run.halted's ``detail``; the same span on any other row fails
+    assert ("`run.halted`", "status") in NOT_KEYS
+    assert _planted("`detail` (`run_id`, `status`)")
+    row = ["system", "`run.halted`", "ok", "`detail` (`run_id`, `status`)", "core/run.py", "LOG"]
+    assert problems([row])[0] == []
 
 
 def _fix(by: str, key: str) -> str:
@@ -249,6 +336,11 @@ def _fix(by: str, key: str) -> str:
 def test_every_envelope_key_is_a_served_envelope_field() -> None:
     marked = {k for r in _rows() for k, on_env in _keys(r[3]) if on_env}
     assert marked and marked <= set(EVENT_KEYS), marked - set(EVENT_KEYS)
+
+
+def test_the_not_keys_spans_really_are_names_the_emitter_would_not_keep() -> None:
+    # an entry is only needed, and only honest, for a span that would otherwise fail
+    assert all(_probe(k) != "kept" for _span, k in NOT_KEYS), NOT_KEYS
 
 
 def test_the_exempt_keys_really_are_lifted_by_the_emitter() -> None:
