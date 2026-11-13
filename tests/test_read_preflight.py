@@ -1018,3 +1018,197 @@ def test_every_other_way_to_read_a_payload_is_flagged(rp: ModuleType, shape: str
         + f'def keep(item):\n    p = item["payload"]\n    return {VALUE_READS[shape]}\n'
     )
     assert rp.source_problems(src), shape
+
+
+# -- review of #142, round 3 ---------------------------------------------------------------
+
+_TASK_READ = (
+    "import read_preflight\n"
+    'S = read_preflight.Expect("builder.author_test.start", "task_id", "envelope", nonempty=True)\n'
+    "EVENT_EXPECTATIONS = (S,)\n"
+    "def n(events):\n    read_preflight.check(events, EVENT_EXPECTATIONS)\n"
+    "    tasks = set()\n"
+    "    for e in events:\n"
+    '        body = e["payload"]\n'
+    "{read}"
+    '    return read_preflight.nonzero("n", len(tasks), len(events))\n'
+)
+#: A payload handed to a lambda: each reads ``task`` with a default, so two tasks count as
+#: one ``"unknown"``.
+LAMBDA_READS = {
+    "a shadowing parameter": (
+        '        tasks.add((lambda body: body.get("task", "unknown"))(body))\n'
+    ),
+    "another parameter name": '        tasks.add((lambda b: b.get("task", "unknown"))(body))\n',
+    "a keyword argument": (
+        '        tasks.add((lambda body: body.get("task", "unknown"))(body=body))\n'
+    ),
+    "a lambda bound to a name": (
+        '        get = lambda body: body.get("task", "unknown")\n        tasks.add(get(body))\n'
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(LAMBDA_READS))
+def test_a_payload_handed_to_a_lambda_keeps_its_kind(
+    rp: ModuleType, tmp_path: Path, shape: str
+) -> None:
+    source = _TASK_READ.format(read=LAMBDA_READS[shape])
+    problems = rp.source_problems(source)
+    assert any("(payload.task) turns a missing key into a value" in p for p in problems), problems
+    assert any("payload lookup of 'task'" in p for p in problems), problems
+    runtime = rp.preflight(source, _run())
+    assert any(p.startswith("payload.task is read but is on 0 of 3 events") for p in runtime)
+    done = _cli(tmp_path, source, _run())
+    assert done.returncode == 6, done.stdout
+
+
+#: A payload (or the events) handed, with a function, to a call the rule cannot follow: what
+#: the function's parameter receives is not known, so the use is refused.
+UNFOLLOWED_HANDOFFS = {
+    "map with a lambda": '        tasks |= set(map(lambda b: b.get("task", "unknown"), [body]))\n',
+    "a sort key": '        tasks |= set(sorted([body], key=lambda b: b.get("task", "")))\n',
+    "map with a def": "        tasks |= set(map(task_of, [body]))\n",
+    "a starred parameter": "        tasks.add(first(body))\n",
+    # A lambda bound other than by ``name = lambda``: the name is not followed.
+    "an annotated lambda": (
+        '        g: object = lambda b: b.get("task", "unknown")\n        tasks.add(g(body))\n'
+    ),
+    "a tuple-assigned lambda": (
+        '        g, h = lambda b: b.get("task", "unknown"), 0\n        tasks.add(g(body))\n'
+    ),
+    "a walrus called in place": (
+        '        tasks.add((g := lambda b: b.get("task", "unknown"))(body))\n'
+    ),
+    "a walrus then a call": (
+        '        (g := lambda b: b.get("task", "unknown"))\n        tasks.add(g(body))\n'
+    ),
+    # A payload reaching a parameter through a default.
+    "a lambda default": '        tasks.add((lambda b=body: b.get("task", "unknown"))())\n',
+    "a bound lambda default": (
+        '        f = lambda b=body: b.get("task", "unknown")\n        tasks.add(f())\n'
+    ),
+    "a def default": (
+        "        def f(b=body):\n"
+        '            return b.get("task", "unknown")\n        tasks.add(f())\n'
+    ),
+    # A callee the rule cannot resolve.
+    "a returned lambda": '        tasks.add((lambda: lambda y: y.get("task", "u"))()(body))\n',
+    "a partial called": "        tasks.add(functools.partial(task_of)(body))\n",
+    "a partial bound": "        p = functools.partial(task_of)\n        tasks.add(p(body))\n",
+    "a function alias": "        g = task_of\n        tasks.add(g(body))\n",
+    "a factory": "        tasks.add(mk()(body))\n",
+    "a dict of lambdas": '        tasks.add({"f": lambda b: b.get("task", "u")}["f"](body))\n',
+    "a list of lambdas": '        tasks.add([lambda b: b.get("task", "u")][0](body))\n',
+    "a conditional callee": "        tasks.add((task_of if body else task_of)(body))\n",
+    "a class attribute": "        tasks.add(Get.f(body))\n",
+    "a method of an instance": "        tasks.add(Get().g(body))\n",
+    "a partial as a key": (
+        "        p = functools.partial(task_of)\n"
+        "        tasks |= {str(x) for x in sorted([body], key=p)}\n"
+    ),
+    # A key function handed to a method of the payload list.
+    "a sort of the payloads": (
+        '        bodies = [x["payload"] for x in events]\n'
+        '        bodies.sort(key=lambda b: b.get("task", "unknown"))\n'
+        "        tasks |= {str(b) for b in bodies}\n"
+    ),
+}
+_HANDOFF_PRELUDE = (
+    "import functools\n"
+    'def task_of(b):\n    return b.get("task", "unknown")\n'
+    'def first(*a):\n    return a[0].get("task", "unknown")\n'
+    'def mk():\n    return lambda b: b.get("task", "unknown")\n'
+    "class Get:\n"
+    '    f = staticmethod(lambda b: b.get("task", "unknown"))\n'
+    '    def g(self, b):\n        return b.get("task", "unknown")\n'
+)
+#: The same shapes over plain data: nothing to refuse.
+DATA_HANDOFFS = {
+    "a key over rows": (
+        "        rows = sorted([2, 1], key=lambda r: -r)\n        tasks.add(len(rows))\n"
+    ),
+    "a map over rows": "        xs = set(map(lambda r: r + 1, [1]))\n        tasks.add(len(xs))\n",
+    "an event appended": (
+        "        pool = []\n        pool.append(e)\n        tasks.add(len(pool))\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(DATA_HANDOFFS))
+def test_a_function_over_plain_data_is_not_refused(rp: ModuleType, shape: str) -> None:
+    read = "        tasks.add(read_preflight.value(e, S))\n" + DATA_HANDOFFS[shape]
+    source = _TASK_READ.format(read=read) + _HANDOFF_PRELUDE
+    assert rp.source_problems(source) == []
+    assert rp.preflight(source, _run()) == []
+
+
+@pytest.mark.parametrize("shape", sorted(UNFOLLOWED_HANDOFFS))
+def test_a_payload_handed_where_the_rule_cannot_follow_is_refused(
+    rp: ModuleType, tmp_path: Path, shape: str
+) -> None:
+    source = _TASK_READ.format(read=UNFOLLOWED_HANDOFFS[shape]) + _HANDOFF_PRELUDE
+    problems = rp.source_problems(source)
+    assert any("the rule cannot follow what" in p for p in problems), problems
+    assert rp.preflight(source, _run())
+    assert _cli(tmp_path, source, _run()).returncode == 6
+
+
+#: Filters that take events by excluding an action: each selects every other action.
+EXCLUSION_FILTERS = {
+    "!=": '    pool = [e for e in events if e["action"] != C.action]\n',
+    "not in": '    pool = [e for e in events if e["action"] not in (C.action,)]\n',
+    "not ==": '    pool = [e for e in events if not e["action"] == C.action]\n',
+    "or": '    pool = [e for e in events if e["action"] == C.action or e["seq"]]\n',
+    "if ... continue": (
+        "    pool = []\n    for e in events:\n"
+        '        if e["action"] == C.action:\n            continue\n        pool.append(e)\n'
+    ),
+    "a continue nested in an if": (
+        "    pool = []\n    for e in events:\n"
+        '        if e["action"] == C.action:\n            if True:\n                continue\n'
+        "        pool.append(e)\n"
+    ),
+    "a continue in a try": (
+        "    pool = []\n    for e in events:\n"
+        '        if e["action"] == C.action:\n            try:\n                continue\n'
+        "            finally:\n                pass\n        pool.append(e)\n"
+    ),
+    "a continue in a with": (
+        "    import contextlib\n    pool = []\n    for e in events:\n"
+        '        if e["action"] == C.action:\n'
+        "            with contextlib.nullcontext():\n                continue\n"
+        "        pool.append(e)\n"
+    ),
+    "if ... else": (
+        "    pool = []\n    for e in events:\n"
+        '        if e["action"] == C.action:\n            pass\n'
+        "        else:\n            pool.append(e)\n"
+    ),
+    "a conditional expression": (
+        '    pool = [e for e in events if (False if e["action"] == C.action else True)]\n'
+    ),
+    "a match wildcard": (
+        "    pool = []\n    for e in events:\n"
+        '        match e["action"]:\n            case C.action:\n                pass\n'
+        "            case _:\n                pool.append(e)\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(EXCLUSION_FILTERS))
+def test_a_read_under_an_exclusion_filter_is_checked_against_every_action(
+    rp: ModuleType, tmp_path: Path, shape: str
+) -> None:
+    """``commit`` is declared for the start action only; a pool that excludes it takes the
+    failed event, which lacks ``commit``: that action is checked, not the excluded one."""
+    source = _COMMIT_ON_START + _COUNT.format(pool=EXCLUSION_FILTERS[shape])
+    assert rp.source_problems(source) == []
+    runtime = rp.preflight(source, _start_and_failed())
+    assert any(
+        p.startswith("payload.commit is read but is on 0 of 1 builder.author_test.failed")
+        and "an exclusion filter" in p
+        for p in runtime
+    ), runtime
+    done = _cli(tmp_path, source, _start_and_failed())
+    assert done.returncode == 6, done.stdout

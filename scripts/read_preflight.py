@@ -34,15 +34,22 @@ break was a figure, not an error. Here every such break is a ``PreflightError`` 
   name that is not served, a payload key the script does not declare in an ``Expect``,
   and an action string compared with an event's ``action`` that no ``Expect`` declares.
   Each function, lambda and comprehension is its own scope: a name it binds hides the
-  enclosing one. The rule also flags what it cannot read: an event's ``action`` used other
-  than compared with constant strings (or ``X.action`` of a declared ``X``); an event dict
-  read other than by ``[]``, ``.get``, ``.pop`` or ``.setdefault`` (``.copy()``,
-  ``.items()``, ``{**ev}``, ``__getitem__``, ``methodcaller``); ``Expect`` used other than
-  in a direct call with constant arguments; and ``value``/``has`` handed an expectation
-  that is not one such call or a name bound once to one.
+  enclosing one; a call site's events and payloads reach a lambda's parameters (one called
+  where it is written or bound by ``name = lambda``) as they do a function's. The rule also
+  flags what it cannot read: an event's ``action`` used other than compared with constant
+  strings (or ``X.action`` of a declared ``X``); an event dict read other than by ``[]``,
+  ``.get``, ``.pop`` or ``.setdefault`` (``.copy()``, ``.items()``, ``{**ev}``,
+  ``__getitem__``, ``methodcaller``); an event or payload handed where it cannot follow
+  what a function's parameters receive (``map(f, payloads)``, ``payloads.sort(key=f)``,
+  ``*args``, a default argument, or a callee it cannot resolve: ``g = task_of``,
+  ``functools.partial(f)(b)``, ``mk()(b)``, a method of a class); ``Expect`` used other
+  than in a direct call with constant arguments; and ``value``/``has`` handed an
+  expectation that is not one such call or a name bound once to one.
 * ``preflight`` applies ``check`` to the declarations and checks every raw payload read
-  against the declared actions, or, when the script compares no ``action`` with a constant,
-  against every action present in the events.
+  against the declared actions, or, when the script compares no ``action`` with a constant
+  or compares one so that it may take other actions (``!=``, ``not in``, ``not``, ``or``,
+  an ``else``, a jump anywhere in the ``if`` body, ``case _``), against every action present
+  in the events.
 * ``protocol_problems``: the script imports this module, declares ``EVENT_EXPECTATIONS``
   and calls both ``check`` and ``nonzero``; the CLI applies it too.
 
@@ -603,6 +610,9 @@ def _infer(nodes: list[ast.AST], base: Mapping[str, str], rp: tuple[Any, Any]) -
 
 
 _Fn = ast.FunctionDef | ast.AsyncFunctionDef
+#: What a call of this module may reach: a function, or a lambda (called where it is written
+#: or through the name it is bound to).
+_Callee = ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
 
 
 def _params(fn: ast.AST) -> list[str]:
@@ -682,17 +692,25 @@ def _locals(fn: _Fn) -> set[str]:
     return bound - shared
 
 
-def _positional(fn: _Fn, method: bool) -> list[str]:
+def _positional(fn: _Callee, method: bool) -> list[str]:
     names = [p.arg for p in (*fn.args.posonlyargs, *fn.args.args)]
     return names[1:] if method else names
 
 
+def _named(fn: _Callee) -> list[str]:
+    """The parameters of ``fn`` a keyword argument can reach."""
+    return [p.arg for p in (*fn.args.args, *fn.args.kwonlyargs)]
+
+
 def _callees(
-    call: ast.Call, funcs: Mapping[str, list[_Fn]], methods: set[int]
-) -> list[tuple[_Fn, bool]]:
-    """The functions of this module ``call`` may call: a bare name for a function, and
-    ``self.name`` / ``cls.name`` for a method (whose first parameter is then skipped)."""
+    call: ast.Call, funcs: Mapping[str, list[_Callee]], methods: set[int]
+) -> list[tuple[_Callee, bool]]:
+    """The functions of this module ``call`` may call: a lambda called where it is written,
+    a bare name for a function (or a lambda bound to that name), and ``self.name`` /
+    ``cls.name`` for a method (whose first parameter is then skipped)."""
     f = call.func
+    if isinstance(f, ast.Lambda):
+        return [(f, False)]
     if isinstance(f, ast.Name):
         return [(g, False) for g in funcs.get(f.id, []) if id(g) not in methods]
     if (
@@ -751,8 +769,163 @@ def _scopes(tree: ast.Module) -> list[tuple[ast.AST, list[ast.AST], ast.AST | No
 class _Analysis:
     scopes: list[tuple[ast.AST, list[ast.AST], ast.AST | None]]
     envs: dict[int, dict[str, str]]
-    funcs: dict[str, list[_Fn]]
+    funcs: dict[str, list[_Callee]]
     methods: set[int]
+    #: Names a call cannot be resolved through: bound other than only by ``def``, by
+    #: ``name = lambda`` or by an import (a parameter, ``g = task_of``, ``g: T = lambda``,
+    #: ``g, h = ...``, ``(g := ...)``, a class).
+    unresolved: set[str]
+    #: Names bound to a value that may hold a function of this module (``functools.partial
+    #: (task_of)``, ``{"f": lambda b: ...}``), and the functions that may return one.
+    fnish: set[str]
+    returns_fn: set[int]
+
+    def fnref(self, node: ast.AST) -> bool:
+        return _fnref(node, self.funcs, self.methods, self.fnish, self.returns_fn)
+
+
+def _binding_kinds(tree: ast.Module) -> dict[str, set[str]]:
+    """How each name is bound anywhere in the module: ``def``, ``lambda`` (a plain ``name =
+    lambda`` assignment), ``import`` or ``other`` (any other binding, parameters included)."""
+    plain = {
+        id(t)
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Assign) and isinstance(n.value, ast.Lambda)
+        for t in n.targets
+        if isinstance(t, ast.Name)
+    }
+    kinds: dict[str, set[str]] = {}
+
+    def add(name: str, kind: str) -> None:
+        kinds.setdefault(name, set()).add(kind)
+
+    for n in ast.walk(tree):
+        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef):
+            add(n.name, "def")
+        elif isinstance(n, ast.ClassDef):
+            add(n.name, "other")
+        elif isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store | ast.Del):
+            add(n.id, "lambda" if id(n) in plain else "other")
+        elif isinstance(n, ast.arg):
+            add(n.arg, "other")
+        elif isinstance(n, ast.Import | ast.ImportFrom):
+            for al in n.names:
+                if al.name != "*":
+                    add((al.asname or al.name).split(".")[0], "import")
+        elif isinstance(n, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and n.name:
+            add(n.name, "other")
+        elif isinstance(n, ast.MatchMapping) and n.rest:
+            add(n.rest, "other")
+    return kinds
+
+
+#: Builtins whose result is never a function, and builtins whose result holds only the
+#: elements of their positional arguments (a function handed as ``key=`` is not kept).
+_SCALAR_BUILTINS = frozenset({"len", "sum", "any", "all", "str", "repr", "print", "bool", "int"})
+_ELEMENT_BUILTINS = frozenset(
+    {"sorted", "list", "set", "frozenset", "tuple", "map", "filter", "min", "max", "next"}
+    | {"enumerate", "zip", "reversed", "iter"}
+)
+
+
+def _fnref(
+    node: ast.AST,
+    funcs: Mapping[str, list[_Callee]],
+    methods: set[int],
+    fnish: set[str],
+    returns_fn: set[int],
+) -> bool:
+    """Whether ``node`` may evaluate to, or hold, a function of this module: a lambda, a
+    function's name taken as a value, a name bound to one, or a call that may return one."""
+
+    def ref(n: ast.AST) -> bool:
+        if isinstance(n, ast.Lambda):
+            return True
+        if isinstance(n, ast.Name):
+            return isinstance(n.ctx, ast.Load) and (n.id in funcs or n.id in fnish)
+        if isinstance(n, ast.Call):
+            f = n.func
+            if isinstance(f, ast.Lambda):
+                return ref(f.body)
+            if not isinstance(f, ast.Name | ast.Attribute):
+                return ref(f)
+            if callees := _callees(n, funcs, methods):
+                return any(id(g) in returns_fn for g, _m in callees)
+            if ref(f.value if isinstance(f, ast.Attribute) else f):
+                return True  # a call of something that holds a function (a class, a partial)
+            if isinstance(f, ast.Name) and f.id in _SCALAR_BUILTINS and f.id not in funcs:
+                return False
+            if isinstance(f, ast.Name) and f.id in _ELEMENT_BUILTINS and f.id not in funcs:
+                # The result holds the elements of its positional arguments (a ``key=`` is
+                # not kept), or for ``map`` what its function returns.
+                elems = [*n.args, *(k.value for k in n.keywords if k.arg != "key")]
+                if f.id in {"map", "filter"} and n.args:
+                    g = elems.pop(0)
+                    if f.id == "map" and isinstance(g, ast.Lambda) and ref(g.body):
+                        return True
+                    if f.id == "map" and isinstance(g, ast.Name):
+                        if any(id(c) in returns_fn for c in funcs.get(g.id, [])):
+                            return True
+                        if g.id not in funcs and ref(g):
+                            return True
+                return any(ref(a) for a in elems)
+            # A callee defined elsewhere that is handed a function may return one
+            # (``functools.partial(task_of)``).
+            return any(ref(a) for a in (*n.args, *(k.value for k in n.keywords)))
+        return any(ref(c) for c in ast.iter_child_nodes(n))
+
+    return ref(node)
+
+
+def _function_values(
+    tree: ast.Module, funcs: Mapping[str, list[_Callee]], methods: set[int]
+) -> tuple[set[str], set[int]]:
+    """``(fnish, returns_fn)`` to a fixpoint (see ``_Analysis``); a class of this module that
+    defines a function holds one, and so does an instance of it."""
+    fnish = {
+        c.name
+        for c in ast.walk(tree)
+        if isinstance(c, ast.ClassDef)
+        and any(
+            isinstance(m, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) for m in ast.walk(c)
+        )
+    }
+    returns_fn: set[int] = set()
+    callees = [g for gs in funcs.values() for g in gs]
+    callees += [n for n in ast.walk(tree) if isinstance(n, ast.Lambda)]
+
+    def ref(n: ast.AST) -> bool:
+        return _fnref(n, funcs, methods, fnish, returns_fn)
+
+    while True:
+        before = (len(fnish), len(returns_fn))
+        for n in ast.walk(tree):
+            pairs: list[tuple[list[ast.AST], ast.AST | None]] = []
+            if isinstance(n, ast.Assign):
+                pairs.append((list(n.targets), n.value))
+            elif isinstance(n, ast.AnnAssign | ast.NamedExpr | ast.AugAssign):
+                pairs.append(([n.target], n.value))
+            elif isinstance(n, ast.For | ast.AsyncFor | ast.comprehension):
+                pairs.append(([n.target], n.iter))
+            elif isinstance(n, ast.With | ast.AsyncWith):
+                pairs += [([i.optional_vars], i.context_expr) for i in n.items if i.optional_vars]
+            for targets, value in pairs:
+                if value is not None and ref(value):
+                    fnish |= {
+                        m.id
+                        for t in targets
+                        for m in ast.walk(t)
+                        if isinstance(m, ast.Name) and m.id not in {"self", "cls"}
+                    }
+        for g in callees:
+            if isinstance(g, ast.Lambda):
+                out = [g.body]
+            else:
+                out = [r.value for r in ast.walk(g) if isinstance(r, ast.Return) and r.value]
+            if any(ref(v) for v in out):
+                returns_fn.add(id(g))
+        if (len(fnish), len(returns_fn)) == before:
+            return fnish, returns_fn
 
 
 def _analyse(tree: ast.Module) -> _Analysis:
@@ -760,15 +933,26 @@ def _analyse(tree: ast.Module) -> _Analysis:
     ones it binds itself (a parameter, a local, a lambda parameter or a comprehension target
     of that name is its own); what a scope learns about a name it does not bind holds in the
     enclosing scope too (a ``payload`` lookup inside a comprehension marks the event it is
-    made on); and the kinds a call site hands a function's parameters are propagated
-    (``task_of(item["payload"])`` makes ``task_of``'s parameter a payload)."""
+    made on); and the kinds a call site hands a function's or a lambda's parameters are
+    propagated (``task_of(item["payload"])`` makes ``task_of``'s parameter a payload, as does
+    ``(lambda body: ...)(item["payload"])`` the lambda's)."""
     rp = _rp_imports(tree)
     scopes = _scopes(tree)
     own = {id(s): _scope_locals(s) for s, _nodes, _parent in scopes}
-    funcs: dict[str, list[_Fn]] = {}
+    funcs: dict[str, list[_Callee]] = {}
     for fn, _nodes, _parent in scopes:
         if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
             funcs.setdefault(fn.name, []).append(fn)
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Assign) and isinstance(n.value, ast.Lambda):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    funcs.setdefault(t.id, []).append(n.value)
+    # A name bound any other way as well is not followed: a call through it is refused when
+    # it hands an event value (see ``_unfollowed``).
+    kinds = _binding_kinds(tree)
+    funcs = {k: v for k, v in funcs.items() if kinds.get(k, set()) <= {"def", "lambda"}}
+    unresolved = {k for k, v in kinds.items() if not v <= {"def", "lambda"} and not v <= {"import"}}
     methods = {
         id(f)
         for c in ast.walk(tree)
@@ -776,6 +960,7 @@ def _analyse(tree: ast.Module) -> _Analysis:
         for f in c.body
         if isinstance(f, ast.FunctionDef | ast.AsyncFunctionDef)
     }
+    fnish, returns_fn = _function_values(tree, funcs, methods)
     handed: dict[int, dict[str, str]] = {id(s): {} for s, _nodes, _parent in scopes}
     while True:
         envs: dict[int, dict[str, str]] = {}
@@ -801,10 +986,10 @@ def _analyse(tree: ast.Module) -> _Analysis:
                     for name, arg in zip(pos, n.args, strict=False):
                         changed |= _set(handed[id(g)], name, _kind(arg, env))
                     for kw in n.keywords:
-                        if kw.arg in _params(g):
+                        if kw.arg in _named(g):
                             changed |= _set(handed[id(g)], kw.arg, _kind(kw.value, env))
         if not changed:
-            return _Analysis(scopes, envs, funcs, methods)
+            return _Analysis(scopes, envs, funcs, methods, unresolved, fnish, returns_fn)
 
 
 def _caught(tree: ast.Module) -> set[int]:
@@ -901,6 +1086,89 @@ def _literal_use(n: ast.AST, parent: ast.AST | None, by_name: Mapping[str, Expec
 _LOOKUP_ATTRS = _GETS
 
 
+_EVENTISH = frozenset({"envelope", "payload", "events", "payloads"})
+_JUMPS = (ast.Continue, ast.Break, ast.Return, ast.Raise)
+
+
+def _eventish(a: ast.AST, env: Mapping[str, str]) -> str | None:
+    """The kind of the first event value in ``a``, if it holds one."""
+    return next((k for m in ast.walk(a) if (k := _kind(m, env)) in _EVENTISH), None)
+
+
+def _resolved(n: ast.Call, an: _Analysis) -> bool:
+    """Whether the rule knows what call ``n`` calls: a lambda written in place, a function
+    of this module (by ``def`` or ``name = lambda``) or a method of one by ``self.name``, or
+    something defined elsewhere (a builtin, an import, a method of a value that holds no
+    function of this module). A callee computed by an expression (``mk()(b)``,
+    ``FNS["f"](b)``, ``(f if c else g)(b)``, ``(g := ...)(b)``) or reached through a name
+    bound any other way (``g = task_of``, a parameter) is not."""
+    f = n.func
+    if isinstance(f, ast.Lambda):
+        return True
+    if isinstance(f, ast.Name):
+        return f.id not in an.unresolved
+    if isinstance(f, ast.Attribute):
+        if isinstance(f.value, ast.Name) and f.value.id in {"self", "cls"}:
+            return bool(_callees(n, an.funcs, an.methods))
+        return not an.fnref(f.value)
+    return False
+
+
+def _unfollowed(n: ast.Call, env: Mapping[str, str], an: _Analysis) -> str | None:
+    """Why the rule cannot follow what a function of this module receives at call ``n``: a
+    function or lambda handed, as a value, to a call that is also handed an event value or
+    is a method of one (``map(f, payloads)``, ``sorted(evs, key=lambda e: ...)``,
+    ``payloads.sort(key=f)``), an event value handed to a callee the rule cannot resolve
+    (see ``_resolved``), or an event value that lands on no named parameter of the function
+    called (``*args``, ``**kwargs``)."""
+    args = [*n.args, *(k.value for k in n.keywords)]
+    recv = [n.func.value] if isinstance(n.func, ast.Attribute) else []
+    handed = next((k for a in args if not an.fnref(a) and (k := _eventish(a, env))), None)
+    handed = handed or next((k for r in recv if (k := _eventish(r, env))), None)
+    if handed and any(an.fnref(a) for a in args):
+        return f"a function is handed to a call with an event value ({handed})"
+    kind = next((k for a in args if (k := _eventish(a, env))), None)
+    if kind and not _resolved(n, an):
+        return f"an event value ({kind}) is handed to a callee the rule cannot resolve"
+    for g, method in _callees(n, an.funcs, an.methods):
+        pos = _positional(g, method)
+        for i, a in enumerate(n.args):
+            if (isinstance(a, ast.Starred) or i >= len(pos)) and (kind := _eventish(a, env)):
+                return f"an event value ({kind}) lands on no named parameter"
+        for kw in n.keywords:
+            if kw.arg not in _named(g) and (kind := _eventish(kw.value, env)):
+                return f"an event value ({kind}) lands on no named parameter"
+    return None
+
+
+def _wild(p: ast.pattern) -> bool:
+    """A ``case`` that takes whatever the other cases did not (``case _:``)."""
+    if isinstance(p, ast.MatchAs):
+        return p.pattern is None or _wild(p.pattern)
+    return isinstance(p, ast.MatchOr) and any(_wild(q) for q in p.patterns)
+
+
+def _selects(cmp: ast.Compare, parents: Mapping[int, ast.AST]) -> bool:
+    """Whether an action comparison only lets through events of the actions it names: an
+    ``==`` / ``in`` that is a comprehension's ``if`` or the test of an ``if`` with no
+    ``else`` whose body holds no jump at any depth, joined to them by ``and`` alone. Anything
+    else (``!=``, ``not in``, ``not``, ``or``, an ``else`` branch, a ``continue``, ``break``,
+    ``return`` or ``raise`` anywhere in the body, a value kept for later) may take the
+    actions it does not name."""
+    if not all(isinstance(op, ast.Eq | ast.In) for op in cmp.ops):
+        return False
+    child: ast.AST = cmp
+    parent = parents.get(id(cmp))
+    while isinstance(parent, ast.BoolOp) and isinstance(parent.op, ast.And):
+        child, parent = parent, parents.get(id(parent))
+    if isinstance(parent, ast.comprehension):
+        return any(i is child for i in parent.ifs)
+    if isinstance(parent, ast.If) and parent.test is child:
+        jumps = any(isinstance(m, _JUMPS) for s in parent.body for m in ast.walk(s))
+        return not parent.orelse and not jumps
+    return False
+
+
 def _opaque(n: ast.AST, parent: ast.AST | None, env: Mapping[str, str]) -> tuple[str, str] | None:
     """``(where, how)`` when ``n`` reads an event dict or payload in a way the rule cannot
     check: a method other than ``get``/``pop``/``setdefault`` called on it
@@ -927,15 +1195,17 @@ def _opaque(n: ast.AST, parent: ast.AST | None, env: Mapping[str, str]) -> tuple
 def _scan(source: str) -> tuple[list[Lookup], list[tuple[int, str]]]:
     """The lookups on event dicts and payloads, and the action strings compared with an
     event's ``action``, in ``source``."""
-    found, actions, _problems = _scan_all(source)
+    found, actions, _problems, _excluding = _scan_all(source)
     return found, actions
 
 
-def _scan_all(source: str) -> tuple[list[Lookup], list[tuple[int, str]], list[str]]:
-    """``_scan`` plus the reads the rule cannot check: an event dict or payload used other
+def _scan_all(source: str) -> tuple[list[Lookup], list[tuple[int, str]], list[str], list[int]]:
+    """``_scan`` plus the reads the rule cannot check (an event dict or payload used other
     than by a lookup it reads, an event's ``action`` used other than compared with
-    constants (``.startswith``, ``in WANT``, ``== act``), and ``value`` / ``has`` handed an
-    expectation that is not a name bound to a readable ``Expect`` call."""
+    constants (``.startswith``, ``in WANT``, ``== act``), ``value`` / ``has`` handed an
+    expectation that is not a name bound to a readable ``Expect`` call, and an event value
+    handed where the rule cannot follow what a function's parameters receive), and the lines
+    of each action comparison that may take actions it does not name (see ``_selects``)."""
     tree = ast.parse(source)
     an = _analyse(tree)
     caught = _caught(tree)
@@ -945,6 +1215,7 @@ def _scan_all(source: str) -> tuple[list[Lookup], list[tuple[int, str]], list[st
     found: dict[tuple[int, int, str | None], Lookup] = {}
     actions: set[tuple[int, str]] = set()
     problems: dict[tuple[int, int], str] = {}
+    excluding: set[int] = set()
     getters: dict[int, tuple[int, str, str]] = {}
     for fn, nodes, _parent in an.scopes:
         env = an.envs[id(fn)]
@@ -964,6 +1235,20 @@ def _scan_all(source: str) -> tuple[list[Lookup], list[tuple[int, str]], list[st
                     f"line {pos[0]}: an event's action is used other than compared with "
                     f"constant action strings (or X.action of a declared X); the rule cannot "
                     f"tell which actions the read takes, so write the actions out"
+                )
+            if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+                defaults = [*n.args.defaults, *(k for k in n.args.kw_defaults if k)]
+                if kind := next((k for a in defaults if (k := _eventish(a, env))), None):
+                    problems[pos] = (
+                        f"line {pos[0]}: a default argument hands an event value ({kind}) to "
+                        f"a function; the rule cannot follow what the function's parameters "
+                        f"receive, so call it directly with the value as a named parameter"
+                    )
+            if isinstance(n, ast.Call) and (why := _unfollowed(n, env, an)) is not None:
+                problems[pos] = (
+                    f"line {pos[0]}: {why}; the rule cannot follow what the function's "
+                    f"parameters receive, so call it directly with the value as a named "
+                    f"parameter, or read it in a comprehension"
                 )
             fname = _rp_call(n, mods, names)
             if isinstance(n, ast.Call) and fname in {"value", "has"}:
@@ -993,6 +1278,8 @@ def _scan_all(source: str) -> tuple[list[Lookup], list[tuple[int, str]], list[st
                     if _action_lookup(op, env, known=True) is not None:
                         others = [_action_literals(o, d.by_name) for o in ops if o is not op]
                         actions |= {(n.lineno, s) for o in others for s in o or []}
+                        if not _selects(n, parents):
+                            excluding.add(n.lineno)
             if isinstance(n, ast.Match):
                 out: list[Lookup] = []
                 for case in n.cases:
@@ -1004,6 +1291,7 @@ def _scan_all(source: str) -> tuple[list[Lookup], list[tuple[int, str]], list[st
                         for c in n.cases
                         for s in _case_actions(c.pattern, d.by_name) or []
                     }
+                    excluding |= {c.pattern.lineno for c in n.cases if _wild(c.pattern)}
             for holder, keynode, got_default, got_how in _accesses(n):
                 where = _kind(holder, env)
                 if where not in {"envelope", "payload"}:
@@ -1036,7 +1324,7 @@ def _scan_all(source: str) -> tuple[list[Lookup], list[tuple[int, str]], list[st
             arg = next((k.value for k in n.keywords if k.arg == pname), arg)
             found[(n.lineno, n.col_offset, None)] = Lookup(n.lineno, where, _const(arg), False)
     ordered = sorted(found.values(), key=lambda lk: (lk.line, lk.where, lk.key or ""))
-    return ordered, sorted(actions), [problems[k] for k in sorted(problems)]
+    return ordered, sorted(actions), [problems[k] for k in sorted(problems)], sorted(excluding)
 
 
 def lookups(source: str) -> list[Lookup]:
@@ -1226,7 +1514,7 @@ def _undeclared_for(decl: Sequence[Expect], key: str) -> list[str]:
 def source_problems(source: str) -> list[str]:
     """The static rule for a script that reads run events (see the module docstring)."""
     decl, problems = _declarations(source)
-    found, actions, unreadable = _scan_all(source)
+    found, actions, unreadable, _excluding = _scan_all(source)
     problems += unreadable
     for lk in found:
         at = f"line {lk.line}"
@@ -1284,14 +1572,22 @@ def preflight(source: str, events: Sequence[Any], *, label: str = "read") -> lis
         lines = str(exc).splitlines()
         problems += lines[1:] if len(lines) > 1 else lines
     evs = [e for e in events if isinstance(e, Mapping)]
-    # A read that compares no event's action with a constant may take any action's events.
-    filtered = bool(compared_actions(source))
+    # A read that compares no event's action with a constant may take any action's events;
+    # so may one with a comparison that excludes actions (``!=``, ``not in``, ``else``).
+    _found, compared, _unreadable, excluding = _scan_all(source)
+    filtered = bool(compared) and not excluding
     acts = (
         sorted({x.action for x in decl})
         if filtered
         else sorted({a for e in evs if isinstance(a := e.get("action"), str)})
     )
-    why = "" if filtered else "; the read names no action, so every action's events count"
+    why = (
+        ""
+        if filtered
+        else f"; an exclusion filter (line {excluding[0]}) may take any action's events"
+        if excluding
+        else "; the read names no action, so every action's events count"
+    )
     for where, key in sorted(reads(source)):
         hint = f"; served at envelope.{LIFTED[key]}" if key in LIFTED else ""
         if not any(key in _holder(e, where) for e in evs):
