@@ -10,6 +10,8 @@ most of them, review enforces the rest. Read [ARCHITECTURE](ARCHITECTURE.md),
 # Python ≥ 3.12; uv on PATH (https://docs.astral.sh/uv/); git; docker for sandbox tests.
 uv sync --locked --python 3.12 --extra server --extra postgres --extra mcp --extra dev
 # optional extras: --extra openai --extra claude, or --all-extras
+# once per clone: every git push then runs the fast gate set first (see "The gates")
+.venv/bin/python scripts/pre_push.py --install-hook
 ```
 
 The server, postgres and mcp extras are part of what the gates check: without them `mypy`
@@ -59,6 +61,14 @@ docker, a service or the network, checks the title as the squash merge will writ
 ends with the CI jobs it could not run here and why (P-818). `--fast` runs the static gates,
 the tests of the files you changed against `origin/main` and the repo-wide ratchet tests
 instead of the whole suite; `--list` prints what it covers.
+
+`scripts/pre_push.py --install-hook` (in the setup above, once per clone) makes git run that
+`--fast` set on every `git push`, from `scripts/hooks/pre-push`, and a failure stops the push.
+It covers every worktree of the clone whose branch carries `scripts/hooks`. Set `CRB_PR_TITLE`
+to have the hook check the title too; it uses the checkout's `.venv`, or `CRB_PYTHON`, and
+refuses the push when it finds neither. In the hook a gate that cannot run stops the push,
+unless it is the title with none given or a `ui` gate when no `ui` file changed.
+`git push --no-verify` skips every git hook, this one included, so CI stays the gate.
 
 No test may fail because of the machine it runs on **[aspiration — the rule DL-053 sets; the
 run below shows it is not yet demonstrated]**. Running as root, with no docker daemon or with

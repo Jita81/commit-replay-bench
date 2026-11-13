@@ -10,6 +10,7 @@ P-818). This script is that list, read from CI, so nobody has to pick:
     python scripts/pre_push.py --title "fix(api): refuse an empty name"     # every gate + suite
     python scripts/pre_push.py --fast --title "…"   # gates + changed files' tests + ratchets
     python scripts/pre_push.py --list               # what runs here, and what only CI runs
+    python scripts/pre_push.py --install-hook       # once per clone: run it on every git push
 
 Run it with the virtual environment's interpreter (``.venv/bin/python``): it finds ``ruff``,
 ``mypy`` and ``lint-imports`` beside that interpreter. Every gate runs from this checkout's
@@ -26,6 +27,15 @@ one chained after ``cd`` or an install, cannot be missing from this list without
 saying so. A gate here that cannot run (``ui/node_modules`` absent, no ``--title``) is
 NOT RUN and the exit is 3, unless ``--allow-skip`` accepts it.
 
+**The git hook.** ``--install-hook`` points this clone's ``core.hooksPath`` at
+``scripts/hooks``, whose ``pre-push`` runs ``--hook`` before a push leaves: the ``--fast`` set,
+with the title read from ``CRB_PR_TITLE`` when it is set. In the hook a gate NOT RUN stops the
+push, with two exceptions that cannot hide a failure the push carries: the title gate when no
+title is known (a pull request may not exist yet), and a gate whose folder (``ui``) holds no
+changed file. A push that only deletes refs runs nothing. ``git push --no-verify`` skips every
+git hook, this one included, and nothing local can stop that: CI remains the gate. A run
+outside the hook says so when the hook is not installed.
+
 Nothing here fetches: ``--base`` (``origin/main``) is read as it is in this clone, so a stale
 one widens the range the subjects and ``--fast`` read. CI sees only commits; a dirty tree is
 checked as it is on disk, and the run starts with a warning naming each such path.
@@ -41,7 +51,8 @@ What it does: Runs each gate in ``GATES`` (ruff, mypy, import-linter, the code-m
               over the changed files' tests and the repository-wide ratchets); prints one line
               per gate, every CI check it did not run and ``N passed, N failed, N not run``;
               exits 1 when a gate failed, 3 when one was not run (unless ``--allow-skip``),
-              2 when ``--base`` is not a commit here.
+              2 when ``--base`` is not a commit here. ``--install-hook`` sets
+              ``core.hooksPath`` to ``scripts/hooks``; ``--hook`` is the run that hook makes.
 How:          Each gate is an argv run from the repository root (its output shown only when
               it fails; pytest streams) or, for the subjects, a call into
               scripts/check_commit_subject.py; ``--fast`` maps each changed file to its tests
@@ -50,7 +61,8 @@ Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   .github/workflows/ci.yml (the jobs it mirrors, and the coverage floor it reads),
               .github/workflows/commit-subjects.yml (the title gate it runs before the pull
-              request exists), scripts/check_commit_subject.py (the subject rule it imports,
+              request exists), scripts/hooks/pre-push (the git hook that runs ``--hook``),
+              scripts/check_commit_subject.py (the subject rule it imports,
               never copies), scripts/code_map.py (the header reader that maps a changed file to
               its tests), docs/CONTRIBUTING.md (where a contributor is told to run it),
               docs/PREVENTION.md (P-818, the class it stops)
@@ -683,6 +695,89 @@ def not_run_here() -> list[str]:
     return lines
 
 
+#: Where the tracked git hooks live, from the root; ``--install-hook`` points git at it.
+HOOKS_DIR = "scripts/hooks"
+#: The title the hook checks, when the author has one before the pull request exists.
+TITLE_ENV = "CRB_PR_TITLE"
+
+
+def _git_out(root: Path, *args: str) -> str:
+    """One git answer from ``root``, stripped; empty when git says no (an unset key)."""
+    proc = subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True, check=False
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def hooks_path(root: Path = ROOT) -> str:
+    """``core.hooksPath`` as git resolves it for ``root``, from any scope; empty when unset."""
+    return _git_out(root, "config", "--type=path", "--get", "core.hooksPath")
+
+
+def hook_installed(root: Path = ROOT) -> bool:
+    """git runs this checkout's ``scripts/hooks`` on a push from ``root``."""
+    configured = hooks_path(root)
+    return bool(configured) and (root / configured).resolve() == (root / HOOKS_DIR).resolve()
+
+
+def install_hook(root: Path = ROOT) -> tuple[bool, str]:
+    """Point ``root``'s clone at ``scripts/hooks``. Refuses, changing nothing, when that would
+    switch off hooks the clone already runs: a ``core.hooksPath`` set elsewhere, or a live
+    hook in the clone's own hooks folder (git reads one folder only)."""
+    hook = root / HOOKS_DIR / "pre-push"
+    if not os.access(hook, os.X_OK):
+        return False, f"{HOOKS_DIR}/pre-push is missing or not executable in {root}"
+    if hook_installed(root):
+        return True, f"already installed: core.hooksPath is {HOOKS_DIR}"
+    configured = hooks_path(root)
+    if configured:
+        return False, (
+            f"core.hooksPath is already {configured}; git reads one hooks folder, so add a "
+            f"pre-push there that runs {HOOKS_DIR}/pre-push, or unset it and run this again"
+        )
+    common = _git_out(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if not common:
+        return False, f"{root} is not a git checkout"
+    folder = Path(common) / "hooks"
+    live = (
+        sorted(f.name for f in folder.iterdir() if f.is_file() and f.suffix != ".sample")
+        if folder.is_dir()
+        else []
+    )
+    if live:
+        return False, (
+            f"{folder} holds live hooks ({', '.join(live)}) that core.hooksPath would switch "
+            f"off; move them into {HOOKS_DIR} or remove them, then run this again"
+        )
+    subprocess.run(
+        ["git", "-C", str(root), "config", "--local", "core.hooksPath", HOOKS_DIR], check=True
+    )
+    return True, f"installed: core.hooksPath is {HOOKS_DIR}; every git push now runs --hook"
+
+
+def pushed_shas(stdin_text: str) -> list[str]:
+    """The commits a push sends, from the lines git hands a pre-push hook
+    (``<local ref> <local sha> <remote ref> <remote sha>``). A deleted ref has an all-zero
+    local sha and sends nothing."""
+    shas = []
+    for line in stdin_text.splitlines():
+        fields = line.split()
+        if len(fields) == 4 and fields[1].strip("0"):
+            shas.append(fields[1])
+    return shas
+
+
+def hook_tolerates(gate: Gate, changed: Sequence[str]) -> bool:
+    """In the hook a gate NOT RUN stops the push unless it cannot hide a failure the push
+    carries: the title gate with no title known, or a gate that needs a path missing here
+    and whose own folder holds no changed file."""
+    if gate.argv == ("<title>",):
+        return True
+    if gate.requires and gate.cwd != "." and not (ROOT / gate.requires).exists():
+        return not any(path.startswith(f"{gate.cwd}/") for path in changed)
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
     ap.add_argument("--title", default=None, help="the pull request's title, checked as CI will")
@@ -704,7 +799,36 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="exit 0 when a gate was NOT RUN here (by default that exits 3)",
     )
+    ap.add_argument(
+        "--install-hook",
+        action="store_true",
+        help=f"once per clone: point core.hooksPath at {HOOKS_DIR} so every git push runs --hook",
+    )
+    ap.add_argument(
+        "--hook",
+        action="store_true",
+        help=f"the run {HOOKS_DIR}/pre-push makes: --fast on what git says the push sends "
+        f"(stdin), the title from {TITLE_ENV}; a gate not run stops the push",
+    )
     args = ap.parse_args(argv)
+    if args.install_hook:
+        ok, message = install_hook()
+        print(f"pre_push: {message}", file=sys.stdout if ok else sys.stderr)
+        return 0 if ok else 1
+    if args.hook:
+        shas = pushed_shas(sys.stdin.read())
+        if not shas:
+            print("pre_push: this push sends no commit (deletions only); no gate runs")
+            return 0
+        args.fast = True
+        args.title = args.title or os.environ.get(TITLE_ENV) or None
+        head = _git_out(ROOT, "rev-parse", "HEAD")
+        if head not in shas:
+            print(
+                "pre_push: WARNING — the push sends a commit that is not this checkout's HEAD; "
+                "the gates below check what is checked out here, not what is pushed",
+                flush=True,
+            )
     if not args.list and not base_is_commit(args.base):
         print(
             f"pre_push: --base {args.base} is not a commit in this clone; run "
@@ -713,6 +837,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     floor = _floor()
+
+    if not args.list and not args.hook and not hook_installed():
+        print(
+            "pre_push: the git hook is not installed in this clone, so a push can leave "
+            "without this run; `python scripts/pre_push.py --install-hook` installs it",
+            flush=True,
+        )
 
     if args.list:
         for gate in GATES:
@@ -767,6 +898,17 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\n{passed} passed, {failed} failed, {skipped} not run{mode}")
     if failed:
         return 1
+    if args.hook:
+        changed = changed_files(args.base)
+        stops = [
+            r.name
+            for gate, r in zip(GATES, results, strict=True)
+            if r.status == "NOT RUN" and not hook_tolerates(gate, changed)
+        ]
+        if stops:
+            print(f"pre_push: exit 3 — the push is stopped; not run here: {'; '.join(stops)}")
+            return 3
+        return 0
     if skipped and not args.allow_skip:
         print(f"pre_push: exit 3 — {skipped} gate(s) not run here; --allow-skip accepts that")
         return 3

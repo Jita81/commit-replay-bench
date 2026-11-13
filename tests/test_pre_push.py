@@ -17,7 +17,11 @@ What it does: Fails when a workflow command is unaccounted for (one chained afte
               command CI no longer has, when the pull-request workflows are not the ones
               pre_push reads, when ``--title`` disagrees with scripts/check_commit_subject.py
               on the squash subject, and when a missing base, a gate not run or a dirty tree
-              is not reported as pre_push promises (exit 2, exit 3, a warning).
+              is not reported as pre_push promises (exit 2, exit 3, a warning). For the git
+              hook: fails when ``--install-hook`` does not make git run ``scripts/hooks/pre-push``
+              on a push, switches off hooks a clone already runs, or is missing from the
+              contributor setup; when the hook lets a push through with no interpreter or with
+              a gate not run that could hide a failure; and when it is not tracked executable.
 How:          yaml-loads each workflow, splits each ``run:`` into lines (a folded block is one
               line, a backslash continues one), collapses whitespace, splits each line into
               commands with ``pre_push.commands``, prefixes the job id and matches pre_push's
@@ -27,6 +31,8 @@ ADRs:         none
 Works with:   scripts/pre_push.py (the set it holds to CI), .github/workflows/ci.yml (the jobs
               it reads), .github/workflows/commit-subjects.yml (the title job it reads),
               scripts/check_commit_subject.py (the rule the title check must reuse),
+              scripts/hooks/pre-push (the git hook it runs in a scratch clone),
+              docs/CONTRIBUTING.md (the setup that must name ``--install-hook``),
               tests/test_version_consistency.py (the same run-line reading for CONTRIBUTING)
 Tested by:    tests/test_pre_push.py
 Touch when:   never for a new repository; a workflow step is added (give scripts/pre_push.py a
@@ -36,7 +42,10 @@ Touch when:   never for a new repository; a workflow step is added (give scripts
 from __future__ import annotations
 
 import importlib.util
+import io
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -462,3 +471,233 @@ def test_not_run_names_the_python_versions_and_the_shard_processes() -> None:
 def test_the_coverage_floor_is_read_from_ci() -> None:
     text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert f"coverage report --fail-under={pre_push._floor()}" in text
+
+
+# --- the git hook (G-716): a push runs the set without the author choosing to ---------------
+
+
+@pytest.fixture
+def clone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A scratch clone holding this checkout's hook, with one commit and a bare remote, read
+    under no user or system git configuration (a contributor's own ``core.hooksPath`` must
+    not decide these tests) and none of the variables git hands a hook."""
+    for name in [n for n in os.environ if n.startswith("GIT_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("CRB_PYTHON", raising=False)
+    root = tmp_path / "clone"
+    (root / "scripts" / "hooks").mkdir(parents=True)
+    shutil.copy2(ROOT / "scripts" / "hooks" / "pre-push", root / "scripts" / "hooks" / "pre-push")
+    _git_in(root, "init", "-q", "-b", "main")
+    _git_in(root, "add", "scripts")
+    _git_in(root, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "one")
+    subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / "remote.git")], check=True)
+    _git_in(root, "remote", "add", "origin", str(tmp_path / "remote.git"))
+    return root
+
+
+def _git_in(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+    )
+
+
+def _interpreter(path: Path, exit_code: int) -> Path:
+    """A stand-in interpreter: records its arguments, ``GIT_DIR`` as it sees it and its
+    standard input beside itself, then exits ``exit_code``."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = path.with_name("record.txt")
+    path.write_text(
+        f'#!/bin/sh\n{{ echo "$@"; echo "GIT_DIR=${{GIT_DIR-unset}}"; cat; }} > "{record}"\n'
+        f"exit {exit_code}\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return record
+
+
+def _push(root: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), "push", "-q", "origin", "main"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_the_hook_is_tracked_as_an_executable_file() -> None:
+    listed = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "-s", "scripts/hooks/pre-push"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert listed.startswith("100755 "), listed or "scripts/hooks/pre-push is not tracked"
+
+
+def test_the_contributor_setup_installs_the_hook() -> None:
+    text = (ROOT / "docs" / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    setup = text.split("## Development setup", 1)[1].split("\n## ", 1)[0]
+    block = setup.split("```", 2)[1]
+    assert "scripts/pre_push.py --install-hook" in block, (
+        "the setup commands in docs/CONTRIBUTING.md must install the pre-push hook"
+    )
+
+
+def test_install_makes_git_run_the_hook_on_a_push(clone: Path) -> None:
+    assert not pre_push.hook_installed(clone)
+    ok, message = pre_push.install_hook(clone)
+    assert ok and "installed" in message
+    assert pre_push.hook_installed(clone)
+    assert pre_push.install_hook(clone) == (
+        True,
+        "already installed: core.hooksPath is scripts/hooks",
+    )
+    record = _interpreter(clone / ".venv" / "bin" / "python", 1)
+    refused = _push(clone)
+    assert refused.returncode != 0
+    lines = record.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "scripts/pre_push.py --hook"
+    assert lines[1] == "GIT_DIR=unset"
+    assert lines[2].startswith("refs/heads/main ") and len(lines[2].split()) == 4
+    assert _git_in(clone, "ls-remote", "origin").stdout == ""
+    _interpreter(clone / ".venv" / "bin" / "python", 0)
+    assert _push(clone).returncode == 0
+    assert "refs/heads/main" in _git_in(clone, "ls-remote", "origin").stdout
+
+
+def test_the_hook_refuses_the_push_when_there_is_no_interpreter(clone: Path) -> None:
+    assert pre_push.install_hook(clone)[0]
+    refused = _push(clone)
+    assert refused.returncode != 0
+    assert "no interpreter to run the gates with" in refused.stderr
+    assert _git_in(clone, "ls-remote", "origin").stdout == ""
+
+
+def test_the_hook_takes_crb_python_first_then_the_main_checkouts_venv(
+    clone: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert pre_push.install_hook(clone)[0]
+    main_venv = _interpreter(clone / ".venv" / "bin" / "python", 0)
+    worktree = tmp_path / "worktree"
+    _git_in(clone, "worktree", "add", "-q", "-b", "side", str(worktree))
+    pushed = subprocess.run(
+        ["git", "-C", str(worktree), "push", "-q", "origin", "side"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert pushed.returncode == 0, pushed.stderr
+    assert main_venv.read_text(encoding="utf-8").startswith("scripts/pre_push.py --hook\n")
+    main_venv.unlink()
+    named = _interpreter(tmp_path / "named" / "python", 1)
+    monkeypatch.setenv("CRB_PYTHON", str(named.with_name("python")))
+    assert _push(clone).returncode != 0
+    assert named.exists() and not main_venv.exists()
+
+
+def test_install_refuses_to_switch_off_hooks_the_clone_already_runs(clone: Path) -> None:
+    live = clone / ".git" / "hooks" / "pre-commit"
+    live.parent.mkdir(exist_ok=True)
+    live.write_text("#!/bin/sh\n", encoding="utf-8")
+    ok, message = pre_push.install_hook(clone)
+    assert not ok and "pre-commit" in message and "switch off" in message
+    assert pre_push.hooks_path(clone) == ""
+    live.unlink()
+    _git_in(clone, "config", "--local", "core.hooksPath", ".husky")
+    ok, message = pre_push.install_hook(clone)
+    assert not ok and ".husky" in message
+    assert pre_push.hooks_path(clone) == ".husky"
+
+
+def test_install_refuses_a_checkout_without_an_executable_hook(clone: Path) -> None:
+    (clone / "scripts" / "hooks" / "pre-push").chmod(0o644)
+    ok, message = pre_push.install_hook(clone)
+    assert not ok and "missing or not executable" in message
+    assert pre_push.hooks_path(clone) == ""
+
+
+def test_pushed_shas_are_the_local_shas_of_the_refs_not_deleted() -> None:
+    sha, zero = "a" * 40, "0" * 40
+    assert pre_push.pushed_shas(f"refs/heads/x {sha} refs/heads/x {zero}\n") == [sha]
+    assert pre_push.pushed_shas(f"(delete) {zero} refs/heads/x {sha}\n") == []
+    assert pre_push.pushed_shas("") == []
+
+
+def _hook_run(
+    monkeypatch: pytest.MonkeyPatch, gates: tuple[Any, ...], changed: list[str], stdin: str
+) -> int:
+    monkeypatch.setattr(pre_push, "GATES", gates)
+    monkeypatch.setattr(pre_push, "dirty_paths", lambda: [])
+    monkeypatch.setattr(pre_push, "changed_files", lambda base: changed)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
+    monkeypatch.delenv(pre_push.TITLE_ENV, raising=False)
+    return int(pre_push.main(["--hook", "--base", "HEAD"]))
+
+
+_PUSH_LINE = f"refs/heads/x {'a' * 40} refs/heads/x {'0' * 40}\n"
+
+
+def test_a_push_that_only_deletes_runs_no_gate(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    failing = pre_push.Gate("fails", ("python", "-c", "raise SystemExit(1)"), ())
+    line = f"(delete) {'0' * 40} refs/heads/x {'a' * 40}\n"
+    assert _hook_run(monkeypatch, (failing,), [], line) == 0
+    assert "no gate runs" in capsys.readouterr().out
+
+
+def test_the_hook_stops_a_push_whose_gate_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    failing = pre_push.Gate("fails", ("python", "-c", "raise SystemExit(1)"), ())
+    assert _hook_run(monkeypatch, (failing,), [], _PUSH_LINE) == 1
+    out = capsys.readouterr().out
+    assert "0 passed, 1 failed, 0 not run (--fast)" in out
+    assert "not this checkout's HEAD" in out
+
+
+def test_in_the_hook_a_gate_not_run_stops_the_push_unless_it_could_hide_nothing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    title = pre_push.Gate("title", ("<title>",), ())
+    folder = pre_push.Gate(
+        "folder gate", ("python", "-c", "pass"), (), cwd="ui", requires="ui/no-such-dir"
+    )
+    absent = pre_push.Gate("absent tool", ("no-such-tool-for-pre-push",), ())
+    assert not pre_push.hook_tolerates(absent, [])
+    assert pre_push.hook_tolerates(title, ["ui/src/a.ts"])
+    assert pre_push.hook_tolerates(folder, ["src/crb/x.py", "uix/a.ts"])
+    assert not pre_push.hook_tolerates(folder, ["ui/src/a.ts"])
+    assert _hook_run(monkeypatch, (title, folder), ["src/crb/x.py"], _PUSH_LINE) == 0
+    assert "2 not run" in capsys.readouterr().out
+    assert _hook_run(monkeypatch, (title, folder), ["ui/src/a.ts"], _PUSH_LINE) == 3
+    assert "the push is stopped; not run here: folder gate" in capsys.readouterr().out
+    assert _hook_run(monkeypatch, (absent,), [], _PUSH_LINE) == 3
+
+
+def test_the_hook_reads_the_title_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    title = next(g for g in pre_push.GATES if g.argv == ("<title>",))
+    monkeypatch.setattr(pre_push, "GATES", (title,))
+    monkeypatch.setattr(pre_push, "dirty_paths", lambda: [])
+    monkeypatch.setattr(pre_push, "changed_files", lambda base: [])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(_PUSH_LINE))
+    monkeypatch.setenv(pre_push.TITLE_ENV, "not a conventional subject")
+    assert pre_push.main(["--hook", "--base", "HEAD"]) == 1
+    assert "0 passed, 1 failed, 0 not run" in capsys.readouterr().out
+
+
+def test_a_run_outside_the_hook_says_when_the_hook_is_not_installed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(pre_push, "GATES", _gates(None))
+    monkeypatch.setattr(pre_push, "dirty_paths", lambda: [])
+    monkeypatch.setattr(pre_push, "hook_installed", lambda: False)
+    assert pre_push.main(["--base", "HEAD"]) == 0
+    assert "--install-hook` installs it" in capsys.readouterr().out
+    monkeypatch.setattr(pre_push, "hook_installed", lambda: True)
+    assert pre_push.main(["--base", "HEAD"]) == 0
+    assert "--install-hook" not in capsys.readouterr().out

@@ -1,0 +1,32 @@
+#!/bin/sh
+# The git pre-push hook: runs scripts/pre_push.py --hook before any push leaves this clone.
+#
+# Installed by `python scripts/pre_push.py --install-hook` (docs/CONTRIBUTING.md), which points
+# git's core.hooksPath at this directory. It stops a push whose static gates or changed files'
+# tests fail (docs/PREVENTION.md P-818). It fails closed: with no interpreter to run the
+# gates, the push is refused, not let through unchecked. `git push --no-verify` skips every
+# git hook and so skips this one; CI is still the gate on the pull request.
+#
+# The interpreter is the first of: $CRB_PYTHON, this checkout's .venv, the .venv of the
+# checkout this worktree belongs to.
+
+root=$(git rev-parse --show-toplevel) || exit 1
+common=$(git rev-parse --path-format=absolute --git-common-dir) || exit 1
+# git exports GIT_DIR and friends to a hook; the gates start git and pytest runs that must
+# read their own repositories, not this one
+unset $(git rev-parse --local-env-vars)
+
+python=
+for candidate in "$CRB_PYTHON" "$root/.venv/bin/python" "$(dirname "$common")/.venv/bin/python"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+        python=$candidate
+        break
+    fi
+done
+if [ -z "$python" ]; then
+    echo "pre-push hook: no interpreter to run the gates with, so the push is refused." >&2
+    echo "pre-push hook: create .venv (docs/CONTRIBUTING.md) or set CRB_PYTHON to one." >&2
+    exit 1
+fi
+cd "$root" || exit 1
+exec "$python" scripts/pre_push.py --hook
