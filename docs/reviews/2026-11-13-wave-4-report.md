@@ -41,23 +41,29 @@ The result is **Inconclusive** **[hypothesis — PRO lines 43-60 and WRN, the si
 Part E; the rows are not in this repository]**.
 
 - **Why the paired result does not decide it.** Over 12 batches and 60 commits, S1 minus A0 is
-  d = -45.8333 points, with p = 4/4096 = 0.0009765625, below 0.05 (PRO lines 44-46). The interval
-  is -58.6725 to -32.9942 points (t = 2.2010, df 11) (PRO line 47). Both seats read it this way.
+  d = -45.8333 points, with p = 4/4096 = 0.0009765625, below 0.05 (PRO lines 44-46). The method
+  is the registered exact two-sided sign-flip test that flips whole batches: 12 batches give
+  2^12 = 4,096 sign patterns, and p is the share that qualify (REG A6). The interval is
+  -58.6725 to -32.9942 points (t = 2.2010, df 11) (PRO line 47). Both seats read it this way.
   The primary p is below 0.05 with S1 behind. *Cleared* needs S1 ahead. *No 15-point effect*
   needs a p not below 0.05. Neither is reachable, so the word is *Inconclusive* for any count
-  (WRN, signatures entry).
+  (WRN, signatures entry) **[hypothesis — PRO lines 44-47; the rows are not in this
+  repository]**.
 - **First ground: the blocks result.** The units found are 2 (click-1 to click-6 as one, cobra-1
   to cobra-6 as one). With 2 units, p = 2/4 = 0.5, not below 0.05 (PRO lines 49-55). Two units
   can never give a blocks p below 0.5; at least six units are needed before it can fall below
   0.05 (WRN, signatures entry, enumeration by the methodologist's seat). WRN says the next
   registration should say so. The decision line reads "Inconclusive (the blocks result falls on
-  the other side of 0.05)" (PRO line 60).
+  the other side of 0.05)" (PRO line 60) **[hypothesis — PRO lines 49-60; the rows are not in
+  this repository]**.
 - **Second ground: the left-out result** "cannot be calculated" (PRO lines 56-57). The output
-  prints one ground, the blocks result. The seats name this as the second (WRN, signatures).
+  prints one ground, the blocks result. The seats name this as the second (WRN, signatures)
+  **[hypothesis — PRO lines 56-57; the rows are not in this repository]**.
 - **Both grounds rest on a faulty count.** The two units of the blocks result and the left-out
   result that cannot be calculated both come from the same faulty usable-test count (section 2).
   The decision word does not: the seats signed Inconclusive for any count (WRN, "Why 0 of 120",
-  "What follows from it"; the deviation entry after the read).
+  "What follows from it"; the deviation entry after the read) **[hypothesis — WRN; the events
+  are not in this repository]**.
 
 What *Inconclusive* means: the registered rule for *Cleared* or *No 15-point effect* was not met,
 so the wave makes neither claim. What it does not mean: it is not a finding that S1 is worse, nor
@@ -157,7 +163,9 @@ task to a top-level `task_id` (events.py line 350) and serves it there (runs.py 
 test (b) of R12 fails on every attempt, and test (c) fails on every attempt of any run that holds
 a `builder.author_test.failed` event. The theory that a null error field caused it is wrong: the
 field is an empty string (ledger.py line 865, schemas.py line 1072). The wrong key came from
-docs/API.md line 565 (WRN, "Why 0 of 120") **[hypothesis — WRN; the events are not in this
+docs/API.md line 565 as it stood at commit `7bb03d6c` (the `builder.author_test` row, which
+listed `task` as a payload key; the row has since been corrected and now names `task_id` on the
+envelope) (WRN, "Why 0 of 120") **[hypothesis — WRN; the events are not in this
 repository]**.
 
 - The decision word does not rest on the usable count. The seats did not sign 0 of 120 (WRN,
@@ -218,10 +226,12 @@ wave at 60 commits (REG, Amendment 2).
 The cost gate before cobra spend was not held in order. Cobra started at 23:28Z on 2026-11-11
 without it. The reconciliation was done on 2026-11-12, over both stages, and was one-way only, not
 three-way (REG Part E item 2; annex row D5). The annex word "passed" for D5 was withdrawn (REG
-Amendment 3 annex, note 1).
+Amendment 3 annex, note 1) **[hypothesis — REG Part E and the Amendment 3 annex; the spend rows
+are not in this repository]**.
 
 The cost gate before the read was closed by Paul before 12:52Z on 2026-11-12 with the words "read
-may go ahead on product dollars, unconfirmed" (WRN, Part E). It is deferred, not passed.
+may go ahead on product dollars, unconfirmed" (WRN, Part E). It is deferred, not passed
+**[hypothesis — WRN Part E; no provider Console export is in hand]**.
 
 ## 5. Spend against the $95 line
 
@@ -400,6 +410,9 @@ read"):
     the served shape of one real event before the read script is committed. A consistency figure
     may be removed only with a seat's signed word. Every rule of a read spec is listed against
     the signed reading that covers it.
+
+Entries 11 to 14 **[hypothesis — WRN, the entries after the read; the events are not in this
+repository]**.
 
 The read script's other departures from the spec are recorded in its opening text (WRN, "Decisions
 of the delivery manager after the code check").
