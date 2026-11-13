@@ -44,7 +44,11 @@ Part E; the rows are not in this repository]**.
   d = -45.8333 points, with p = 4/4096 = 0.0009765625, below 0.05 (PRO lines 44-46). The method
   is the registered exact two-sided sign-flip test that flips whole batches: 12 batches give
   2^12 = 4,096 sign patterns, and p is the share that qualify (REG A6). The interval is
-  -58.6725 to -32.9942 points (t = 2.2010, df 11) (PRO line 47). Both seats read it this way.
+  -58.6725 to -32.9942 points (PRO line 47). It is the registered 95% interval for the mean
+  per-commit difference, built from batches: the estimate plus and minus its standard error
+  with each batch as one unit, times t = 2.2010, the 97.5% point of Student's t with 11 degrees
+  of freedom (12 batches less one) (REG, the registered analysis, item 2, "The interval").
+  Both seats read it this way.
   The primary p is below 0.05 with S1 behind. *Cleared* needs S1 ahead. *No 15-point effect*
   needs a p not below 0.05. Neither is reachable, so the word is *Inconclusive* for any count
   (WRN, signatures entry) **[hypothesis — PRO lines 44-47; the rows are not in this
