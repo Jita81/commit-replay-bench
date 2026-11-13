@@ -72,7 +72,9 @@ What it does: Per attempt: resolves the rung, refuses the attempt before any bui
               proves it RED under the parent's dependency binding, on a test it defines (removing
               it before the grade; an author whose provider refused the call is recorded
               ``model_error:`` so the ledger reads an outage — P-293; a RED naming no test while
-              the env probe is red under that binding is ``harness`` — P-800), stamps every
+              the env probe is red under that binding is ``harness`` — P-800; a refused
+              author's test and parent run are kept as the attempt's transcript when
+              transcripts are retained, the refusal unchanged), stamps every
               attempt with the run's one arm (``run_arm_for``, module level so a caller outside
               the closure names the same arm — P-295) and, on every exit, where its builder ran
               (``builder_executor``, never replaced by the calibrated budget profile's labels —
@@ -196,9 +198,9 @@ from crb.core.ledger import (
 from crb.core.lint import LintPlan, fix_commands, run_plan
 from crb.core.playbook import taught_before
 from crb.core.prevention import AUTO_OFF, LearningSnapshot
-from crb.core.redact import redact_and_cap_head
+from crb.core.redact import redact, redact_and_cap_head
 from crb.core.run import BuildAttempt, BuildFn
-from crb.core.runners.base import BaseRunner, tail_of
+from crb.core.runners.base import BaseRunner, TestRun, tail_of
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
 
@@ -697,6 +699,72 @@ def _write_transcript(
     return str(path)
 
 
+#: The most characters of one refused author's text (its test, the parent run's output) a
+#: retained record keeps: the head and the tail, the middle replaced by a note.
+REFUSED_AUTHOR_MAX_CHARS = 16_000
+
+
+def _bounded(text: str, max_chars: int = REFUSED_AUTHOR_MAX_CHARS) -> tuple[str, bool]:
+    """``text`` redacted, and at most ``max_chars`` of it: head and tail, the cut noted."""
+    out = redact(text)
+    if len(out) <= max_chars:
+        return out, False
+    half = max_chars // 2
+    cut = len(out) - 2 * half
+    return f"{out[:half]}\n[... {cut} characters truncated ...]\n{out[-half:]}", True
+
+
+def _write_refused_author(
+    transcript_dir: Path,
+    task: TaskSpec,
+    rung: Rung | None,
+    error: str,
+    *,
+    authored: tuple[str, str] | None,
+    red: TestRun | None,
+) -> str:
+    """Keep a refused ``S1`` author's evidence beside the transcripts — the authored test
+    (path, content) and the parent run the gate judged — and return its reference (path),
+    which the attempt carries as its ``transcript_ref``. Retention only: never raises (any
+    ``Exception`` is logged, a partial file removed and ``""`` returned), so the refusal it
+    records stays exactly the refusal it was. The author's text is a model's reply and may
+    hold a lone surrogate, which UTF-8 cannot encode: it is kept as ``?``."""
+    path: Path | None = None
+    try:
+        body: dict[str, Any] = {
+            "task_id": task.task_id,
+            "repo": task.repo,
+            "rung": rung.to_dict() if rung is not None else None,
+            "authoring_refused": {"error": error},
+        }
+        if authored is not None:
+            content, cut = _bounded(authored[1])
+            body["authoring_refused"]["authored_test"] = {
+                "path": authored[0],
+                "content": content,
+                "truncated": cut,
+            }
+        if red is not None:
+            parent = red.to_dict()
+            parent["tail"], cut = _bounded(red.tail)
+            for key in ("parse_error", "env_error"):
+                if key in parent:
+                    parent[key] = _bounded(parent[key])[0]
+            parent["truncated"] = cut
+            body["authoring_refused"]["parent_run"] = parent
+        data = json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8", "replace")
+        transcript_dir.mkdir(parents=True, exist_ok=True)
+        path = transcript_dir / f"s1-author-{uuid.uuid4().hex[:12]}.json"
+        path.write_bytes(data)
+    except Exception as exc:
+        _LOG.warning("the refused author's evidence was not kept: %s", exc)
+        if path is not None:
+            with contextlib.suppress(OSError):
+                path.unlink(missing_ok=True)
+        return ""
+    return str(path)
+
+
 def sighted_test_command(
     runner: BaseRunner,
     executor: Executor,
@@ -897,7 +965,10 @@ def build_fn_for(
         task subject; a failure falls back to the subject too.
     transcript_dir:
         When set, each attempt's redacted transcript is written there and
-        referenced from ``BuildAttempt.transcript_ref`` — never inlined.
+        referenced from ``BuildAttempt.transcript_ref`` — never inlined. An ``S1``
+        author the gate refused has no builder transcript: its authored test and the
+        parent run it was judged on are kept there instead (redacted, head and tail of
+        at most :data:`REFUSED_AUTHOR_MAX_CHARS` each) and referenced the same way.
     builder_overrides:
         Extra constructor kwargs applied to every builder (e.g. a scripted
         ``chat_fn`` in tests, an ``endpoint``).
@@ -1044,14 +1115,28 @@ def build_fn_for(
             **({LABEL_CTX_AUTHOR: s1.author_stamp} if s1.author_stamp else {}),
         }
 
-        def fail(why: str) -> BuildAttempt:
+        def fail(
+            why: str, *, authored: tuple[str, str] | None = None, red: TestRun | None = None
+        ) -> BuildAttempt:
             emit(
                 on_event,
                 BUILDER_EVENT_PREFIX + "author_test.failed",
                 task=task.task_id,
                 error=why[:200],
             )
-            return BuildAttempt(ref, error=_prefixed(AUTHORING_PREFIX, why), labels=stamp)
+            error = _prefixed(AUTHORING_PREFIX, why)
+            # retention only (retain.transcripts): the refused test and the parent run it was
+            # judged on, kept where the builder's transcript is kept; the refusal is unchanged
+            kept = (
+                _write_refused_author(tdir, task, rung, error, authored=authored, red=red)
+                if tdir is not None and (authored is not None or red is not None)
+                else ""
+            )
+            if not kept:
+                return BuildAttempt(ref, error=error, labels=stamp)
+            return BuildAttempt(
+                replace(ref, transcript_ref=kept), error=error, transcript_ref=kept, labels=stamp
+            )
 
         dest = ws.root.parent / f"{ws.root.name}-s1-author"
         try:
@@ -1069,9 +1154,14 @@ def build_fn_for(
             return fail(f"{AUTHORING_AUTHOR_FAILED} {author_error(exc)}")
         path = path.strip().lstrip("/")
         if not path or ".." in path.split("/") or not config.is_test(path):
-            return fail(f"{path!r} is not a test path for {config.name!r}")
+            return fail(
+                f"{path!r} is not a test path for {config.name!r}", authored=(path, content)
+            )
         if path in task.test_files:
-            return fail(f"{path!r} is a held-out test's path; the authored test must be its own")
+            return fail(
+                f"{path!r} is a held-out test's path; the authored test must be its own",
+                authored=(path, content),
+            )
         target = ws.root / path
         original = target.read_bytes() if target.is_file() else None
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -1102,11 +1192,17 @@ def build_fn_for(
             raise
         except Exception as exc:
             remove_authored(ws)
-            return fail(f"{AUTHORING_HARNESS_ERROR} {type(exc).__name__}: {exc}")
+            return fail(
+                f"{AUTHORING_HARNESS_ERROR} {type(exc).__name__}: {exc}", authored=(path, content)
+            )
         if red is None or red.green:
             remove_authored(ws)
             why = "defines no test" if red is None else "passes at the parent"
-            return fail(f"the authored test {path!r} is not RED at the parent: it {why}")
+            return fail(
+                f"the authored test {path!r} is not RED at the parent: it {why}",
+                authored=(path, content),
+                red=red,
+            )
         if red.env_error or red.timed_out or red.parse_error or not red.failing:
             # unattributed: nothing names the authored test. Its file comes out FIRST, so the
             # probe measures the parent's posture and never the author's own imports
@@ -1135,9 +1231,13 @@ def build_fn_for(
                 # judged. It is not a retry and nothing here re-runs: on this branch a
                 # harness row may still be re-run; once a reservation decides the commit
                 # (reserved.v1) a harness row after it is a miss like any other.
-                return fail(f"{AUTHORING_HARNESS_ERROR} {fault}")
+                return fail(f"{AUTHORING_HARNESS_ERROR} {fault}", authored=(path, content), red=red)
             why = "timed out" if red.timed_out else "failed without attributable test ids"
-            return fail(f"the authored test {path!r} is not RED at the parent: it {why}")
+            return fail(
+                f"the authored test {path!r} is not RED at the parent: it {why}",
+                authored=(path, content),
+                red=red,
+            )
         own = authored_red(
             runner.name, path, content, red.failing, task.baseline_failing, beside=beside
         )
@@ -1147,7 +1247,9 @@ def build_fn_for(
             rule = f"; {GO_RED_RULE}" if runner.name == "go" else ""
             return fail(
                 f"the authored test {path!r} is not RED at the parent: no test it defines "
-                f"fails there{rule} (failing: {shown})"
+                f"fails there{rule} (failing: {shown})",
+                authored=(path, content),
+                red=red,
             )
         return path, content
 

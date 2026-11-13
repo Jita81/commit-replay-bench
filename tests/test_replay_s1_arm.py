@@ -18,7 +18,10 @@ What it does: Pins that the author works in a checkout holding one commit and no
               run's arm, ``+L`` included (P-295); that ``POST /runs`` takes ``arm: S1`` on
               a blind run only; and that the RED runs under the task's PARENT binding, must be
               a test the author defined, and is ``harness`` when it names no test while the
-              env probe is red under that binding (P-800).
+              env probe is red under that binding (P-800); and that a refused author's test and
+              the parent run it was judged on are kept and served as the row's transcript when
+              the run retains transcripts, kept nowhere when it does not, bounded, and that
+              the refusal itself is byte-identical either way.
 How:          ``pyrepo``'s feat commit replayed blind through ``crb.core.run.run`` with a
               recording builder that applies the commit's own patch and a scripted author;
               the binding cases drive the Go fixture's feat commit through the run's own
@@ -919,3 +922,284 @@ def test_s1_unattributed_red_with_red_env_probe_is_harness(
     attempt, _ = _s1_on_go(tmp_path / "copy", monkeypatch, copy)
     assert attempt.error.startswith("authoring: harness error proving RED:"), attempt.error
     assert copy.ran("list") == []
+
+
+# --- a refused author's evidence (retention only) ------------------------------------------
+
+#: A test the gate refuses because its RED names no test id: it kills the runner mid-test,
+#: after printing past pytest's capture (the output the gate judged).
+UNATTRIBUTED = "tests/test_s1_broken.py"
+UNATTRIBUTED_SRC = (
+    "import os\n\n\ndef test_broken(capsys):\n"
+    "    with capsys.disabled():\n"
+    "        print('PARENT-RUN-OUTPUT', flush=True)\n"
+    "    os._exit(3)\n"
+)
+
+
+def _refuse(
+    pyrepo: pr.PyRepo,
+    tmp_path: Path,
+    tdir: Path | None,
+    src: str = UNATTRIBUTED_SRC,
+    path: str = UNATTRIBUTED,
+) -> tuple[Any, list[tuple[str, dict[str, Any]]], bool]:
+    """One S1 attempt through the run's own ``BuildFn`` whose author the gate refuses:
+    the attempt, every event the adapter emitted, and whether the authored file is left."""
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    def author(ws: Any, subject: str, message: str) -> tuple[str, str]:
+        return path, src
+
+    fn = adapter.build_fn_for(
+        EscalationLadder((Rung("rec", "m"),)),
+        budget=Budget(),
+        runner=PytestRunner(pyrepo.config),
+        executor=LocalExecutor(),
+        config=pyrepo.config,
+        on_event=lambda action, payload: events.append((action, dict(payload))),
+        transcript_dir=tdir,
+        s1=S1Arm(author=author, author_model="t1", author_stamp="fake-author"),
+    )
+    label = adapter.ladder_labels(EscalationLadder((Rung("rec", "m"),)))[0]
+    with Workspace.create(pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws") as ws:
+        attempt = fn(ws, pyrepo.feat_task(), "blind", label)
+        left = (ws.root / UNATTRIBUTED).exists()
+    return attempt, events, left
+
+
+#: The refusal as the gate decided it before its evidence was kept — pinned byte for byte.
+REFUSED_ERROR = (
+    "authoring: the authored test 'tests/test_s1_broken.py' is not RED at the parent: "
+    "it failed without attributable test ids"
+)
+
+
+def test_a_refusal_is_byte_identical_whether_or_not_its_evidence_is_kept(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """Keeping a refused author's evidence is retention only: the error, the labels, the
+    builder named, the events and the removal of the authored file are what they were
+    without it; only the attempt's ``transcript_ref`` (and the pack's pointer) differ."""
+    off, off_events, off_left = _refuse(pyrepo, tmp_path / "off", None)
+    on, on_events, on_left = _refuse(pyrepo, tmp_path / "on", tmp_path / "transcripts")
+    assert off.error == on.error == REFUSED_ERROR
+    assert derive_failure_kind(clean=False, disqualified=False, error=on.error) == (
+        FAILURE_AUTHORING
+    )
+    assert (
+        dict(off.labels)
+        == dict(on.labels)
+        == {
+            LABEL_CONTEXT_ARM: "S1@t1",
+            "builder_executor": "host",
+            LABEL_CTX_AUTHOR: "fake-author",
+        }
+    )
+    assert off.notes == on.notes == {}
+    assert off.transcript_ref == "" and on.transcript_ref
+    assert on.builder.transcript_ref == on.transcript_ref
+    assert off.builder.to_dict() == {**on.builder.to_dict(), "transcript_ref": ""}
+    # the sealed checkout is a fresh one-commit export per attempt: its sha differs per run
+    # whatever is kept, so it is compared by presence only
+    for events in (off_events, on_events):
+        assert events[0][1].pop("commit")
+    assert off_events == on_events
+    assert [a for a, _ in on_events] == [
+        "builder.author_test.start",
+        "builder.author_test.removed",
+        "builder.author_test.failed",
+    ]
+    assert on_events[1][1] == {"path": UNATTRIBUTED}
+    assert on_events[2][1] == {
+        "task": pyrepo.feat_sha,
+        "error": REFUSED_ERROR.removeprefix("authoring: ")[:200],
+    }
+    assert not off_left and not on_left
+
+
+def test_retention_off_keeps_nothing_of_a_refused_author(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
+    attempt, _, _ = _refuse(pyrepo, tmp_path, None)
+    assert attempt.transcript_ref == "" and attempt.builder.transcript_ref == ""
+    assert list(tmp_path.rglob("s1-author-*.json")) == []
+
+
+def test_a_lone_surrogate_in_the_authored_test_never_changes_the_refusal(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A model's reply can decode to a lone surrogate, which UTF-8 cannot encode. Keeping
+    it is retention only: the held-out-path refusal is the same with retention on or off,
+    and nothing raises; the kept record holds the text with the surrogate replaced."""
+    held_out = pyrepo.feat_task().test_files[0]
+    src = "def test_x():\n    assert 'a\ud800b'\n"
+    off, off_events, _ = _refuse(pyrepo, tmp_path / "off", None, src, held_out)
+    on, on_events, _ = _refuse(pyrepo, tmp_path / "on", tmp_path / "transcripts", src, held_out)
+    expected = (
+        f"authoring: {held_out!r} is a held-out test's path; the authored test must be its own"
+    )
+    assert off.error == on.error == expected
+    assert dict(off.labels) == dict(on.labels)
+    # the sealed checkout is a fresh one-commit export per attempt: its sha differs per run
+    for events in (off_events, on_events):
+        assert events[0][1].pop("commit")
+    assert off_events == on_events
+    assert off.transcript_ref == "" and on.transcript_ref
+    kept = json.loads(Path(on.transcript_ref).read_text(encoding="utf-8"))
+    assert kept["authoring_refused"]["authored_test"]["content"] == src.replace("\ud800", "?")
+
+
+def test_retention_that_fails_keeps_nothing_and_never_raises(
+    pyrepo: pr.PyRepo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Any failure while keeping a refused author's evidence (not only an ``OSError``) is
+    logged and swallowed: no reference, and no partial file left behind."""
+
+    def boom(self: Path, data: bytes) -> int:
+        self.write_text("partial", encoding="utf-8")
+        raise ValueError("cannot keep")
+
+    monkeypatch.setattr(Path, "write_bytes", boom)
+    ref = adapter._write_refused_author(
+        tmp_path, pyrepo.feat_task(), None, "authoring: x", authored=("tests/x.py", "x"), red=None
+    )
+    assert ref == ""
+    assert list(tmp_path.rglob("s1-author-*.json")) == []
+
+
+def test_a_refused_authors_test_and_parent_output_are_served_as_the_rows_transcript(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The 15 Wave 4 refusals ("failed without attributable test ids") kept nothing: the
+    route answered 404 "not retained" though the run asked for transcripts. A run that
+    retains transcripts now keeps the refused test and the parent run it was judged on,
+    and ``/grades/{row}/transcript`` serves them; a run that does not still answers 404."""
+    from crb.core.run import RunSpec, run
+    from crb.server.worker import evidence_pack_from_file
+    from crb.store.ledger import DbLedger
+    from crb.store.models import EvidencePackRow, Run
+    from fixtures.posture import witnessed_context_for
+
+    for retain in (True, False):
+        run_id = ("7" if retain else "8") * 32
+        with make_env(tmp_path / f"retain-{retain}") as env:
+            with env.factory() as s:
+                s.add(
+                    Run(
+                        id=run_id,
+                        repo=ALPHA,
+                        kind="blind",
+                        status="succeeded",
+                        builder="rec",
+                        model="m",
+                        provider="",
+                        ladder_json=["r1"],
+                        params_json={"retain": {"transcripts": retain}},
+                        actor="op1",
+                    )
+                )
+                s.commit()
+            ledger = DbLedger(env.factory)
+            evidence = tmp_path / f"evidence-{retain}"
+
+            class _PackThenRow:
+                def append(self, row: Any, evidence: Path = evidence, ledger: Any = ledger) -> Any:
+                    body = evidence_pack_from_file(evidence, row.evidence_pack_hash)
+                    with env.factory() as s:
+                        s.add(
+                            EvidencePackRow(
+                                pack_hash=row.evidence_pack_hash,
+                                repo=row.repo,
+                                task_id=row.task_id,
+                                run_id=row.run_id,
+                                body_json=body,
+                            )
+                        )
+                        s.commit()
+                    return ledger.append(row)
+
+            def author(ws: Any, subject: str, message: str) -> tuple[str, str]:
+                return UNATTRIBUTED, UNATTRIBUTED_SRC
+
+            runner, executor = PytestRunner(pyrepo.config), LocalExecutor()
+            scratch = tmp_path / f"scratch-{retain}"
+            ladder = EscalationLadder((Rung("rec", "m"),))
+            spec = RunSpec(
+                run_id=run_id,
+                config=pyrepo.config,
+                runner=runner,
+                executor=executor,
+                scratch=scratch,
+                ledger=adapter.as_run_ledger(_PackThenRow()),
+                evidence_dir=evidence,
+                mode="blind",
+                ladder=adapter.ladder_labels(ladder),
+                context_for=witnessed_context_for(
+                    pyrepo.repo, pyrepo.config, runner=runner, executor=executor, scratch=scratch
+                ),
+            )
+            fn = adapter.build_fn_for(
+                ladder,
+                budget=Budget(),
+                runner=runner,
+                executor=executor,
+                config=pyrepo.config,
+                # where the worker writes a retaining run's transcripts
+                transcript_dir=(
+                    Path(env.settings.home) / "transcripts" / run_id if retain else None
+                ),
+                s1=S1Arm(author=author, author_model="t1"),
+            )
+            run(spec, pyrepo.repo, [pyrepo.feat_task(repo=ALPHA)], fn)
+            (row,) = [r for r in ledger.rows() if r.run_id == run_id]
+            assert row.error == REFUSED_ERROR and row.failure_kind == FAILURE_AUTHORING
+            res = env.get(f"/grades/{row.row_hash}/transcript")
+            if not retain:
+                assert res.status_code == 404
+                assert "was not retained" in envelope(res)["detail"]["reason"]
+                continue
+            assert res.status_code == 200, res.text
+            kept = res.json()
+            assert kept["task_id"] == pyrepo.feat_sha
+            refused = kept["authoring_refused"]
+            assert refused["error"] == REFUSED_ERROR
+            assert refused["authored_test"] == {
+                "path": UNATTRIBUTED,
+                "content": UNATTRIBUTED_SRC,
+                "truncated": False,
+            }
+            parent = refused["parent_run"]
+            assert parent["returncode"] != 0 and parent["failing"] == []
+            assert parent["returncode"] == 3 and "PARENT-RUN-OUTPUT" in parent["tail"]
+            assert parent["truncated"] is False
+
+
+def test_an_oversized_refusal_is_kept_bounded_head_and_tail(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A row never stores unbounded output: the authored test and the parent run's output
+    keep their head and tail, at most ``REFUSED_AUTHOR_MAX_CHARS`` each, the cut noted;
+    a credential in either is redacted as the builder's transcript is."""
+    from crb.core.runners.base import TestRun
+
+    cap = adapter.REFUSED_AUTHOR_MAX_CHARS
+    output = "HEAD-LINE\n" + "x" * (cap * 5) + "\nTAIL-LINE"
+    content = 'KEY = "sk-live-abcdefghijklmnopqrstuvwxyz0123"\n' + "y" * (cap * 3) + "\nEND"
+    red = TestRun(2, frozenset(), tail=output, parse_error="unattributed failure")
+    ref = adapter._write_refused_author(
+        tmp_path,
+        pyrepo.feat_task(),
+        None,
+        "authoring: x",
+        authored=("tests/test_x.py", content),
+        red=red,
+    )
+    body = json.loads(Path(ref).read_text(encoding="utf-8"))["authoring_refused"]
+    tail, test = body["parent_run"]["tail"], body["authored_test"]["content"]
+    for kept, raw in ((tail, output), (test, content)):
+        assert len(kept) < cap + 100 < len(raw)
+        assert "characters truncated" in kept
+    assert tail.startswith("HEAD-LINE") and tail.endswith("TAIL-LINE")
+    assert body["parent_run"]["truncated"] is True and body["authored_test"]["truncated"]
+    assert test.endswith("END") and "sk-live-" not in test
+    # within the bound nothing is cut
+    assert adapter._bounded("short") == ("short", False)
