@@ -115,9 +115,12 @@ def _unaccounted_command(job: str, cmd: str) -> bool:
     if _mirrored(job, cmd) or _listed(job, cmd):
         return False
     if pre_push.matches(pre_push.SETUP, cmd):
-        # plumbing may not carry a gate inside a command substitution
-        nested = "$(" in cmd or "`" in cmd
-        return nested and bool(pre_push.gate_words(cmd, GATE_PROGRAMS))
+        # plumbing names no gate program at all: however the line was split (a quote the
+        # splitter misread, a lone ``&``, a command substitution), a part that still holds a
+        # gate program's name is not plumbing. The one word allowed to look like a program
+        # is the interpreter path handed to uv's ``--python`` option
+        plain = re.sub(r"--python[ =]\S+", "", cmd)
+        return bool(pre_push.gate_words(plain, GATE_PROGRAMS))
     if job in pre_push.UNCOVERED_JOBS:
         allowed = (*pre_push.UNCOVERED_JOB_TOOLS.get(job, ()), *pre_push.SHELL_SYNTAX)
         if pre_push.program(cmd) not in allowed:
@@ -187,6 +190,10 @@ def test_a_new_static_gate_in_any_job_is_caught() -> None:
         ("lint", 'uv pip install -r "$(python scripts/new_gate.py --check)"'),
         ("types", "mkdir -p `.venv/bin/mypy src`"),
         ("security", 'cd "$(ruff check src)"'),
+        # a line the splitter cannot cut: an escaped quote, a lone ``&``
+        ("lint", 'mkdir -p "a\\""; python scripts/new_gate.py --check'),
+        ("lint", "mkdir -p reports & python scripts/new_gate.py --check"),
+        ("types", "mkdir -p reports & .venv/bin/mypy src"),
     ]
     assert unaccounted(planted) == [f"{j}: {line}" for j, line in planted]
     assert unaccounted([("lint", ".venv/bin/ruff check src tests")]) == []
