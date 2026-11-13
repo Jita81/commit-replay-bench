@@ -53,6 +53,13 @@ CI additionally runs `gitleaks` (secrets: every commit a pull request adds, and 
 history on every push to main, `scripts/ci_gitleaks.py`), `pip-audit` (known vulnerabilities in
 the resolved environment) and produces a CycloneDX SBOM.
 
+Before a push, run `.venv/bin/python scripts/pre_push.py --title "<the PR title>"`. It runs
+the lines above and every other static gate of the pull-request workflows that works without
+docker, a service or the network, checks the title as the squash merge will write it, and
+ends with the CI jobs it could not run here and why (P-818). `--fast` runs the static gates,
+the tests of the files you changed against `origin/main` and the repo-wide ratchet tests
+instead of the whole suite; `--list` prints what it covers.
+
 No test may fail because of the machine it runs on **[aspiration — the rule DL-053 sets; the
 run below shows it is not yet demonstrated]**. Running as root, with no docker daemon or with
 no network is meant to change which tests run, not their results **[aspiration — DL-053]**.
