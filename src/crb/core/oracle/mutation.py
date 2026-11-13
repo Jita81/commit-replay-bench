@@ -1025,7 +1025,7 @@ def score_task(
                     "oracle.mutation.excluded",
                     task=task.task_id,
                     mutant=m.mutant_id,
-                    status=outcomes[-1].status,
+                    outcome=outcomes[-1].status,
                 )
                 continue
             if compile_failure(run):
