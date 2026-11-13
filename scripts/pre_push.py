@@ -131,6 +131,8 @@ RATCHET_TESTS: tuple[str, ...] = (
     "tests/test_dod_check.py",
     "tests/test_claims_check.py",
     "tests/test_check_commit_subject.py",
+    "tests/test_event_key_contract.py",
+    "tests/test_read_preflight.py",
 )
 
 #: CI's ``-m`` for the hermetic suite: the sandbox images are built and tested in their own job.

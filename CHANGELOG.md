@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **A read script proves it can see its event keys before it counts.** `scripts/read_preflight.py`
+  refuses an expectation of a key the emitter lifts out of the payload, checks every fetched event,
+  stops an unwaived zero count over a non-empty population, and exits 6. Its AST rule follows
+  event dicts through aliases, call sites and getter helpers, each scope on its own, and flags
+  lifted-key lookups, undeclared payload keys, `Expect` calls or action filters it cannot read,
+  and compared actions no `Expect` declares. Positive controls plant a direct `payload["task"]`
+  lookup and the Wave 4 helper; both must exit 6. `tests/test_event_key_contract.py` pins the
+  event table against each emit site's keys; ten table rows were corrected (P-819)
+  ([#142](https://github.com/Jita81/commit-replay-bench/pull/142)).
+
 - **A refused S1 author's test and parent run are kept as the row's transcript.** When the
   author gate refused a test, the adapter deleted it and kept neither its content nor the parent
   run's output, so the Wave 4 refusals that "failed without attributable test ids" could not be
