@@ -103,28 +103,38 @@ def _listed(job: str, line: str) -> bool:
     return any(j in ("*", job) and re.fullmatch(p, line) for j, p, _ in pre_push.UNCOVERED_STEPS)
 
 
+def all_commands() -> list[tuple[str, str]]:
+    return [(job, cmd) for job, line in all_lines() for cmd in pre_push.commands(line)]
+
+
+#: The programs the gates here run, derived from pre_push's gates and the CI lines they mirror.
+GATE_PROGRAMS = pre_push.gate_programs(all_commands())
+
+
 def _unaccounted_command(job: str, cmd: str) -> bool:
     if _mirrored(job, cmd) or _listed(job, cmd):
         return False
+    if pre_push.matches(pre_push.SETUP, cmd):
+        return False
     if job in pre_push.UNCOVERED_JOBS:
-        return re.fullmatch(pre_push.STATIC_SHAPE, cmd) is not None
-    return not pre_push.matches(pre_push.SETUP, cmd)
+        allowed = (*pre_push.UNCOVERED_JOB_TOOLS.get(job, ()), *pre_push.SHELL_SYNTAX)
+        if pre_push.program(cmd) not in allowed:
+            return True
+        return bool(pre_push.gate_words(cmd, GATE_PROGRAMS))
+    return True
 
 
 def unaccounted(lines: list[tuple[str, str]]) -> list[str]:
     """Each line holding a command no gate mirrors, no entry lists and no plumbing pattern
-    explains. In a job pre_push lists as not run, only a command shaped like a static gate
-    must be named. Each command is read on its own, so plumbing cannot cover a gate chained
-    after it."""
+    explains. In a job pre_push lists as not run, a command may also run a program that job
+    lists in ``UNCOVERED_JOB_TOOLS`` (or be shell syntax), unless a word of it names a gate
+    program. Each command is read on its own, so plumbing cannot cover a gate chained after
+    it."""
     return [
         f"{job}: {line}"
         for job, line in lines
         if any(_unaccounted_command(job, cmd) for cmd in pre_push.commands(line))
     ]
-
-
-def all_commands() -> list[tuple[str, str]]:
-    return [(job, cmd) for job, line in all_lines() for cmd in pre_push.commands(line)]
 
 
 def test_every_pull_request_run_line_is_a_local_gate_or_listed_as_not_run() -> None:
@@ -150,10 +160,60 @@ def test_a_new_static_gate_in_any_job_is_caught() -> None:
         # shell and npm gates in a job listed as not run
         ("security", "bash scripts/x.sh"),
         ("security", "npm run lint"),
+        # bare tools, and a tool nobody listed, in jobs listed as not run
+        ("security", "ruff check src"),
+        ("container", "mypy --strict src"),
+        ("sandbox-images", "pytest -q tests"),
+        ("walkthrough", "PYTHONPATH=src pytest -q"),
+        ("sbom", "shellcheck scripts/x.sh"),
+        # a tool one uncovered job lists does not cover another job
+        ("walkthrough", "helm lint deploy/helm/crb"),
+        # a gate behind a program that runs the command after it, or inside a substitution
+        ("fresh-clone-shard", "sudo -E .venv/bin/ruff check src"),
+        ("fresh-clone-shard", "git diff --check"),
+        ("container", "docker run img pytest -q"),
+        ("security", "echo $(ruff check src)"),
+        ("container", '[ -z "$(ruff check src)" ]'),
+        ("sandbox-images", "for f in $(.venv/bin/mypy src)"),
+        ("sandbox-images", "test -n x"),
+        ("container", "docker run --entrypoint=ruff img check src"),
+        ("container", "docker run img pytest>log"),
+        ("container", "echo $(pytest>/dev/null)"),
+        ("container", "[ -z $(mypy<x) ]"),
+        ("container", "echo {ruff,x} check"),
     ]
     assert unaccounted(planted) == [f"{j}: {line}" for j, line in planted]
     assert unaccounted([("lint", ".venv/bin/ruff check src tests")]) == []
     assert unaccounted([("lint", "cd ui && mkdir -p x")]) == []
+    assert unaccounted([("container", "helm lint deploy/helm/crb && code=0")]) == []
+
+
+def test_every_listed_tool_names_a_job_not_run_and_a_program_it_still_runs() -> None:
+    """A stale tool would let a later gate with that program pass unnamed."""
+    assert set(pre_push.UNCOVERED_JOB_TOOLS) <= set(pre_push.UNCOVERED_JOBS)
+    used = {(job, pre_push.program(cmd)) for job, cmd in all_commands()}
+    for job, tools in pre_push.UNCOVERED_JOB_TOOLS.items():
+        for tool in tools:
+            assert (job, tool) in used, f"UNCOVERED_JOB_TOOLS[{job!r}]: {tool!r} is never run"
+
+
+def test_gate_programs_are_read_from_the_gates() -> None:
+    """The set is derived, not typed: each gate's tool and each mirrored CI program."""
+    for name in ("ruff", "mypy", "lint-imports", "pytest", ".venv/bin/pytest", "python", "npx"):
+        assert name in GATE_PROGRAMS, name
+    assert not {"docker", "helm", "echo", "jq", "["} & GATE_PROGRAMS
+    words = pre_push.gate_words('[ -z "$(.venv/bin/ruff check src)" ]', GATE_PROGRAMS)
+    assert words == [".venv/bin/ruff"]
+    assert (
+        pre_push.gate_words("docker run --rm crb-sandbox-python:ci go version", GATE_PROGRAMS) == []
+    )
+
+
+def test_program_is_the_first_word_after_assignments() -> None:
+    assert pre_push.program("PYTHONPATH=scripts .venv/bin/pytest -q") == ".venv/bin/pytest"
+    assert pre_push.program("ruff check src") == "ruff"
+    assert pre_push.program('want="$(sed -n x f)"') == "="
+    assert pre_push.program("echo 'unbalanced") == "echo"
 
 
 def test_commands_split_outside_quotes_only() -> None:
@@ -190,10 +250,27 @@ def test_every_entry_names_a_job_and_a_line_ci_still_has() -> None:
 def test_pre_push_reads_exactly_the_pull_request_workflows() -> None:
     triggered = set()
     for path in sorted(WORKFLOW_DIR.glob("*.y*ml")):
-        on = _load(path.relative_to(ROOT).as_posix()).get(True) or {}  # yaml reads `on` as True
-        if "pull_request" in on:
+        workflow = _load(path.relative_to(ROOT).as_posix())
+        if "pull_request" in pre_push.workflow_triggers(workflow):
             triggered.add(path.relative_to(ROOT).as_posix())
     assert triggered == set(pre_push.WORKFLOWS)
+
+
+@pytest.mark.parametrize(
+    ("text", "triggered"),
+    [
+        ("on:\n  pull_request:\n    branches: [main]\n", True),  # yaml reads `on` as True
+        ("'on':\n  pull_request:\n    branches: [main]\n", True),  # quoted: the string "on"
+        ('"on": [push, pull_request]\n', True),
+        ("on: pull_request\n", True),
+        ("'on': pull_request_target\n", False),  # another event, not a substring match
+        ("'on':\n  push:\n    branches: [main]\n", False),
+        ("name: no trigger\n", False),
+    ],
+)
+def test_the_trigger_is_read_whether_or_not_on_is_quoted(text: str, triggered: bool) -> None:
+    workflow = yaml.safe_load(text)
+    assert ("pull_request" in pre_push.workflow_triggers(workflow)) is triggered
 
 
 def test_every_ratchet_test_exists() -> None:
@@ -233,6 +310,60 @@ def test_a_changed_file_maps_to_the_tests_its_header_names() -> None:
     assert "tests/test_check_commit_subject.py" in tests
     assert notes == [notes[0]] and "tests/conftest.py" in notes[0]
     assert pre_push.tests_for(["tests/test_pre_push.py"]) == (["tests/test_pre_push.py"], [])
+
+
+def test_a_deleted_source_selects_its_filename_test() -> None:
+    """A deleted file has no header; ``tests/test_<stem>.py`` still covers it."""
+    deleted = "src/crb/nowhere/pre_push.py"  # not on disk; its stem has a test
+    assert not (ROOT / deleted).exists()
+    assert pre_push.tests_for([deleted]) == (["tests/test_pre_push.py"], [])
+    gone = "scripts/deleted_with_no_test_here.py"
+    assert not (ROOT / gone).exists()
+    tests, notes = pre_push.tests_for([gone])
+    assert tests == [] and len(notes) == 1 and gone in notes[0]
+
+
+def test_a_deleted_test_file_is_not_passed_to_pytest() -> None:
+    gone = "tests/test_deleted_by_this_branch.py"
+    assert not (ROOT / gone).exists()
+    tests, notes = pre_push.tests_for([gone])
+    assert tests == [] and notes == [f"{gone} is deleted: there is nothing of it to run"]
+
+
+def test_changed_files_keeps_deleted_and_renamed_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A committed and a staged, uncommitted deletion and rename each give every path: the
+    committed pair is read by the ``base...HEAD`` call, the staged pair by the ``HEAD`` call,
+    so dropping ``--no-renames`` from either loses an old name."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "no-global-config"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    git("config", "diff.renames", "true")  # git's default, held here whatever the machine's
+    for name in ("gone.py", "old.py", "kept.py", "staged_gone.py", "staged_old.py"):
+        (tmp_path / name).write_text(f"# {name}\nx = 1\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-q", "-m", "base")
+    git("rm", "-q", "gone.py")
+    git("mv", "old.py", "new.py")
+    git("commit", "-q", "-m", "change")
+    git("rm", "-q", "staged_gone.py")
+    git("mv", "staged_old.py", "staged_new.py")
+    monkeypatch.setattr(pre_push, "ROOT", tmp_path)
+    assert pre_push.changed_files("HEAD~1") == [
+        "gone.py",
+        "new.py",
+        "old.py",
+        "staged_gone.py",
+        "staged_new.py",
+        "staged_old.py",
+    ]
 
 
 def test_a_changed_file_that_maps_to_no_test_gets_a_note() -> None:

@@ -56,8 +56,10 @@ Works with:   .github/workflows/ci.yml (the jobs it mirrors, and the coverage fl
               docs/PREVENTION.md (P-818, the class it stops)
 Tested by:    tests/test_pre_push.py
 Touch when:   never for a new repository; a step is added to a pull-request workflow (add a
-              ``Gate`` that mirrors it, or an ``UNCOVERED_STEPS`` entry with the reason it
-              cannot run here — tests/test_pre_push.py fails until one of them names it).
+              ``Gate`` that mirrors it, an ``UNCOVERED_STEPS`` entry with the reason it
+              cannot run here, or, in a job not run here, its program in
+              ``UNCOVERED_JOB_TOOLS`` — tests/test_pre_push.py fails until one of them names
+              it).
 """
 
 from __future__ import annotations
@@ -66,11 +68,12 @@ import argparse
 import functools
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -255,8 +258,9 @@ GATES: tuple[Gate, ...] = (
 )
 
 #: Whole jobs this script does not run, with the reason. Their lines are still read by
-#: tests/test_pre_push.py: one shaped like a static gate (a script, ruff, mypy, pytest) must
-#: be named by a gate or by ``UNCOVERED_STEPS``, so a cheap gate cannot hide in such a job.
+#: tests/test_pre_push.py: each command must be named by a gate, ``UNCOVERED_STEPS`` or
+#: ``SETUP``, or run a program the job lists in ``UNCOVERED_JOB_TOOLS`` with no word naming
+#: a gate program — the comment on that list says what can still pass.
 UNCOVERED_JOBS: dict[str, str] = {
     "security": "gitleaks is downloaded and pip-audit asks the advisory database (network)",
     "sbom": "the CycloneDX SBOM is an artifact, not a verdict on the change",
@@ -271,6 +275,20 @@ UNCOVERED_JOBS: dict[str, str] = {
     "fresh-clone": "an aggregator over the fresh-clone jobs, with the partition proof",
 }
 
+#: The fresh-clone jobs' own commands, each held whole: ``test``, ``git`` and ``sudo`` can carry
+#: another command, so none of them is accepted by its program alone.
+_FRESH_CLONE: tuple[str, ...] = (
+    'test "$(id -u)" = 0',
+    'git clone -q --no-local "$SRC" /root/fresh',
+    "git fetch -q \"$SRC\" '+refs/remotes/origin/*:refs/remotes/origin/*'",
+    'git fetch -q "$SRC" HEAD',
+    'git checkout -q --detach "$(git -C "$SRC" rev-parse HEAD)"',
+)
+_AS_ROOT = (
+    'sudo --preserve-env={env} env "PATH=$PATH" HOME=/root bash -euo pipefail '
+    '"$RUNNER_TEMP/gates.sh" < /dev/null'
+)
+
 #: Single commands no gate here runs: ``(job id or "*", regex, reason)``, matched like
 #: ``Gate.mirrors`` against one command (``commands``) without its job prefix.
 UNCOVERED_STEPS: tuple[tuple[str, str, str], ...] = (
@@ -283,10 +301,26 @@ UNCOVERED_STEPS: tuple[tuple[str, str, str], ...] = (
         "the shard partition proof and the weights' staleness need the shards' reports",
     ),
     ("test", r"\.venv/bin/coverage (combine|xml) .*", "combines the shards' coverage files"),
-    (
-        "fresh-clone-gates",
-        r'(test "\$\(id -u\)" = 0|git (clone|fetch|checkout) .*|sudo .*)',
-        "the gates as root on a fresh clone made from the lock (this runs in your checkout)",
+    *(
+        (
+            "fresh-clone-gates",
+            re.escape(line),
+            "the gates as root on a fresh clone made from the lock (this runs in your checkout)",
+        )
+        for line in (*_FRESH_CLONE, _AS_ROOT.format(env="DOD_BASE,SRC,PYTHONDONTWRITEBYTECODE"))
+    ),
+    *(
+        (
+            "fresh-clone-shard",
+            re.escape(line),
+            "the suite as root on a fresh clone made from the lock (this runs in your checkout)",
+        )
+        for line in (
+            *_FRESH_CLONE,
+            _AS_ROOT.format(
+                env="SRC,SHARD,CRB_TEST_REQUIRE_TOOLS,JAVA_HOME,PYTHONDONTWRITEBYTECODE"
+            ),
+        )
     ),
     (
         "*",
@@ -300,6 +334,37 @@ UNCOVERED_STEPS: tuple[tuple[str, str, str], ...] = (
     ("test-postgres", r"\.venv/bin/pytest .*", "needs the PostgreSQL service"),
     ("sbom", r"\.venv/bin/cyclonedx-py .*", "writes the SBOM artifact"),
     ("sandbox-images", r"\.venv/bin/pytest .*", "needs docker and the built sandbox images"),
+    *(
+        ("sandbox-images", re.escape(line), "checks the built sandbox images (docker)")
+        for line in (
+            # ``test`` runs the command it substitutes: each line is held whole
+            'test -n "$want"',
+            'test "$(docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-go:ci '
+            'id -u)" = "65534"',
+            'test "$(docker run --rm --network=none --read-only --tmpfs /tmp "$img" id -u)" '
+            '= "65534"',
+            # names python as a sandbox language, and runs pytest inside that image
+            "for lang in python node go",
+            "docker run --rm --network=none --read-only --tmpfs /tmp crb-sandbox-python:ci "
+            "python -m pytest --version",
+        )
+    ),
+    *(
+        ("container", re.escape(line), "runs python inside the built image (docker)")
+        for line in (
+            'docker run --rm crb:ci python -c "import os; assert os.getuid() == 10001, '
+            "os.getuid(); print('uid ok')\"",
+            "docker run --rm crb:ci python -c \"import os; assert os.path.isfile('/app/ui/dist/"
+            "index.html'), 'UI missing from image'; print('ui ok')\"",
+            'docker run --rm crb:ci python -c "import crb.store.migrate, crb.core, '
+            "crb.builders; print('imports ok')\"",
+        )
+    ),
+    (
+        "security",
+        re.escape('tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks'),
+        "unpacks the gitleaks binary CI downloads",
+    ),
     ("*", r"python3 \.\./scripts/ci_install_browser\.py .*", "installs Chromium (network)"),
     ("*", r"scripts/walkthrough\.sh .*", "boots a live stack and drives a browser"),
 )
@@ -322,8 +387,80 @@ SETUP: tuple[str, ...] = (
     r"set -euo pipefail",
 )
 
-#: How the static-gate shape is recognised in a job listed in ``UNCOVERED_JOBS``.
-STATIC_SHAPE = r"(PYTHONPATH=\S+ )?(python3?|\.venv/bin/\S+|\S*scripts/\S+|bash|sh|npm|npx)( .*)?"
+#: The programs each job in ``UNCOVERED_JOBS`` may run without a gate or an entry naming the
+#: whole command: the tools its reason needs (docker, helm, the network) and the shell around
+#: them, for a job with too many such lines to name each. A program that runs the command
+#: after it (``sudo``, ``git``, ``test``, ``tar``) is not listed where the job has few such
+#: lines: each line is an exact ``UNCOVERED_STEPS`` entry instead. A command accepted only by
+#: its program here (or by ``SHELL_SYNTAX``) is still refused when any of its words, split at
+#: whitespace and ``$ ( ) ` " ' ; | & < > = , { }``, names a gate program (``gate_programs``): so
+#: ``docker run img pytest -q`` and ``echo $(ruff check src)`` are reported. What this does
+#: not catch: a tool no gate here runs (``docker run img shellcheck x``), a gate reached
+#: through a variable, a script file or an image's entrypoint (``docker run img`` whose image
+#: runs ruff), a gate program under another name (``python3.12``), a name broken up by shell
+#: quoting or escaping (``r''uff``, ``py\test``), and ``SETUP`` and ``UNCOVERED_STEPS``
+#: patterns that end in ``.*`` (they match whatever follows).
+UNCOVERED_JOB_TOOLS: dict[str, tuple[str, ...]] = {
+    "security": ("curl", "echo", "sha256sum", ".audit/bin/pip-audit"),
+    "test-postgres": ("grep",),
+    "container": ("docker", "helm", "echo", "printf", "rm", "["),
+    "sandbox-images": ("docker", "grep", "printf"),
+    "walkthrough": ("jq",),
+}
+
+#: Shell words that run nothing on their own, accepted in any job listed as not run; a bare
+#: ``VAR=value`` assignment is read as one of them (its program is ``=``).
+SHELL_SYNTAX: tuple[str, ...] = ("for", "do", "done", "then", "else", "fi", "=")
+
+#: Where a command is cut into words for ``gate_words``: whitespace and shell punctuation.
+_WORDS = re.compile(r"""[\s$()`"';|&<>=,{}]+""")
+
+
+def gate_programs(ci_commands: Iterable[tuple[str, str]]) -> frozenset[str]:
+    """The programs the gates here run, read from ``GATES`` itself: each gate's tool
+    (``argv[0]``), the program (``program``) of every ``(job, command)`` of ``ci_commands``
+    a gate mirrors, the basename of each (``.venv/bin/pytest`` is also ``pytest``), and
+    ``python`` / ``python3``."""
+    found = {gate.argv[0] for gate in GATES if not gate.argv[0].startswith("<")}
+    for job, cmd in ci_commands:
+        if any(matches(gate.mirrors, f"{job}: {cmd}") for gate in GATES):
+            found.add(program(cmd))
+    found |= {name.rsplit("/", 1)[-1] for name in found}
+    return frozenset(found | {"python", "python3"})
+
+
+def gate_words(cmd: str, programs: Iterable[str]) -> list[str]:
+    """The words of ``cmd`` that name one of ``programs``, by name or basename."""
+    names = set(programs)
+    words = (w for w in _WORDS.split(cmd) if w)
+    return sorted({w for w in words if w in names or w.rsplit("/", 1)[-1] in names})
+
+
+def program(cmd: str) -> str:
+    """The program one command runs: its first word after any ``VAR=value`` assignments
+    (``PYTHONPATH=scripts .venv/bin/pytest -q`` runs ``.venv/bin/pytest``), ``=`` for a
+    command that only assigns."""
+    try:
+        words = shlex.split(cmd)
+    except ValueError:  # an unbalanced quote: read the words as they are
+        words = cmd.split()
+    for word in words:
+        if not re.match(r"[A-Za-z_][A-Za-z0-9_]*=", word):
+            return word
+    return "="
+
+
+def workflow_triggers(workflow: Mapping[object, object]) -> set[str]:
+    """The events a workflow's ``on:`` names. PyYAML reads an unquoted ``on:`` key as
+    ``True`` and a quoted ``'on':`` as the string ``"on"``; both are read here, and the value
+    may be one event, a list of them or a mapping keyed by them."""
+    on = workflow.get(True, workflow.get("on"))
+    if isinstance(on, str):
+        return {on}
+    if isinstance(on, Mapping | list | tuple):
+        return {str(event) for event in on}
+    return set()
+
 
 #: Shell words that open a command without being one: ``if grep …; then mv …``.
 _LEADING = re.compile(r"^(?:(?:if|then|else|elif|do|while|until|!)\s+|\()+")
@@ -442,12 +579,15 @@ def check_title(title: str, pr_number: int | None) -> tuple[bool, str]:
 
 
 def changed_files(base: str) -> list[str]:
-    """Files this branch changes against ``base``: committed, staged, unstaged, untracked."""
+    """Files this branch changes against ``base``: committed, staged, unstaged, untracked.
+
+    Deleted paths are kept (``tests_for`` maps a deleted source to its tests), and a rename
+    is read as its old and its new path (``--no-renames``), so the old name's tests run."""
     names: set[str] = set()
-    names.update(_git("diff", "--name-only", f"{base}...HEAD"))
-    names.update(_git("diff", "--name-only", "HEAD"))
+    names.update(_git("diff", "--name-only", "--no-renames", f"{base}...HEAD"))
+    names.update(_git("diff", "--name-only", "--no-renames", "HEAD"))
     names.update(_git("ls-files", "--others", "--exclude-standard"))
-    return sorted(n for n in names if (ROOT / n).is_file())
+    return sorted(names)
 
 
 def tests_for(paths: Sequence[str]) -> tuple[list[str], list[str]]:
@@ -455,19 +595,24 @@ def tests_for(paths: Sequence[str]) -> tuple[list[str], list[str]]:
 
     A test file is its own test; any other file is covered by the ``tests/*.py`` its header's
     ``Tested by`` names (scripts/code_map.py reads the header) and by ``tests/test_<stem>.py``
-    when that exists."""
+    when that exists. A deleted path has no header to read: a deleted test file is not run,
+    and a deleted source maps to ``tests/test_<stem>.py`` alone."""
     found: set[str] = set()
     notes: list[str] = []
     for rel in paths:
         path = ROOT / rel
+        exists = path.is_file()
         if rel.startswith("tests/") and Path(rel).name.startswith("test_") and rel.endswith(".py"):
-            found.add(rel)
+            if exists:
+                found.add(rel)
+            else:
+                notes.append(f"{rel} is deleted: there is nothing of it to run")
             continue
         if rel.startswith("tests/") and rel.endswith(".py"):
             notes.append(f"{rel} is shared test code: only the full run covers what uses it")
             continue
         named: set[str] = set()
-        if path.suffix in (".py", ".ts", ".tsx", ".sh"):
+        if exists and path.suffix in (".py", ".ts", ".tsx", ".sh"):
             tested_by = code_map.read_header(path).fields.get("Tested by", "")
             named.update(re.findall(r"tests/[\w/.-]+?\.py", tested_by))
         guess = f"tests/test_{path.stem}.py"
@@ -516,7 +661,8 @@ def _in_process(name: str, check: Callable[[], tuple[bool, str]]) -> Result:
 def not_run_here() -> list[str]:
     """Every CI check this script does not run, one line each."""
     lines = [f"job {job}: {why}" for job, why in UNCOVERED_JOBS.items()]
-    lines += [f"step in {job}: {why}" for job, _, why in UNCOVERED_STEPS]
+    steps = dict.fromkeys((job, why) for job, _, why in UNCOVERED_STEPS)  # one line per reason
+    lines += [f"step in {job}: {why}" for job, why in steps]
     lines.append(
         "tests marked docker / toolchain / network skip here when the tool is absent; CI "
         "(CRB_TEST_REQUIRE_TOOLS, CRB_TEST_STRICT_WARMUP) fails them instead — read pytest's "
