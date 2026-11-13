@@ -300,17 +300,37 @@ Source: ERR. The click and cobra totals match SC1 item6. For cobra, ERR's split 
 2 protocol) matches the product's own `failure_kind` labels (authoring 30, protocol 2) (SC1
 item6).
 
-**The open A3 question.** The author gate sits at adapter.py lines 1110-1140. Go tests may not
-compile at the parent commit, so a cobra A3 refusal may be the instrument's miss, not the author's.
-It is not settled. Settling it needs the stored parent output, and that look is not yet done (ERR)
-**[hypothesis — ERR; the stored output is not in this repository]**. Only S1 builds have an author
-(WRN, the deviation entries before the read), so author-gate refusals occur only on S1 builds.
-Until the A3 question is settled, it could bear on how the cobra rows are read. No size is claimed
-for that here.
+**The open A3 question.** The author gate sits at adapter.py lines 1110-1140. Read on
+2026-11-13, the code refuses with this text when the run at the parent fails, names no failing
+test, and the environment probe is sound. A Go test that calls a function the commit adds does not
+compile at the parent, so the package fails and no test is named. The served events of the 15 A3
+rows hold the refusal text and no parent output (`builder.author_test.failed`, empty payload), so
+the stored record cannot settle it
+**[hypothesis — served events read 2026-11-13 by the delivery manager; not in this repository]**.
+A repeat of one A3 row at no model cost, with the parent output kept, is the step that would.
+Only S1 builds have an author (WRN, the deviation entries before the read), so author-gate
+refusals occur only on S1 builds. No size is claimed for the A3 effect here.
 
-ERR says the split by arm "goes in the wave report from the key file" (ERR, Limits). This report
-follows ERR on the source. TO FILL after Paul's audit, from the key file: the error classes split
-by arm.
+**The error classes by arm.** Made on 2026-11-13 after Paul's audit, by the same mechanical rule
+as ERR, over the same 49 runs, read through the product's own API with the campaign's arm flag
+**[hypothesis — served task rows, read 2026-11-13 by the delivery manager; not in this
+repository]**.
+Rows with an error, of 60 task rows in each repository and arm:
+
+| Class | click A0 | click S1 | cobra A0 | cobra S1 | Total |
+|---|---|---|---|---|---|
+| A1 | 0 | 0 | 0 | 2 | 2 |
+| A2 | 0 | 15 | 0 | 8 | 23 |
+| A3 | 0 | 0 | 0 | 15 | 15 |
+| A4 | 0 | 0 | 0 | 5 | 5 |
+| P1 | 3 | 2 | 1 | 0 | 6 |
+| P2 | 3 | 0 | 1 | 0 | 4 |
+| Total | 6 | 17 | 2 | 30 | 55 |
+
+All 45 author-gate refusals are S1 rows: 15 of 60 on click and 30 of 60 on cobra
+**[hypothesis — the same served task rows; not in this repository]**. The 10 protocol stops are
+8 A0 rows and 2 S1 rows. The table describes where rows stopped. It is not a second
+read and it changes no word of the primary read.
 
 ## 7. The review
 
