@@ -488,3 +488,95 @@ none changes the decision word, which the seats signed for any count
   figure may be removed only with a seat's signed word. Every rule of a read spec is
   listed against the signed reading that covers it.
   **[aspiration — the delivery manager's proposal for the next registration; nothing is registered yet]**
+
+## 2026-11-12 — The review draw: readings signed before any draw exists
+
+The draw of Amendment 3 Part B is made by `scripts/wave4_review_draw.py`. This entry is
+written before the script is merged and before any draw exists. No row has been read for
+the draw.
+**[hypothesis — the delivery manager's statement of 2026-11-12; the script was not merged and had not been run when this entry was written]**
+
+- **B1, confirmed in writing by the delivery manager.** The primary read was made once and
+  both seats signed it, as the entry "Signatures on the primary read" above records. The
+  script cannot check this, so the delivery manager confirms it here before running it.
+  **[hypothesis — the delivery manager's confirmation of 2026-11-12, resting on the signatures entry above]**
+- **The readings.** The methodologist's seat read Part B against the script on four
+  questions and signed: "reading, signed by the methodologist 2026-11-12, after the primary
+  read, before any draw exists". The seat read the registration and the script and nothing
+  else.
+  **[hypothesis — the seat's signed readings of 2026-11-12, summarised in the entries below by the delivery manager]**
+- **How the reviewer's labels are made (reading 1; the text settles it; no deviation).**
+  B2 item 4 says the reviewer is not told the arm. B3 item 1 fixes the audit order from a
+  public hash. A reviewer's list in that order would let a reader work out most arms, as an
+  adversarial check of the first draft showed on made-up tables. The script therefore gives
+  each drawn patch a label, `click-NN` or `cobra-NN`, in ascending order of
+  `sha256("crb.wave4.reviewer|" + salt + "|" + R + "|" + A + "|" + commit + "|" + attempt)`.
+  The salt is drawn once from the operating system and written only in the key file. The
+  reviewer's list holds the label, the repository and the commit, and nothing else about a
+  patch. The filed list prints the key file's sha256, which binds the salt before the
+  review. B3's order is still computed exactly as registered.
+  **[hypothesis — reading 1 of the methodologist's seat, 2026-11-12; the check on made-up tables is in the pull request that adds the script]**
+- **The step counts (reading 3; the text settles it; nothing to record as a departure).**
+  B2 item 3 says "the report prints" how many patches each step gave for each repository
+  and arm. The seat reads "the report" as the wave report, since item 4 names "the drawn
+  list" as a separate document. The counts are kept in the key file and printed in the wave
+  report after the review. The reviewer's list does not carry them.
+  **[hypothesis — reading 3 of the methodologist's seat, 2026-11-12]**
+- **Clean, for the draw (reading 4; the text settles it).** A3 says clean is read from the
+  row's own field and that a row that carries an error is a miss. For the draw a patch is
+  clean only if the row's clean field is true and its `error` is empty or null. A row with
+  no `error` field at all stops the draw. The read counted the clean field alone
+  (`scripts/wave4_primary_read.py`, the batch sums). The read is not run again. When the
+  draw is made, the key file gives the number of rows with clean true and an error. If that
+  number is zero, a note here will say both readings give the same draw. If it is not, a
+  deviation-log entry will give the count by repository and arm, as description only.
+  **[hypothesis — reading 4 of the methodologist's seat, 2026-11-12; the count is not known, because no row has been read]**
+- **A random line in Paul's file.** Paul's file holds no secret once the B3 sequence is
+  taken out of it, and the filed list prints its sha256. A reader could try every audit set
+  and order until the hash matched, and so learn which patches Paul checks. The script
+  writes one random line, "file id", into Paul's file. The line orders nothing. The
+  delivery manager added it after the readings, as a tightening in the direction of
+  reading 2.
+  **[hypothesis — the delivery manager's decision of 2026-11-12, from the builder's note on the repair; not put to the seat]**
+- **Reviewed against drawn.** B3 item 1 orders the reviewed patches. The script orders the
+  drawn patches before the review. The two lists are the same only if every drawn patch is
+  reviewed. If one is not, the audit order is computed again over the reviewed patches and
+  the change is recorded here.
+  This rule is about the blinded reviewer's list alone. A shortfall in Paul's own check
+  is a different case, and the deviation log entry below governs it: the audit order is
+  not computed again for it.
+  **[hypothesis — the seat's note on B3 item 1, 2026-11-12]**
+
+- **A leak that stays, from the registered B3 hash.** An independent check of the script
+  on made-up tables found no arm information that the script itself adds. Two leaks remain
+  that no presentation can remove, because B3's hash is public and takes the arm as an
+  input. First, which patches are in Paul's set tells a reader something about their arms:
+  guessing each audited patch's arm as the arm of its smaller audit hash was right for
+  3170 of 4000 patches, against 2000 by chance.
+  **[measured — n = 4000 audited patches in 400 random made-up tables, method: the arm of the smallest-hash candidate compared with the drawn arm, by one verifying agent on 2026-11-12; apparatus n/a, made-up rows, no wave data]**
+  Second, a reader of the filed list can guess which patches Paul checks: ranking labels by
+  their commit's smallest audit hash found Paul's patches at a rate of 0.478, against 0.250
+  by chance.
+  **[measured — n = 400 random made-up tables, method: precision of the ranked guess against the drawn audit set, by the same agent on 2026-11-12; apparatus n/a, made-up rows, no wave data]**
+  R9 therefore holds in what Paul and the reviewer are told, and not against a reader who
+  works the public hash. The wave report says so beside the agreement counts. The next
+  registration should salt the audit order.
+  **[hypothesis — the delivery manager's reading of the verifier's result, recorded before any draw exists; not put to the seat]**
+
+### Deviation log entry, entered before any draw exists
+
+- 2026-11-12, the methodologist's seat and the delivery manager. **Paul's audit file does
+  not present his patches in the B3 sequence.** B3 item 3 says Paul takes his patches in
+  the sequence click 1, cobra 1, click 2 and so on, and that if he checks fewer than ten,
+  the ones checked are the first in that sequence. R9 says Paul is not told the arm until
+  he has given his own verdict. The B3 order comes from a public hash over the arm, so a
+  file in that order, read with the filed list, would let its reader work out many arms.
+  The text does not settle the conflict, and the seat took the harder reading (reading 2).
+  Paul's file lists his patches under their reviewer labels in a second salted order. The
+  B3 sequence stays in the key file, held by the delivery manager. Paul is asked for all of
+  them. If he gives fewer, only the longest unbroken run from the start of the B3 sequence
+  in which every patch was checked is counted, and the rest is reported as a shortfall
+  against part 9. Which patches are checked and which are counted is unchanged. Only the
+  order in which they are shown to Paul departs from the registered words, and the
+  departure can only lower the counted number.
+  **[hypothesis — a deviation of presentation order, ruled by the methodologist's seat on 2026-11-12 before any draw exists; no patch has been drawn or checked]**
