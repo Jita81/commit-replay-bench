@@ -1,0 +1,73 @@
+== 1. lists
+[hypothesis — design input: sha256 over the 12 C1 and 11 L2 names; exact arithmetic on stated inputs, no sample; not a measurement of the product]
+C2 order same as registered: True
+sha256 C1 list b38fb8b6b8de3bf50ebc88b54e6dd54c1d9578bc2c5209c47fcc8350a612a1de
+L2  1 labstack/echo              153409d129dd738cb9ccfc9d758331691a969da358946230ceecda3cee107c31
+L2  2 mahmoud/boltons            1951e5a216edb972b507d94a74909e0a07b9ee568f2751d8cea6c2147f0e12b6
+L2  3 BurntSushi/toml            207fc0c8343e85786b623093bb4ee0e719e45f89f69e6609f155876f07e9ba8b
+L2  4 python-poetry/tomlkit      2dfd17e4285d80b0485e566b3e77df248210979c5acf7111c3e4fc5a2f9bd508
+L2  5 astanin/python-tabulate    3905283da2f52fa3e92c51af1bdad4411686a199fbd363b2d71585f2b2b0ba0c
+L2  6 arrow-py/arrow             5fee1e3899d6e27e756e0d3bff44fcf5625869f7bef158bed1c2525b8340d551
+L2  7 andialbrecht/sqlparse      662f5da351fc3755bed19fe801cba7c5ccf2a278c18c988068832d93d4a9417b
+L2  8 pypa/packaging             89c5c70b0b340484141818848025f5f0619222f3be6abc8d08c1eb5a29f81a11
+L2  9 tox-dev/platformdirs       9ca40902abfb696d2db44edc72ef4ec4f25dd60071ed0403775db33b5c61d7fb
+L2 10 go-chi/chi                 bb8f64c0ea718b1da255a23629d9a0b42a7f69bcdbadee8bc70d520418d6842c
+L2 11 google/go-cmp              e048b96e923d7a710682c771010e73f185a0ea7d9a86ce76c6cc1c00301bcf82
+sha256 L2 list c62cf5f1f39b336e9842b43beb9794cf848051bb84078ba1331213bfa84e8145
+== 2. p floors, Holm
+[hypothesis — exact p floors 2/2^n, n = 5..10; exact arithmetic on stated inputs, no sample; not a measurement of the product]
+5 0.0625 ok.05 False ok.025 False
+6 0.03125 ok.05 True ok.025 False
+7 0.015625 ok.05 True ok.025 True
+8 0.0078125 ok.05 True ok.025 True
+9 0.00390625 ok.05 True ok.025 True
+10 0.001953125 ok.05 True ok.025 True
+Holm J=2 thresholds: 0.025 then 0.05; J=1: 0.05
+== 3. t quantiles
+[hypothesis — bisection on a numeric t cdf; exact arithmetic on stated inputs, no sample; not a measurement of the product]
+5 2.015 2.5706
+6 1.9432 2.4469
+7 1.8946 2.3646
+8 1.8595 2.306
+9 1.8331 2.2622
+11 1.7959 2.201
+== 4. K sets
+[hypothesis — five synthetic sets, exact sign-flip and t; exact arithmetic on stated inputs, no sample; not a measurement of the product]
+K1 -50 2/256=0.0078125 8 0.0 Worse
+K2 0 256/256=1.0000000 8 7.1608 Within 15
+K3 -33.3333 4/64=0.0625000 5 13.4337 Undecided
+K4 30 2/128=0.0156250 7 0.0 Better
+K5 -17 4/1024=0.0039062 10 5.4993 Worse
+== 5. sign-flip power, unit ~ N(z,1), z=Phi^-1(q)
+[hypothesis — 4,000 simulated waves a cell, one stream, seed 7; q(m) rows exact; simulation under stated assumptions, not a measurement of the product]
+q=11/12 n 6 0.592 0.0
+q=11/12 n 7 0.827 0.555
+q=11/12 n 8 0.901 0.789
+q=11/12 n 10 0.968 0.912
+q m=4 0.9149 m=6 0.9454 m=10 0.9714 m=20 0.9889
+q m=2 0.8467 m=3 0.8885
+== 6. W pilot rule, binomial 20 attempts per arm, A0 p=0.7
+[hypothesis — exact binomial, 20 attempts per arm, A0 p = 0.7; exact arithmetic on stated inputs, no sample; not a measurement of the product]
+gap 0.1 0.121
+gap 0.15 0.205
+gap 0.2 0.313
+gap 0.3 0.572
+gap 0.45 0.891
+== 7. costs
+[hypothesis — cost and time projection from Wave 4's rate over 120 commit-arms; unconfirmed]
+rate 0.40096268333333335 rows-only None
+D1 n10 (208, 83.4, 208.5, 209, 78.98, 17.1)
+D1 n7 (148, 59.34, 148.36, 149, 18.98, 12.2)
+D1 m20 (408, 163.59, 408.98, 409, 278.98, 33.5)
+D2 n10 (340, 136.33, 340.82, 341, 210.98, 27.9)
+D2 n7 pilot28 (238, 95.43, 238.57, 239, 108.98, 19.5)
+D2 n7 pilot40 (250, 100.24, 250.6, 251, 120.98, 20.5)
+D3 n10 (128, 51.32, 128.31, 129, 0, 10.5)
+D3 n7 (92, 36.89, 92.22, 93, 0, 7.6)
+m4 n10 (88, 35.28, 88.21, 89, 0, 7.2)
+m4 n7 (64, 25.66, 64.15, 65, 0, 5.3)
+m6 n6 (80, 32.08, 80.19, 81, 0, 6.6)
+per repo high D3 12.03 D1 20.05 D2 30.07
+S1 attempts D2 n10 = (100+10)*2 = 220 author $ 0.305 reg says 226
+D3 author $ 0.177 minutes/slot 2.4636734693877553
+lift for D1 smallest at n=10 78.98

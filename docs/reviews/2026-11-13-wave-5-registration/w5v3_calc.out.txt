@@ -1,0 +1,126 @@
+
+======== 1. C1 in C2 order and L2, recomputed
+[hypothesis — design input: sha256 over the 12 C1 and 11 L2 names; exact arithmetic on stated inputs, no sample; not a measurement of the product]
+sha256(C1 in C2 order) = b38fb8b6b8de3bf50ebc88b54e6dd54c1d9578bc2c5209c47fcc8350a612a1de match: True
+L2 order unchanged: True
+sha256(L2 in hash order) = c62cf5f1f39b336e9842b43beb9794cf848051bb84078ba1331213bfa84e8145 match: True
+seeded-order key example (R11 item 5, Wave 4 part 2 step 2): crb.reading.v1|<repo>|<cell key>|<commit>
+
+======== 2. Costs, product dollars, unconfirmed
+[hypothesis — cost and time projection from Wave 4's rate over 120 commit-arms and its 49 runs; unconfirmed]
+rate per commit-arm (2 attempts) = 48.115522/120 = 0.400963; left = 130.02
+high per full repository = 6 commits x 2 arms x 0.400963 x 2.5 = 12.0289
+pilot high = 8 x 0.400963 x 2.5 = 8.0193
+ n | commit-arms | central  | high     | line(ceil high) | lift over 130.02
+ 6 |          80 |    32.08 |    80.19 |              81 | 0.00  (high minus 130.02 = -49.83)
+ 7 |          92 |    36.89 |    92.22 |              93 | 0.00  (high minus 130.02 = -37.80)
+ 8 |         104 |    41.70 |   104.25 |             105 | 0.00  (high minus 130.02 = -25.77)
+ 9 |         116 |    46.51 |   116.28 |             117 | 0.00  (high minus 130.02 = -13.74)
+10 |         128 |    51.32 |   128.31 |             129 | 0.00  (high minus 130.02 = -1.71)
+11 |         140 |    56.13 |   140.34 |             141 | 10.98  (high minus 130.02 = +10.32)
+12 |         152 |    60.95 |   152.37 |             153 | 22.98  (high minus 130.02 = +22.35)
+thinnest R11 repository (1 XS + 1 S): 2 commits x 2 arms = 4 commit-arms, central 1.60, high 4.01
+repository-boundary stop with line 129: start repository j only if spend + 12.0289 <= 129
+  after pilot +  0 repos at high: spend    8.02; next starts: True
+  after pilot +  1 repos at high: spend   20.05; next starts: True
+  after pilot +  2 repos at high: spend   32.08; next starts: True
+  after pilot +  3 repos at high: spend   44.11; next starts: True
+  after pilot +  4 repos at high: spend   56.13; next starts: True
+  after pilot +  5 repos at high: spend   68.16; next starts: True
+  after pilot +  6 repos at high: spend   80.19; next starts: True
+  after pilot +  7 repos at high: spend   92.22; next starts: True
+  after pilot +  8 repos at high: spend  104.25; next starts: True
+  after pilot +  9 repos at high: spend  116.28; next starts: True
+  after pilot + 10 repos at high: spend  128.31; next starts: False
+time D3 n=6: 80 commit-arms x 2 x 2.464 min = 6.6 h
+time D3 n=10: 128 commit-arms x 2 x 2.464 min = 10.5 h
+D1 n=10 m=10 (A0,S1): 208 commit-arms, central 83.40, high 208.50, line 209, lift 78.98
+D1 n=7  m=10 (A0,S1): 148 commit-arms, central 59.34, high 148.36, line 149, lift 18.98
+D2 n=10 m=10 (A0,S1,W; pilot 10 commits x 4 arms): 340 commit-arms, central 136.33, high 340.82, line 341, lift 210.98
+D2 n=7  m=10 (A0,S1,W; pilot 10 commits x 4 arms): 250 commit-arms, central 100.24, high 250.60, line 251, lift 120.98
+D2 S1 attempts n=10: (100 + 10) x 2 = 220 ; author central = 0.305
+
+======== 3. Power at q = 11/12, n = 6..12, alpha 0.05 (J = 1)
+[hypothesis — method A exact binomial; method B 4,000 simulated waves a cell, seed 20261123; simulation under stated assumptions, not a measurement of the product]
+method A: exact sign test, equal magnitudes (binomial); method B: exact sign-flip,
+unit difference ~ Normal(z,1), z = Phi^-1(11/12) = 1.3830, 4000 waves a cell, seed 20261123
+n= 6: A 0.593 (needs >= 6 of 6 same sign) | B 0.595 (MC s.e. 0.008) | p_min 2/2^n = 0.031250
+n= 7: A 0.544 (needs >= 7 of 7 same sign) | B 0.826 (MC s.e. 0.006) | p_min 2/2^n = 0.015625
+n= 8: A 0.499 (needs >= 8 of 8 same sign) | B 0.900 (MC s.e. 0.005) | p_min 2/2^n = 0.007812
+n= 9: A 0.831 (needs >= 8 of 9 same sign) | B 0.941 (MC s.e. 0.004) | p_min 2/2^n = 0.003906
+n=10: A 0.800 (needs >= 9 of 10 same sign) | B 0.973 (MC s.e. 0.003) | p_min 2/2^n = 0.001953
+n=11: A 0.768 (needs >= 10 of 11 same sign) | B 0.985 (MC s.e. 0.002) | p_min 2/2^n = 0.000977
+n=12: A 0.928 (needs >= 10 of 12 same sign) | B 0.991 (MC s.e. 0.001) | p_min 2/2^n = 0.000488
+
+======== 4. Discrete simulation of the D3 read, n = 6..12 (model as v2 appendix A part 6)
+[hypothesis — 1,000 simulated waves a cell, seed 20261133; simulation under stated assumptions, not a measurement of the product]
+A0 repo mean ~ N(0.7,0.15) clipped; commit chance Beta, ICC 0.25; S1 shift per repo
+~ N(delta, tau_e); 2 attempts/arm; m = 6; 1,000 waves a cell; seed 20261133
+cols: P(correct Better/Worse) | P(Within 15) | P(Undecided) | P(Undecided and n' < 6) | P(wrong-sign decisive)
+tau_e=0.10 delta=+0.00 n= 6: 0.000 | 0.027 | 0.967 | 0.771 | 0.006
+tau_e=0.10 delta=+0.00 n= 7: 0.000 | 0.135 | 0.853 | 0.450 | 0.012
+tau_e=0.10 delta=+0.00 n= 8: 0.000 | 0.290 | 0.684 | 0.220 | 0.026
+tau_e=0.10 delta=+0.00 n= 9: 0.000 | 0.441 | 0.537 | 0.088 | 0.022
+tau_e=0.10 delta=+0.00 n=10: 0.000 | 0.549 | 0.416 | 0.032 | 0.035
+tau_e=0.10 delta=+0.00 n=11: 0.000 | 0.636 | 0.316 | 0.018 | 0.048
+tau_e=0.10 delta=+0.00 n=12: 0.000 | 0.728 | 0.243 | 0.006 | 0.029
+tau_e=0.10 delta=-0.25 n= 6: 0.392 | 0.000 | 0.608 | 0.388 | 0.000
+tau_e=0.10 delta=-0.25 n= 7: 0.630 | 0.002 | 0.368 | 0.122 | 0.000
+tau_e=0.10 delta=-0.25 n= 8: 0.808 | 0.000 | 0.192 | 0.023 | 0.000
+tau_e=0.10 delta=-0.25 n= 9: 0.852 | 0.000 | 0.148 | 0.004 | 0.000
+tau_e=0.10 delta=-0.25 n=10: 0.931 | 0.002 | 0.067 | 0.001 | 0.000
+tau_e=0.10 delta=-0.25 n=11: 0.944 | 0.002 | 0.054 | 0.000 | 0.000
+tau_e=0.10 delta=-0.25 n=12: 0.972 | 0.001 | 0.027 | 0.000 | 0.000
+tau_e=0.10 delta=-0.46 n= 6: 0.863 | 0.000 | 0.137 | 0.098 | 0.000
+tau_e=0.10 delta=-0.46 n= 7: 0.985 | 0.000 | 0.015 | 0.007 | 0.000
+tau_e=0.10 delta=-0.46 n= 8: 0.997 | 0.000 | 0.003 | 0.000 | 0.000
+tau_e=0.10 delta=-0.46 n= 9: 1.000 | 0.000 | 0.000 | 0.000 | 0.000
+tau_e=0.10 delta=-0.46 n=10: 1.000 | 0.000 | 0.000 | 0.000 | 0.000
+tau_e=0.10 delta=-0.46 n=11: 1.000 | 0.000 | 0.000 | 0.000 | 0.000
+tau_e=0.10 delta=-0.46 n=12: 1.000 | 0.000 | 0.000 | 0.000 | 0.000
+tau_e=0.20 delta=+0.00 n= 6: 0.000 | 0.009 | 0.984 | 0.679 | 0.007
+tau_e=0.20 delta=+0.00 n= 7: 0.000 | 0.062 | 0.916 | 0.329 | 0.022
+tau_e=0.20 delta=+0.00 n= 8: 0.000 | 0.103 | 0.875 | 0.145 | 0.022
+tau_e=0.20 delta=+0.00 n= 9: 0.000 | 0.227 | 0.746 | 0.058 | 0.027
+tau_e=0.20 delta=+0.00 n=10: 0.000 | 0.268 | 0.692 | 0.015 | 0.040
+tau_e=0.20 delta=+0.00 n=11: 0.000 | 0.329 | 0.630 | 0.007 | 0.041
+tau_e=0.20 delta=+0.00 n=12: 0.000 | 0.401 | 0.553 | 0.003 | 0.046
+tau_e=0.20 delta=-0.25 n= 6: 0.227 | 0.000 | 0.773 | 0.456 | 0.000
+tau_e=0.20 delta=-0.25 n= 7: 0.423 | 0.001 | 0.576 | 0.135 | 0.000
+tau_e=0.20 delta=-0.25 n= 8: 0.550 | 0.002 | 0.448 | 0.032 | 0.000
+tau_e=0.20 delta=-0.25 n= 9: 0.668 | 0.008 | 0.324 | 0.003 | 0.000
+tau_e=0.20 delta=-0.25 n=10: 0.763 | 0.003 | 0.234 | 0.001 | 0.000
+tau_e=0.20 delta=-0.25 n=11: 0.796 | 0.003 | 0.201 | 0.000 | 0.000
+tau_e=0.20 delta=-0.25 n=12: 0.855 | 0.001 | 0.144 | 0.000 | 0.000
+tau_e=0.20 delta=-0.46 n= 6: 0.693 | 0.000 | 0.307 | 0.180 | 0.000
+tau_e=0.20 delta=-0.46 n= 7: 0.930 | 0.000 | 0.070 | 0.013 | 0.000
+tau_e=0.20 delta=-0.46 n= 8: 0.974 | 0.000 | 0.026 | 0.002 | 0.000
+tau_e=0.20 delta=-0.46 n= 9: 0.994 | 0.000 | 0.006 | 0.000 | 0.000
+tau_e=0.20 delta=-0.46 n=10: 0.996 | 0.000 | 0.004 | 0.000 | 0.000
+tau_e=0.20 delta=-0.46 n=11: 0.999 | 0.000 | 0.001 | 0.000 | 0.000
+tau_e=0.20 delta=-0.46 n=12: 0.999 | 0.000 | 0.001 | 0.000 | 0.000
+
+======== 5. One thin R11 repository (m_r = 2: one XS, one S) among n = 7, tau_e 0.10
+[hypothesis — 1,000 simulated waves a cell, seed 20261143; simulation under stated assumptions, not a measurement of the product]
+P(Worse) counts every Worse word, so at delta 0 it is the false-Worse rate
+delta=+0.00 thin repos=0: P(Worse)=0.009 P(Within 15)=0.114
+delta=+0.00 thin repos=1: P(Worse)=0.009 P(Within 15)=0.056
+delta=-0.46 thin repos=0: P(Worse)=0.987 P(Within 15)=0.000
+delta=-0.46 thin repos=1: P(Worse)=0.967 P(Within 15)=0.000
+
+======== 6. Known-answer sets K1..K7 through the registered word rule (J = 1)
+[hypothesis — seven synthetic sets, exact sign-flip and t; exact arithmetic on stated inputs, no sample; not a measurement of the product]
+K1 eight repos all -50: D=-50.0000 p=0.0078125 (2/256) nonzero=8 90% half-width=0.0000 -> Worse
+K2 eight repos +-10 alternating: D=+0.0000 p=1.0000000 (256/256) nonzero=8 90% half-width=7.1608 -> Within 15
+K3 six repos, one 0, five -40: D=-33.3333 p=0.0625000 (4/64) nonzero=5 90% half-width=13.4337 -> Undecided
+K4 seven repos all +30: D=+30.0000 p=0.0156250 (2/128) nonzero=7 90% half-width=0.0000 -> Better
+K5 ten repos, nine -20 one +10: D=-17.0000 p=0.0039062 (4/1024) nonzero=10 90% half-width=5.4993 -> Worse
+K6 = K2 with usable-test share 0.85 (P3 fails): D=+0.0000 p=1.0000000 (256/256) nonzero=8 90% half-width=7.1608 -> Undecided
+K7 r1: m_r=2, registered rows/arm=4, A0 clean=3, S1 clean=1, D_r=-50.0000
+K7 r2: m_r=6, registered rows/arm=12, A0 clean=9, S1 clean=5, D_r=-33.3333
+K7 r3: m_r=6, registered rows/arm=12, A0 clean=9, S1 clean=5, D_r=-33.3333
+K7 r4: m_r=6, registered rows/arm=12, A0 clean=9, S1 clean=5, D_r=-33.3333
+K7 r5: m_r=6, registered rows/arm=12, A0 clean=9, S1 clean=5, D_r=-33.3333
+K7 r6: m_r=6, registered rows/arm=12, A0 clean=9, S1 clean=5, D_r=-33.3333
+K7 six repos, unequal counts: D=-36.1111 p=0.0312500 (2/64) nonzero=6 90% half-width=5.5974 -> Worse
+check t(0.95,5) = 2.015  t(0.95,7) = 1.8946  t(0.95,9) = 1.8331

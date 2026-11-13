@@ -1,0 +1,113 @@
+== 1 lists
+[hypothesis — design input: sha256 over the 12 C1 and 11 L2 names; exact arithmetic on stated inputs, no sample; not a measurement of the product]
+C2 order ok: True
+sha C1: b38fb8b6b8de3bf50ebc88b54e6dd54c1d9578bc2c5209c47fcc8350a612a1de
+L2 order ok: True
+sha L2: c62cf5f1f39b336e9842b43beb9794cf848051bb84078ba1331213bfa84e8145
+run order of C1 names (crb.w5.run):
+   marshmallow-code/marshmallow C1
+   rs/zerolog C1
+   mahmoud/boltons L2
+   go-chi/chi L2
+   gorilla/mux C1
+   python-poetry/tomlkit L2
+   tox-dev/filelock C1
+   jpadilla/pyjwt C1
+   labstack/echo L2
+   tox-dev/platformdirs L2
+   andialbrecht/sqlparse L2
+   BurntSushi/toml L2
+   more-itertools/more-itertools C1
+   urfave/cli C1
+   jd/tenacity C1
+   google/go-cmp L2
+   pypa/packaging L2
+   astanin/python-tabulate L2
+   arrow-py/arrow L2
+   pelletier/go-toml C1
+   sirupsen/logrus C1
+   hashicorp/go-version C1
+   hynek/structlog C1
+== 2 costs
+[hypothesis — cost and time projection from Wave 4's rate over 120 commit-arms; unconfirmed]
+rate 0.400963
+6 80 32.08 80.19 81 0 -49.83
+7 92 36.89 92.22 93 0 -37.8
+8 104 41.7 104.25 105 0 -25.77
+9 116 46.51 116.28 117 0 -13.74
+10 128 51.32 128.31 129 0 -1.71
+11 140 56.13 140.34 141 10.98 10.32
+12 152 60.95 152.37 153 22.98 22.35
+repo high 12.0289 pilot high 8.0193
+D1 n10 208 83.4 208.5 D1 n7 148 59.34 148.36
+D2 n10 340 136.33 340.82 D2 n7 250 100.24 250.6
+author n10 central 0.177 D2 S1 220 0.305
+hours n10 10.51 n6 6.57
+== 3 p floors and method A
+[hypothesis — exact sign test and binomial power at q = 11/12, n = 5..12; exact arithmetic on stated inputs, no sample; not a measurement of the product]
+5 0.0625
+6 0.03125
+7 0.015625
+8 0.0078125
+9 0.00390625
+10 0.001953125
+11 0.0009765625
+12 0.00048828125
+n=6 needs 6/6 power 0.5933
+n=7 needs 7/7 power 0.5439
+n=8 needs 8/8 power 0.4985
+n=9 needs 8/9 power 0.8309
+n=10 needs 9/10 power 0.7997
+n=11 needs 10/11 power 0.7680
+n=12 needs 10/12 power 0.9280
+== 4 method B: sign-flip, D_r~N(z,1), my seed
+[hypothesis — 3,000 simulated waves a cell for n = 6..10 and 1,500 for n = 11, 12, seed 777; simulation under stated assumptions, not a measurement of the product]
+z 1.383
+n=6 B 0.590 se 0.009
+n=7 B 0.837 se 0.007
+n=8 B 0.902 se 0.005
+n=9 B 0.940 se 0.004
+n=10 B 0.968 se 0.003
+n=11 B 0.985 se 0.003
+n=12 B 0.992 se 0.002
+== 5 K sets
+[hypothesis — seven synthetic sets, exact sign-flip and t; exact arithmetic on stated inputs, no sample; not a measurement of the product]
+K1 (-50.0, 0.0078125, 8, 0.0, 'Worse')
+K2 (0.0, 1.0, 8, 7.1608, 'Within 15')
+K3 (-33.3333, 0.0625, 5, 13.4337, 'Undecided')
+K4 (30.0, 0.015625, 7, 0.0, 'Better')
+K5 (-17.0, 0.00390625, 10, 5.4993, 'Worse')
+K6 (0.0, 1.0, 8, 7.1608, 'Undecided')
+K7 (-36.1111, 0.03125, 6, 5.5974, 'Worse')
+== 6 discrete sim, my implementation
+[hypothesis — 600 simulated waves a cell for n = 6..8, 400 for n = 10 and 800 a thin-repository cell, one stream, seed 4242; simulation under stated assumptions, not a measurement of the product]
+t0.95 {5: 2.015, 6: 1.9432, 7: 1.8946, 8: 1.8595, 9: 1.8331, 10: 1.8125, 11: 1.7959}
+tau=0.1 delta=0.0 n=6 {'dec': 0.0, 'w15': 0.032, 'und': 0.96, 'und_lt6': 0.763, 'wrong': 0.008}
+tau=0.1 delta=0.0 n=7 {'dec': 0.0, 'w15': 0.14, 'und': 0.843, 'und_lt6': 0.428, 'wrong': 0.017}
+tau=0.1 delta=0.0 n=8 {'dec': 0.0, 'w15': 0.292, 'und': 0.69, 'und_lt6': 0.223, 'wrong': 0.018}
+tau=0.1 delta=0.0 n=10 {'dec': 0.0, 'w15': 0.56, 'und': 0.388, 'und_lt6': 0.043, 'wrong': 0.052}
+tau=0.1 delta=-0.25 n=6 {'dec': 0.405, 'w15': 0.0, 'und': 0.595, 'und_lt6': 0.395, 'wrong': 0.0}
+tau=0.1 delta=-0.25 n=7 {'dec': 0.627, 'w15': 0.0, 'und': 0.373, 'und_lt6': 0.095, 'wrong': 0.0}
+tau=0.1 delta=-0.25 n=8 {'dec': 0.802, 'w15': 0.0, 'und': 0.198, 'und_lt6': 0.022, 'wrong': 0.0}
+tau=0.1 delta=-0.25 n=10 {'dec': 0.912, 'w15': 0.0, 'und': 0.087, 'und_lt6': 0.0, 'wrong': 0.0}
+tau=0.1 delta=-0.46 n=6 {'dec': 0.883, 'w15': 0.0, 'und': 0.117, 'und_lt6': 0.088, 'wrong': 0.0}
+tau=0.1 delta=-0.46 n=7 {'dec': 0.992, 'w15': 0.0, 'und': 0.008, 'und_lt6': 0.002, 'wrong': 0.0}
+tau=0.1 delta=-0.46 n=8 {'dec': 0.998, 'w15': 0.0, 'und': 0.002, 'und_lt6': 0.0, 'wrong': 0.0}
+tau=0.1 delta=-0.46 n=10 {'dec': 1.0, 'w15': 0.0, 'und': 0.0, 'und_lt6': 0.0, 'wrong': 0.0}
+tau=0.2 delta=0.0 n=6 {'dec': 0.0, 'w15': 0.007, 'und': 0.977, 'und_lt6': 0.69, 'wrong': 0.017}
+tau=0.2 delta=0.0 n=7 {'dec': 0.0, 'w15': 0.067, 'und': 0.913, 'und_lt6': 0.325, 'wrong': 0.02}
+tau=0.2 delta=0.0 n=8 {'dec': 0.0, 'w15': 0.117, 'und': 0.847, 'und_lt6': 0.157, 'wrong': 0.037}
+tau=0.2 delta=0.0 n=10 {'dec': 0.0, 'w15': 0.287, 'und': 0.69, 'und_lt6': 0.005, 'wrong': 0.022}
+tau=0.2 delta=-0.25 n=6 {'dec': 0.252, 'w15': 0.0, 'und': 0.748, 'und_lt6': 0.45, 'wrong': 0.0}
+tau=0.2 delta=-0.25 n=7 {'dec': 0.405, 'w15': 0.003, 'und': 0.592, 'und_lt6': 0.167, 'wrong': 0.0}
+tau=0.2 delta=-0.25 n=8 {'dec': 0.565, 'w15': 0.007, 'und': 0.428, 'und_lt6': 0.037, 'wrong': 0.0}
+tau=0.2 delta=-0.25 n=10 {'dec': 0.743, 'w15': 0.0, 'und': 0.258, 'und_lt6': 0.0, 'wrong': 0.0}
+tau=0.2 delta=-0.46 n=6 {'dec': 0.733, 'w15': 0.0, 'und': 0.267, 'und_lt6': 0.158, 'wrong': 0.0}
+tau=0.2 delta=-0.46 n=7 {'dec': 0.913, 'w15': 0.0, 'und': 0.087, 'und_lt6': 0.02, 'wrong': 0.0}
+tau=0.2 delta=-0.46 n=8 {'dec': 0.985, 'w15': 0.0, 'und': 0.015, 'und_lt6': 0.002, 'wrong': 0.0}
+tau=0.2 delta=-0.46 n=10 {'dec': 0.993, 'w15': 0.0, 'und': 0.007, 'und_lt6': 0.0, 'wrong': 0.0}
+thin repo, n=7, tau .10
+0.0 0 {'dec': 0.0, 'w15': 0.126, 'und': 0.854, 'und_lt6': 0.429, 'wrong': 0.02}
+0.0 1 {'dec': 0.0, 'w15': 0.055, 'und': 0.925, 'und_lt6': 0.531, 'wrong': 0.02}
+-0.46 0 {'dec': 0.989, 'w15': 0.0, 'und': 0.011, 'und_lt6': 0.004, 'wrong': 0.0}
+-0.46 1 {'dec': 0.955, 'w15': 0.0, 'und': 0.045, 'und_lt6': 0.016, 'wrong': 0.0}
