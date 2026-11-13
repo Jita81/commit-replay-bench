@@ -21,8 +21,9 @@ What it is:   The tests of the v2 sampler and outcome rule, on a two-file change
 What it does: Pins that the sample reaches both files, is exactly the hash-ranked round-robin,
               is deterministic and differs between commits; that timeouts and unparsed exit-0
               runs are counted apart; that more than half excluded is not scoreable while half
-              is; the provenance and version stamps; and that below apparatus 2.4 the scorer,
-              its stamp and its operator-set hash are v1's.
+              is; that an excluded mutant's event is written through the worker's callback
+              (P-817); the provenance and version stamps; and that below apparatus 2.4 the
+              scorer, its stamp and its operator-set hash are v1's.
 How:          A bound ``Workspace`` over a temporary directory holding two source files, the
               ``PythonAstMutator`` and a stub runner that scripts the baseline and each mutant.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -30,7 +31,9 @@ ADRs:         docs/adr/0009-text-level-mutators.md; ADR-0025 item 7 (stream G; t
               commits)
 Works with:   src/crb/core/oracle/mutation.py (under test), tests/test_oracle_mutation.py (the
               scorer's own suite on a real repository), docs/dod/journeys/prove-the-instrument.md
-              (prove-the-instrument.truth.19, the criterion this closes)
+              (prove-the-instrument.truth.19, the criterion this closes),
+              src/crb/server/worker.py (``RunContext.on_event``, the callback an oracle run uses),
+              src/crb/observability/events.py (``Emitter``, the event's served shape)
 Tested by:    tests/test_oracle_mutation_v2.py
 Touch when:   never for a new repository; the sampler or the exclusion rule changes (a new
               ``mutation_version``, with the apparatus bump it rides).
@@ -39,6 +42,7 @@ Touch when:   never for a new repository; the sampler or the exclusion rule chan
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -50,6 +54,8 @@ from crb.core.oracle import mutation as ms
 from crb.core.runners.base import TestRun as Run
 from crb.core.spec import Language, RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
+from crb.observability.events import Emitter, MemorySink
+from crb.server.worker import RunContext
 
 A = "pkg/alpha.py"
 B = "pkg/beta.py"
@@ -177,6 +183,29 @@ def test_a_timeout_and_an_unparsed_exit_zero_are_neither_kills_nor_escapes(
     assert all(o.killed is None for o in score.outcomes[:2])
     d = score.to_dict()
     assert d["timeouts"] == 1 and d["unattributed"] == 1
+
+
+def test_an_excluded_mutant_is_written_through_the_worker_callback(tmp_path: Path) -> None:
+    """P-817: the ``excluded`` event passed a key named ``status``, which collides with the
+    emitter's own ``status`` argument, so the worker's callback raised ``TypeError`` on the
+    first timed-out or unparsed mutant and the oracle run ended failed. The event now carries
+    ``outcome``; this drives the real path: ``score_task`` → ``_emit`` →
+    ``RunContext.on_event`` → a real ``Emitter`` → a ``MemorySink``."""
+    sink = MemorySink()
+    ctx = SimpleNamespace(emitter=Emitter(sink, trace_id="t"))
+
+    def on_event(action: str, payload: Any) -> None:
+        RunContext.on_event(ctx, action, payload)  # type: ignore[arg-type]
+
+    score = _score(tmp_path, HUNG, UNPARSED, *[RED] * 18, on_event=on_event)
+    assert (score.timeouts, score.unattributed) == (1, 1)
+    excluded = [e for e in sink._events if e.action == "oracle.mutation.excluded"]
+    assert [e.payload["outcome"] for e in excluded] == [
+        ms.OUTCOME_TIMEOUT,
+        ms.OUTCOME_UNATTRIBUTED,
+    ]
+    assert all(e.stage == "oracle" and e.task_id == "a" * 40 for e in excluded)
+    assert all(e.status == "ok" and "status" not in e.payload for e in excluded)
 
 
 def test_more_than_half_excluded_is_not_scoreable_and_half_is(tmp_path: Path) -> None:
