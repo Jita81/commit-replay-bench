@@ -22,6 +22,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   event table against each emit site's keys; ten table rows were corrected (P-819)
   ([#142](https://github.com/Jita81/commit-replay-bench/pull/142)).
 
+- **A refused S1 author's test and parent run are kept as the row's transcript.** When the
+  author gate refused a test, the adapter deleted it and kept neither its content nor the parent
+  run's output, so the Wave 4 refusals that "failed without attributable test ids" could not be
+  diagnosed. A run that retains transcripts now writes the test and the last lines of that
+  output, redacted and bounded head and tail
+  by `REFUSED_AUTHOR_MAX_CHARS`, beside the builder transcripts, and `/grades/{row}/transcript`
+  serves them. With retention off nothing new is kept. The gate's verdict, error, labels, events
+  and removal of the authored file are unchanged, and a test pins them.
+  ([#145](https://github.com/Jita81/commit-replay-bench/pull/145))
+
 - **The locked `opentelemetry-api` moves to the release that fixes its advisory.** `pip-audit` began failing the security job on every pull request when CVE-2026-126360 was published against the locked version, a regular-expression denial of service in the trace-context propagator. Only `uv.lock` changes: the one package is upgraded to its next patch release and nothing else is re-resolved. ([#144](https://github.com/Jita81/commit-replay-bench/pull/144))
 
 - **A git hook runs the fast gate set before every push.** `scripts/pre_push.py --install-hook`, a setup line, points `core.hooksPath` at the tracked `scripts/hooks`; its `pre-push` runs the static gates, the changed files' tests and the ratchets before a push leaves. A failure stops the push, as does a missing interpreter, a gate that could not run and might hide a failure, a push of anything but the checked-out commit, or uncommitted files the gates would read instead. The install refuses to switch off hooks a clone already runs. Limits: a clone that skipped the setup line, or a worktree whose branch lacks `scripts/hooks`, has no hook, and `git push --no-verify` skips it, so CI stays the gate. ([#140](https://github.com/Jita81/commit-replay-bench/pull/140))
