@@ -69,7 +69,9 @@ to have the hook check the title too; it uses the checkout's `.venv`, or `CRB_PY
 refuses the push when it finds neither. In the hook a gate that cannot run stops the push,
 unless it is the title with none given or a `ui` gate when no `ui` or `docs` file changed.
 The gates check what is checked out, so the hook also stops a push of anything but the
-checkout's `HEAD`: push each branch from a checkout of it.
+checkout's `HEAD`: push each branch from a checkout of it. For the same reason it stops a
+push while the checkout holds uncommitted or untracked files, which the gates would read in
+place of the commit: commit them or `git stash --include-untracked` first.
 `git push --no-verify` skips every git hook, this one included, so CI stays the gate.
 
 No test may fail because of the machine it runs on **[aspiration — the rule DL-053 sets; the

@@ -762,3 +762,26 @@ def test_the_hook_stops_a_push_that_sends_anything_but_head(
     monkeypatch.setattr(sys, "stdin", io.StringIO(lines.splitlines()[0] + "\n"))
     monkeypatch.setattr(pre_push, "changed_files", lambda base: [])
     assert pre_push.main(["--hook", "--base", "HEAD"]) == 0
+
+
+def test_the_hook_stops_a_push_from_a_checkout_whose_files_are_not_the_commit(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The commit pushed fails a gate and an uncommitted edit on disk corrects it: the gate
+    reads the disk and would pass, so the push stops before any gate runs. The same push from
+    a clean checkout runs the gate."""
+    reads_disk = pre_push.Gate("reads the disk", ("python", "-c", "pass"), ())
+    monkeypatch.setattr(pre_push, "GATES", (reads_disk,))
+    monkeypatch.setattr(pre_push, "changed_files", lambda base: [])
+    monkeypatch.setattr(pre_push, "not_checked_out", lambda shas: [])
+    monkeypatch.setattr(pre_push, "dirty_paths", lambda: ["src/crb/fixed.py", "notes.txt"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(_PUSH_LINE))
+    assert pre_push.main(["--hook", "--base", "HEAD"]) == 3
+    captured = capsys.readouterr()
+    assert "the push is stopped" in captured.err and "git stash --include-untracked" in captured.err
+    assert "src/crb/fixed.py" in captured.err and "notes.txt" in captured.err
+    assert "passed" not in captured.out
+    monkeypatch.setattr(pre_push, "dirty_paths", lambda: [])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(_PUSH_LINE))
+    assert pre_push.main(["--hook", "--base", "HEAD"]) == 0
+    assert "1 passed, 0 failed, 0 not run (--fast)" in capsys.readouterr().out

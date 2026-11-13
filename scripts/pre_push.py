@@ -34,7 +34,8 @@ push, with two exceptions: the title gate when no title is known (a pull request
 exist yet), and a gate whose own folder and the folders it reads (``ui`` and ``docs`` for the
 UI gates) hold no changed file. The gates check what is checked out, so a push that sends
 anything but this checkout's ``HEAD`` (another branch, several refs, a tag on an older
-commit) is stopped with exit 3. Once the hook has found an interpreter, a push that only
+commit) is stopped with exit 3, and so is a push from a checkout with uncommitted or
+untracked files, which the gates would read in place of what the commit holds. Once the hook has found an interpreter, a push that only
 deletes refs runs no gate. A worktree whose branch does not carry ``scripts/hooks`` has no
 hook to run. ``git push --no-verify`` skips every git hook, this one included, and nothing
 local can stop that: CI remains the gate. A run outside the hook says so when the hook is not
@@ -849,6 +850,18 @@ def main(argv: list[str] | None = None) -> int:
                 "worktree will do) and push it from there, one ref at a time.",
                 file=sys.stderr,
             )
+            return 3
+        unpushed = dirty_paths()
+        if unpushed:
+            print(
+                "pre_push: exit 3 — the push is stopped: the gates read the files on disk, and "
+                f"{len(unpushed)} uncommitted or untracked path(s) here are not in the commit "
+                "the push sends, so a pass would not be a pass of that commit. Commit them, or "
+                "`git stash --include-untracked`, then push again:",
+                file=sys.stderr,
+            )
+            for path in unpushed:
+                print(f"  {path}", file=sys.stderr)
             return 3
         args.fast = True
         args.title = args.title or os.environ.get(TITLE_ENV) or None
