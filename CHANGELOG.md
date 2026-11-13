@@ -14,12 +14,12 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **A read script proves it can see its event keys before it counts.** `scripts/read_preflight.py`
   refuses an expectation of a key the emitter lifts out of the payload, checks every fetched event,
-  stops a zero count that has no signed waiver, and exits 6. Its AST rule follows event dicts
-  through aliases, targets, call sites and getter helpers and flags lifted-key lookups, defaults
-  and compared actions no `Expect` declares; a reader must call `check` and `nonzero`. A positive
-  control plants the Wave 4 lookup over events built by the real emitter and must exit 6.
-  `tests/test_event_key_contract.py` compares the event table with each emit site's keys against a
-  baseline whose size is pinned; ten table rows were corrected (P-819)
+  stops an unwaived zero count over a non-empty population, and exits 6. Its AST rule follows
+  event dicts through aliases, call sites and getter helpers, each scope on its own, and flags
+  lifted-key lookups, undeclared payload keys, `Expect` calls or action filters it cannot read,
+  and compared actions no `Expect` declares. Positive controls plant a direct `payload["task"]`
+  lookup and the Wave 4 helper; both must exit 6. `tests/test_event_key_contract.py` pins the
+  event table against each emit site's keys; ten table rows were corrected (P-819)
   ([#142](https://github.com/Jita81/commit-replay-bench/pull/142)).
 
 - **A git hook runs the fast gate set before every push.** `scripts/pre_push.py --install-hook`, a setup line, points `core.hooksPath` at the tracked `scripts/hooks`; its `pre-push` runs the static gates, the changed files' tests and the ratchets before a push leaves. A failure stops the push, as does a missing interpreter, a gate that could not run and might hide a failure, a push of anything but the checked-out commit, or uncommitted files the gates would read instead. The install refuses to switch off hooks a clone already runs. Limits: a clone that skipped the setup line, or a worktree whose branch lacks `scripts/hooks`, has no hook, and `git push --no-verify` skips it, so CI stays the gate. ([#140](https://github.com/Jita81/commit-replay-bench/pull/140))

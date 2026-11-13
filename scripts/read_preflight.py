@@ -33,6 +33,16 @@ break was a figure, not an error. Here every such break is a ``PreflightError`` 
   ``KeyError``, a ``match`` case), a key that is not a constant, an envelope lookup of a
   name that is not served, a payload key the script does not declare in an ``Expect``,
   and an action string compared with an event's ``action`` that no ``Expect`` declares.
+  Each function, lambda and comprehension is its own scope: a name it binds hides the
+  enclosing one. The rule also flags what it cannot read: an event's ``action`` used other
+  than compared with constant strings (or ``X.action`` of a declared ``X``); an event dict
+  read other than by ``[]``, ``.get``, ``.pop`` or ``.setdefault`` (``.copy()``,
+  ``.items()``, ``{**ev}``, ``__getitem__``, ``methodcaller``); ``Expect`` used other than
+  in a direct call with constant arguments; and ``value``/``has`` handed an expectation
+  that is not one such call or a name bound once to one.
+* ``preflight`` applies ``check`` to the declarations and checks every raw payload read
+  against the declared actions, or, when the script compares no ``action`` with a constant,
+  against every action present in the events.
 * ``protocol_problems``: the script imports this module, declares ``EVENT_EXPECTATIONS``
   and calls both ``check`` and ``nonzero``; the CLI applies it too.
 
@@ -209,7 +219,14 @@ def check(
 ) -> None:
     """Raise ``PreflightError`` unless every expectation holds on every supplied event;
     print one ``ok`` line per expectation otherwise."""
-    items = list(events)
+    if events is None or isinstance(events, str | bytes | Mapping):
+        raise PreflightError(f"{label}: the events are a {type(events).__name__}, not a list")
+    try:
+        items = list(events)
+    except TypeError:
+        raise PreflightError(
+            f"{label}: the events are a {type(events).__name__}, not a list"
+        ) from None
     if not items:
         raise PreflightError(f"{label}: no events to read; a read over nothing proves nothing")
     problems: list[str] = []
@@ -322,12 +339,24 @@ def _name(node: ast.AST) -> str:
 
 
 _GETS = frozenset({"get", "pop", "setdefault"})
+#: Getters that turn a missing key into a value with no default argument: ``get(k)`` gives
+#: ``None``, ``setdefault(k)`` inserts ``None`` and gives it. ``pop(k)`` raises.
+_DEFAULTING = frozenset({"get", "setdefault"})
+
+
+def _unbound(holder: ast.expr) -> bool:
+    """``dict`` or ``type(x)``: the getter is called unbound, the mapping is its first
+    argument (``dict.get(m, k)``, ``type(m).get(m, k)``)."""
+    if isinstance(holder, ast.Name):
+        return holder.id == "dict"
+    return isinstance(holder, ast.Call) and _name(holder.func) == "type"
 
 
 def _accesses(node: ast.AST) -> list[tuple[ast.expr, ast.expr | None, bool, str]]:
     """``(holder, key, default, how)`` for each key of a mapping that ``node`` reads:
-    ``m[k]``, ``k in m``, ``m.get(k)``, ``dict.get(m, k)``, ``getattr(m, "get")(k)`` and
-    ``operator.itemgetter(k)(m)``."""
+    ``m[k]``, ``k in m``, ``m.get(k)``, ``dict.get(m, k)``, ``type(m).get(m, k)``,
+    ``getattr(m, "get")(k)``, ``operator.itemgetter(k)(m)`` and
+    ``operator.methodcaller("get", k)(m)``."""
     if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
         return [(node.value, node.slice, False, "[]")]
     if (
@@ -340,20 +369,26 @@ def _accesses(node: ast.AST) -> list[tuple[ast.expr, ast.expr | None, bool, str]
         return []
     f, args = node.func, node.args
     if isinstance(f, ast.Attribute) and f.attr in _GETS:
-        if isinstance(f.value, ast.Name) and f.value.id == "dict":
+        if _unbound(f.value):
             if len(args) < 2:
                 return []
-            default = f.attr == "get" or len(args) > 2 or bool(node.keywords)
+            default = f.attr in _DEFAULTING or len(args) > 2 or bool(node.keywords)
             return [(args[0], args[1], default, f"dict.{f.attr}")]
         if not args:
             return []
-        return [(f.value, args[0], f.attr == "get" or len(args) > 1 or bool(node.keywords), ".get")]
+        default = f.attr in _DEFAULTING or len(args) > 1 or bool(node.keywords)
+        return [(f.value, args[0], default, f".{f.attr}")]
     if isinstance(f, ast.Call) and args:
         if _name(f.func) == "itemgetter":
             return [(args[0], k, False, "itemgetter") for k in f.args]
         if _name(f.func) == "getattr" and len(f.args) >= 2 and _const(f.args[1]) in _GETS:
-            default = _const(f.args[1]) == "get" or len(args) > 1
-            return [(f.args[0], args[0], default, "getattr .get")]
+            attr = _const(f.args[1])
+            default = attr in _DEFAULTING or len(args) > 1 or bool(node.keywords)
+            return [(f.args[0], args[0], default, f"getattr .{attr}")]
+        if _name(f.func) == "methodcaller" and len(f.args) >= 2 and _const(f.args[0]) in _GETS:
+            attr = _const(f.args[0])
+            default = attr in _DEFAULTING or len(f.args) > 2 or bool(f.keywords)
+            return [(args[0], f.args[1], default, f"methodcaller .{attr}")]
     return []
 
 
@@ -365,6 +400,11 @@ _COLLECTION = {"envelope": "events", "payload": "payloads"}
 _RANK = {"payload": 3, "envelope": 2, "events": 1, "payloads": 1}
 #: Handlers that turn a missing key inside ``try`` (or ``suppress``) into a value.
 CATCHES = frozenset({"KeyError", "LookupError", "Exception", "BaseException"})
+#: Calls whose result holds what their first argument holds (a copy, a view, a wrapper).
+_SAME_KIND = frozenset(
+    {"dict", "list", "tuple", "sorted", "reversed", "copy", "deepcopy", "OrderedDict"}
+    | {"ChainMap", "MappingProxyType", "UserDict"}
+)
 
 
 def _best(kinds: Iterable[str | None]) -> str | None:
@@ -398,16 +438,11 @@ def _kind(node: ast.AST | None, env: Mapping[str, str]) -> str | None:
     if isinstance(node, ast.NamedExpr | ast.Starred):
         return _kind(node.value, env)
     if isinstance(node, ast.ListComp | ast.SetComp | ast.GeneratorExp):
-        local = dict(env)
+        local = {k: v for k, v in env.items() if k not in _scope_locals(node)}
         for gen in node.generators:
             _bind_iter(gen.target, gen.iter, local)
         return _COLLECTION.get(_kind(node.elt, local) or "")
-    if (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.args
-        and node.func.id in {"dict", "list", "tuple", "sorted", "reversed"}
-    ):
+    if isinstance(node, ast.Call) and node.args and _name(node.func) in _SAME_KIND:
         return _kind(node.args[0], env)
     if isinstance(node, ast.Subscript) and _const(node.slice) is None:
         holder = _kind(node.value, env)
@@ -577,6 +612,76 @@ def _params(fn: ast.AST) -> list[str]:
     return [p.arg for p in (*a.posonlyargs, *a.args, *a.kwonlyargs)]
 
 
+_NEW_SCOPE = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.Lambda,
+    ast.ClassDef,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
+
+
+_Comp = ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
+#: The nodes the static rule reads as scopes of their own (a class body is not one: its
+#: names are its enclosing scope's, as far as an event read goes).
+_SCOPE = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.Lambda,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
+
+
+def _arg_names(a: ast.arguments) -> set[str]:
+    params = (*a.posonlyargs, *a.args, *a.kwonlyargs, *(p for p in (a.vararg, a.kwarg) if p))
+    return {p.arg for p in params}
+
+
+def _scope_locals(s: ast.AST) -> set[str]:
+    """The names scope ``s`` binds itself, which hide an enclosing name of the same name: a
+    function's locals, a lambda's parameters, a comprehension's targets."""
+    if isinstance(s, ast.FunctionDef | ast.AsyncFunctionDef):
+        return _locals(s)
+    if isinstance(s, ast.Lambda):
+        return _arg_names(s.args)
+    if isinstance(s, _Comp):
+        return {n.id for g in s.generators for n in ast.walk(g.target) if isinstance(n, ast.Name)}
+    return set()
+
+
+def _locals(fn: _Fn) -> set[str]:
+    """The names local to ``fn``, which hide a module name of the same name: every
+    parameter (``*args`` and ``**kwargs`` too) and every name the body binds (assignment,
+    ``for`` / ``with`` / ``except`` / ``match`` / ``import`` targets, a nested ``def`` or
+    ``class``), less the names it declares ``global`` or ``nonlocal``."""
+    bound = _arg_names(fn.args)
+    shared: set[str] = set()
+    todo: list[ast.AST] = list(fn.body)
+    while todo:
+        n = todo.pop()
+        if isinstance(n, ast.Global | ast.Nonlocal):
+            shared |= set(n.names)
+        elif isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store | ast.Del):
+            bound.add(n.id)
+        elif isinstance(n, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and n.name:
+            bound.add(n.name)
+        elif isinstance(n, ast.MatchMapping) and n.rest:
+            bound.add(n.rest)
+        elif isinstance(n, ast.Import | ast.ImportFrom):
+            bound |= {(al.asname or al.name).split(".")[0] for al in n.names if al.name != "*"}
+        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            bound.add(n.name)
+        if not isinstance(n, _NEW_SCOPE):
+            todo.extend(ast.iter_child_nodes(n))
+    return bound - shared
+
+
 def _positional(fn: _Fn, method: bool) -> list[str]:
     names = [p.arg for p in (*fn.args.posonlyargs, *fn.args.args)]
     return names[1:] if method else names
@@ -599,30 +704,69 @@ def _callees(
     return []
 
 
-def _scopes(tree: ast.Module) -> list[tuple[ast.AST, list[ast.AST]]]:
-    """The module's own nodes, then each function with every node under it."""
-    funcs = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)]
-    inner = {id(m) for f in funcs for m in ast.walk(f)}
-    own = [n for n in ast.walk(tree) if id(n) not in inner]
-    return [(tree, own), *((f, list(ast.walk(f))) for f in funcs)]
+def _parts(s: ast.AST) -> tuple[list[ast.AST], list[ast.AST], list[ast.AST]]:
+    """``(inside, bare, outside)`` of a scope node: the nodes walked in it, its own nodes
+    taken without their children (a comprehension's ``for`` clauses), and the nodes its
+    enclosing scope evaluates (decorators, defaults, a comprehension's first iterable)."""
+    if isinstance(s, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+        outer = [*s.args.defaults, *(d for d in s.args.kw_defaults if d)]
+        if isinstance(s, ast.Lambda):
+            return [s.body], [], outer
+        return list(s.body), [], [*s.decorator_list, *outer]
+    if isinstance(s, _Comp):
+        gens = s.generators
+        elts = [s.key, s.value] if isinstance(s, ast.DictComp) else [s.elt]
+        inside = [*elts, *(g.target for g in gens), *(i for g in gens for i in g.ifs)]
+        return [*inside, *(g.iter for g in gens[1:])], list(gens), [gens[0].iter]
+    return list(ast.iter_child_nodes(s)), [], []
+
+
+def _scopes(tree: ast.Module) -> list[tuple[ast.AST, list[ast.AST], ast.AST | None]]:
+    """``(scope, nodes, enclosing scope)`` for the module, then every function, lambda and
+    comprehension (each after the scope that encloses it). A scope's nodes stop at a nested
+    scope: a name the nested scope binds is its own, never the enclosing one's."""
+    out: list[tuple[ast.AST, list[ast.AST], ast.AST | None]] = []
+
+    def visit(s: ast.AST, parent: ast.AST | None) -> None:
+        inside, nodes, _outside = _parts(s)
+        nested: list[ast.AST] = []
+        todo = list(inside)
+        while todo:
+            n = todo.pop()
+            nodes.append(n)
+            if isinstance(n, _SCOPE):
+                nested.append(n)
+                todo.extend(_parts(n)[2])
+            else:
+                todo.extend(ast.iter_child_nodes(n))
+        out.append((s, nodes, parent))
+        for n in reversed(nested):
+            visit(n, s)
+
+    visit(tree, None)
+    return out
 
 
 @dataclass
 class _Analysis:
-    scopes: list[tuple[ast.AST, list[ast.AST]]]
+    scopes: list[tuple[ast.AST, list[ast.AST], ast.AST | None]]
     envs: dict[int, dict[str, str]]
     funcs: dict[str, list[_Fn]]
     methods: set[int]
 
 
 def _analyse(tree: ast.Module) -> _Analysis:
-    """Every scope's names, with the kinds a call site hands a function's parameters
-    propagated to a fixpoint (``task_of(item["payload"])`` makes ``task_of``'s parameter a
-    payload), and module names visible in every function."""
+    """Every scope's names, to a fixpoint: a scope sees its enclosing scope's names less the
+    ones it binds itself (a parameter, a local, a lambda parameter or a comprehension target
+    of that name is its own); what a scope learns about a name it does not bind holds in the
+    enclosing scope too (a ``payload`` lookup inside a comprehension marks the event it is
+    made on); and the kinds a call site hands a function's parameters are propagated
+    (``task_of(item["payload"])`` makes ``task_of``'s parameter a payload)."""
     rp = _rp_imports(tree)
     scopes = _scopes(tree)
+    own = {id(s): _scope_locals(s) for s, _nodes, _parent in scopes}
     funcs: dict[str, list[_Fn]] = {}
-    for fn, _nodes in scopes[1:]:
+    for fn, _nodes, _parent in scopes:
         if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
             funcs.setdefault(fn.name, []).append(fn)
     methods = {
@@ -632,14 +776,22 @@ def _analyse(tree: ast.Module) -> _Analysis:
         for f in c.body
         if isinstance(f, ast.FunctionDef | ast.AsyncFunctionDef)
     }
-    handed: dict[int, dict[str, str]] = {id(fn): {} for fn, _nodes in scopes[1:]}
+    handed: dict[int, dict[str, str]] = {id(s): {} for s, _nodes, _parent in scopes}
     while True:
-        module = _infer(scopes[0][1], {}, rp)
-        envs = {id(tree): module}
-        for fn, nodes in scopes[1:]:
-            envs[id(fn)] = _infer(nodes, {**module, **handed[id(fn)]}, rp)
+        envs: dict[int, dict[str, str]] = {}
+        for s, nodes, parent in scopes:
+            start = {} if parent is None else dict(envs[id(parent)])
+            start = {k: v for k, v in start.items() if k not in own[id(s)]}
+            for k, v in handed[id(s)].items():
+                _set(start, k, v)
+            envs[id(s)] = _infer(nodes, start, rp)
         changed = False
-        for scope, nodes in scopes:
+        for s, _nodes, parent in scopes:
+            if parent is not None:
+                for k, v in envs[id(s)].items():
+                    if k not in own[id(s)]:
+                        changed |= _set(handed[id(parent)], k, v)
+        for scope, nodes, _parent in scopes:
             env = envs[id(scope)]
             for n in nodes:
                 if not isinstance(n, ast.Call):
@@ -696,19 +848,162 @@ def _pattern_lookups(p: ast.pattern, kind: str | None, out: list[Lookup]) -> Non
             _pattern_lookups(q, kind, out)
 
 
+def _action_literals(node: ast.AST, by_name: Mapping[str, Expect]) -> list[str] | None:
+    """The actions ``node`` names when it is a constant string, a tuple / list / set of
+    them, or ``X.action`` of a declared ``X``; ``None`` for anything else."""
+    if (s := _const(node)) is not None:
+        return [s]
+    if isinstance(node, ast.Tuple | ast.List | ast.Set):
+        parts = [_action_literals(e, by_name) for e in node.elts]
+        return None if any(p is None for p in parts) else [s for p in parts if p for s in p]
+    if (
+        isinstance(node, ast.Attribute)
+        and node.attr == "action"
+        and isinstance(node.value, ast.Name)
+        and node.value.id in by_name
+    ):
+        return [by_name[node.value.id].action]
+    return None
+
+
+def _case_actions(p: ast.pattern, by_name: Mapping[str, Expect]) -> list[str] | None:
+    """The actions a ``case`` names, or ``None`` when it binds or tests the action other
+    than against constants (``case a:`` hands the action to a name)."""
+    if isinstance(p, ast.MatchValue):
+        return _action_literals(p.value, by_name)
+    if isinstance(p, ast.MatchSingleton):
+        return []
+    if isinstance(p, ast.MatchOr):
+        parts = [_case_actions(q, by_name) for q in p.patterns]
+        return None if any(q is None for q in parts) else [s for q in parts if q for s in q]
+    if isinstance(p, ast.MatchAs):
+        if p.pattern is None:
+            return [] if p.name is None else None
+        return _case_actions(p.pattern, by_name)
+    return None
+
+
+def _literal_use(n: ast.AST, parent: ast.AST | None, by_name: Mapping[str, Expect]) -> bool:
+    """Whether the action lookup ``n`` is only compared (``==``, ``!=``, ``in``, ``not
+    in``) with constant actions, or is the subject of a ``match`` whose cases name them."""
+    if isinstance(parent, ast.Compare) and all(
+        isinstance(op, ast.Eq | ast.NotEq | ast.In | ast.NotIn) for op in parent.ops
+    ):
+        ops = [parent.left, *parent.comparators]
+        return all(_action_literals(o, by_name) is not None for o in ops if o is not n)
+    if isinstance(parent, ast.Match) and parent.subject is n:
+        return all(_case_actions(c.pattern, by_name) is not None for c in parent.cases)
+    return False
+
+
+#: Getter names that are read as a lookup (``.get(k)`` etc.); any other attribute of an
+#: event dict or payload hides a key read from the rule.
+_LOOKUP_ATTRS = _GETS
+
+
+def _opaque(n: ast.AST, parent: ast.AST | None, env: Mapping[str, str]) -> tuple[str, str] | None:
+    """``(where, how)`` when ``n`` reads an event dict or payload in a way the rule cannot
+    check: a method other than ``get``/``pop``/``setdefault`` called on it
+    (``p.copy().get``, ``p.__getitem__``, ``p.items()``), a getter taken without being
+    called (``(f := p.get)(k)``), ``getattr`` of anything else, or ``{**p}``."""
+    if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Load):
+        where = _kind(n.value, env)
+        called = isinstance(parent, ast.Call) and parent.func is n
+        if where in {"envelope", "payload"} and not (called and n.attr in _LOOKUP_ATTRS):
+            return str(where), f".{n.attr}" + ("(...)" if called else " taken uncalled")
+    if isinstance(n, ast.Call) and _name(n.func) == "getattr" and n.args:
+        where = _kind(n.args[0], env)
+        attr = _const(n.args[1]) if len(n.args) > 1 else None
+        called = isinstance(parent, ast.Call) and parent.func is n
+        if where in {"envelope", "payload"} and not (called and attr in _LOOKUP_ATTRS):
+            return str(where), f"getattr {attr or '?'}"
+    if isinstance(n, ast.Dict):
+        for k, v in zip(n.keys, n.values, strict=True):
+            if k is None and (where := _kind(v, env)) in {"envelope", "payload"}:
+                return str(where), "{**...}"
+    return None
+
+
 def _scan(source: str) -> tuple[list[Lookup], list[tuple[int, str]]]:
     """The lookups on event dicts and payloads, and the action strings compared with an
     event's ``action``, in ``source``."""
+    found, actions, _problems = _scan_all(source)
+    return found, actions
+
+
+def _scan_all(source: str) -> tuple[list[Lookup], list[tuple[int, str]], list[str]]:
+    """``_scan`` plus the reads the rule cannot check: an event dict or payload used other
+    than by a lookup it reads, an event's ``action`` used other than compared with
+    constants (``.startswith``, ``in WANT``, ``== act``), and ``value`` / ``has`` handed an
+    expectation that is not a name bound to a readable ``Expect`` call."""
     tree = ast.parse(source)
     an = _analyse(tree)
     caught = _caught(tree)
+    d = _decls(tree)
+    mods, names = _rp_imports(tree)
+    parents = {id(c): p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
     found: dict[tuple[int, int, str | None], Lookup] = {}
     actions: set[tuple[int, str]] = set()
+    problems: dict[tuple[int, int], str] = {}
     getters: dict[int, tuple[int, str, str]] = {}
-    for fn, nodes in an.scopes:
+    for fn, nodes, _parent in an.scopes:
         env = an.envs[id(fn)]
         params = _params(fn)
         for n in nodes:
+            parent = parents.get(id(n))
+            pos = (getattr(n, "lineno", 0), getattr(n, "col_offset", 0))
+            if (opaque := _opaque(n, parent, env)) is not None:
+                problems[pos] = (
+                    f"line {pos[0]}: {opaque[1]} on an event dict ({opaque[0]}) is not a lookup "
+                    f"the rule can check; read a key with [] or read_preflight.value"
+                )
+            if _action_lookup(n, env, known=True) is not None and not _literal_use(
+                n, parent, d.by_name
+            ):
+                problems[pos] = (
+                    f"line {pos[0]}: an event's action is used other than compared with "
+                    f"constant action strings (or X.action of a declared X); the rule cannot "
+                    f"tell which actions the read takes, so write the actions out"
+                )
+            fname = _rp_call(n, mods, names)
+            if isinstance(n, ast.Call) and fname in {"value", "has"}:
+                xs = n.args[1:2] or [k.value for k in n.keywords if k.arg == "x"]
+                x = xs[0] if xs else None
+                known = (
+                    d.made.get(id(x))
+                    if x is not None and id(x) in d.made
+                    else d.by_name.get(x.id)
+                    if isinstance(x, ast.Name)
+                    else None
+                )
+                if known is None:
+                    problems[pos] = (
+                        f"line {pos[0]}: read_preflight.{fname}(...) is handed an expectation "
+                        f"the rule cannot see declared; pass a name bound once to "
+                        f"read_preflight.Expect(<constants>)"
+                    )
+                elif known.where == "envelope" and known.key == "action":
+                    problems[pos] = (
+                        f"line {pos[0]}: read_preflight.{fname}(...) reads the action; compare "
+                        f'ev["action"] with constant action strings instead'
+                    )
+            if isinstance(n, ast.Compare):
+                ops = [n.left, *n.comparators]
+                for op in ops:
+                    if _action_lookup(op, env, known=True) is not None:
+                        others = [_action_literals(o, d.by_name) for o in ops if o is not op]
+                        actions |= {(n.lineno, s) for o in others for s in o or []}
+            if isinstance(n, ast.Match):
+                out: list[Lookup] = []
+                for case in n.cases:
+                    _pattern_lookups(case.pattern, _kind(n.subject, env), out)
+                found |= {(lk.line, -1 - i, lk.key): lk for i, lk in enumerate(out)}
+                if _action_lookup(n.subject, env, known=True) is not None:
+                    actions |= {
+                        (c.pattern.lineno, s)
+                        for c in n.cases
+                        for s in _case_actions(c.pattern, d.by_name) or []
+                    }
             for holder, keynode, got_default, got_how in _accesses(n):
                 where = _kind(holder, env)
                 if where not in {"envelope", "payload"}:
@@ -729,25 +1024,6 @@ def _scan(source: str) -> tuple[list[Lookup], list[tuple[int, str]]]:
                         found[at] = Lookup(line, where, None, True, how)
                     continue
                 found[at] = Lookup(line, where, key, default, how)
-            if isinstance(n, ast.Compare):
-                ops = [n.left, *n.comparators]
-                for op in ops:
-                    if _action_lookup(op, env, known=True) is not None:
-                        others = (o for o in ops if o is not op)
-                        actions |= {(n.lineno, s) for o in others for s in _strings(o)}
-            if isinstance(n, ast.Match):
-                out: list[Lookup] = []
-                for case in n.cases:
-                    _pattern_lookups(case.pattern, _kind(n.subject, env), out)
-                found |= {(lk.line, -1 - i, lk.key): lk for i, lk in enumerate(out)}
-                if _action_lookup(n.subject, env, known=True) is not None:
-                    actions |= {
-                        (c.pattern.lineno, s)
-                        for c in n.cases
-                        for m in ast.walk(c.pattern)
-                        if isinstance(m, ast.MatchValue)
-                        for s in _strings(m.value)
-                    }
     for n in ast.walk(tree):
         if not isinstance(n, ast.Call):
             continue
@@ -760,7 +1036,7 @@ def _scan(source: str) -> tuple[list[Lookup], list[tuple[int, str]]]:
             arg = next((k.value for k in n.keywords if k.arg == pname), arg)
             found[(n.lineno, n.col_offset, None)] = Lookup(n.lineno, where, _const(arg), False)
     ordered = sorted(found.values(), key=lambda lk: (lk.line, lk.where, lk.key or ""))
-    return ordered, sorted(actions)
+    return ordered, sorted(actions), [problems[k] for k in sorted(problems)]
 
 
 def lookups(source: str) -> list[Lookup]:
@@ -777,21 +1053,133 @@ def compared_actions(source: str) -> list[tuple[int, str]]:
     return _scan(source)[1]
 
 
-def declared(source: str) -> list[Expect]:
-    """The ``Expect(...)`` calls written with constant arguments in ``source``."""
-    out: list[Expect] = []
-    for n in ast.walk(ast.parse(source)):
-        if not isinstance(n, ast.Call):
-            continue
-        if _name(n.func) != "Expect":
-            continue
-        try:
-            args = [ast.literal_eval(a) for a in n.args]
-            kw = {k.arg: ast.literal_eval(k.value) for k in n.keywords if k.arg}
-            out.append(Expect(*args, **kw))
-        except (ValueError, TypeError, SyntaxError):
-            continue  # a refused or non-constant declaration declares nothing
+def _literal(node: ast.expr) -> bool:
+    try:
+        ast.literal_eval(node)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return False
+    return True
+
+
+def _not_constant(call: ast.Call) -> str | None:
+    """The first argument of ``call`` that is not a constant, as written."""
+    for a in call.args:
+        if not _literal(a):
+            return ast.unparse(a)
+    for k in call.keywords:
+        if k.arg is None or not _literal(k.value):
+            return ast.unparse(k.value) if k.arg else f"**{ast.unparse(k.value)}"
+    return None
+
+
+@dataclass
+class _Decls:
+    expects: list[Expect]
+    problems: list[str]
+    #: A name every binding of which is one readable ``Expect(...)`` call -> that Expect.
+    by_name: dict[str, Expect]
+    #: ``id`` of each readable ``Expect(...)`` call node -> its Expect.
+    made: dict[int, Expect]
+
+
+def _bound_names(tree: ast.Module) -> Iterable[tuple[str, ast.AST]]:
+    """``(name, node)`` for every way a module binds a name."""
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store | ast.Del):
+            yield n.id, n
+        elif isinstance(n, ast.arg):
+            yield n.arg, n
+        elif isinstance(n, ast.alias):
+            yield (n.asname or n.name).split(".")[0], n
+        elif isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) or (
+            isinstance(n, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and n.name
+        ):
+            yield n.name, n
+        elif isinstance(n, ast.MatchMapping) and n.rest:
+            yield n.rest, n
+
+
+def _decls(tree: ast.Module) -> _Decls:
+    """Each call of this module's ``Expect``, however it is imported
+    (``read_preflight.Expect``, ``rp.Expect``, ``Expect``, ``E`` from ``from read_preflight
+    import Expect as E``), and the names bound to one. A call whose arguments are not all
+    constants, a call ``Expect`` refuses, and ``Expect`` reached other than by a direct call
+    (``E = read_preflight.Expect``, ``getattr(read_preflight, "Expect")``, ``partial``) are
+    problems, never silent omissions: the read would otherwise pass the preflight on an
+    expectation nobody checked."""
+    mods, names = _rp_imports(tree)
+    rp_mods = mods | {"read_preflight"}
+    out = _Decls([], [], {}, {})
+    parents = {id(c): p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and _rp_call(n, mods, names) == "Expect":
+            at = f"line {n.lineno}: read_preflight.Expect(...)"
+            if (bad := _not_constant(n)) is not None:
+                out.problems.append(
+                    f"{at} cannot be read without running the script ({bad} is not a "
+                    f"constant); write its arguments as constants"
+                )
+                continue
+            try:
+                x = Expect(
+                    *[ast.literal_eval(a) for a in n.args],
+                    **{str(k.arg): ast.literal_eval(k.value) for k in n.keywords},
+                )
+            except (ValueError, TypeError) as exc:
+                out.problems.append(f"{at} is refused: {exc}")
+                continue
+            out.expects.append(x)
+            out.made[id(n)] = x
+        ref = (
+            isinstance(n, ast.Attribute)
+            and n.attr == "Expect"
+            and isinstance(n.value, ast.Name)
+            and n.value.id in rp_mods
+        ) or (
+            isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and names.get(n.id) == "Expect"
+        )
+        parent = parents.get(id(n))
+        if ref and not (isinstance(parent, ast.Call) and parent.func is n):
+            out.problems.append(
+                f"line {n.lineno}: read_preflight.Expect is used other than in a direct call; "
+                f"the rule reads a declaration only as read_preflight.Expect(<constants>)"
+            )
+        if (
+            isinstance(n, ast.Call)
+            and _name(n.func) == "getattr"
+            and n.args
+            and isinstance(n.args[0], ast.Name)
+            and n.args[0].id in rp_mods
+        ):
+            out.problems.append(
+                f"line {n.lineno}: getattr on read_preflight hides what is called; call it by name"
+            )
+    good: dict[str, list[Expect]] = {}
+    good_nodes: set[int] = set()
+    for n in ast.walk(tree):
+        if (
+            isinstance(n, ast.Assign)
+            and len(n.targets) == 1
+            and isinstance(n.targets[0], ast.Name)
+            and id(n.value) in out.made
+        ):
+            good.setdefault(n.targets[0].id, []).append(out.made[id(n.value)])
+            good_nodes.add(id(n.targets[0]))
+    other = {name for name, node in _bound_names(tree) if id(node) not in good_nodes}
+    out.by_name = {k: v[0] for k, v in good.items() if k not in other and len(set(v)) == 1}
     return out
+
+
+def _declarations(source: str) -> tuple[list[Expect], list[str]]:
+    """``(expectations, problems)`` of ``source``'s ``Expect`` calls (see ``_decls``)."""
+    d = _decls(ast.parse(source))
+    return d.expects, d.problems
+
+
+def declared(source: str) -> list[Expect]:
+    """The ``Expect(...)`` calls of ``source`` that can be read and are not refused (a call
+    that cannot is a problem of ``source_problems``)."""
+    return _declarations(source)[0]
 
 
 def protocol_problems(source: str) -> list[str]:
@@ -823,12 +1211,23 @@ def protocol_problems(source: str) -> list[str]:
     return problems
 
 
+def _actions_for(decl: Iterable[Expect], key: str) -> set[str]:
+    """The actions whose payload ``key`` is declared."""
+    return {x.action for x in decl if x.where == "payload" and x.key == key}
+
+
+def _undeclared_for(decl: Sequence[Expect], key: str) -> list[str]:
+    """The actions the script reads (those it declares) that do not declare payload ``key``:
+    a raw lookup of ``key`` may meet an event of any of them, so one action's declaration is
+    no evidence for another's."""
+    return sorted({x.action for x in decl} - _actions_for(decl, key))
+
+
 def source_problems(source: str) -> list[str]:
     """The static rule for a script that reads run events (see the module docstring)."""
-    decl = declared(source)
-    payload_ok = {x.key for x in decl if x.where == "payload"}
-    problems: list[str] = []
-    found, actions = _scan(source)
+    decl, problems = _declarations(source)
+    found, actions, unreadable = _scan_all(source)
+    problems += unreadable
     for lk in found:
         at = f"line {lk.line}"
         if lk.default:
@@ -838,13 +1237,19 @@ def source_problems(source: str) -> list[str]:
             )
         if lk.key is None:
             problems.append(f"{at}: a {lk.where} key that is not a constant cannot be checked")
-        elif lk.where == "payload" and lk.key in LIFTED and lk.key not in payload_ok:
+        elif lk.where == "payload" and not _actions_for(decl, lk.key):
             problems.append(
                 f"{at}: payload lookup of {lk.key!r}; the emitter serves it at the envelope "
                 f"as {LIFTED[lk.key]!r}"
+                if lk.key in LIFTED
+                else f"{at}: payload.{lk.key} is read but no Expect declares it"
             )
-        elif lk.where == "payload" and lk.key not in payload_ok:
-            problems.append(f"{at}: payload.{lk.key} is read but no Expect declares it")
+        elif lk.where == "payload" and (lacking := _undeclared_for(decl, lk.key)):
+            problems.append(
+                f"{at}: payload.{lk.key} is read but no Expect declares it for "
+                f"{', '.join(lacking)}; a raw lookup is not tied to one action, so declare the "
+                f"key for every action the script reads or read it with read_preflight.value"
+            )
         elif lk.where == "envelope" and lk.key not in (*ENVELOPE_KEYS, "payload"):
             problems.append(f"{at}: {lk.key!r} is not a served envelope field")
     known = {x.action for x in decl}
@@ -864,18 +1269,40 @@ def reads(source: str) -> set[tuple[str, str]]:
 
 def preflight(source: str, events: Sequence[Any], *, label: str = "read") -> list[str]:
     """Every problem of ``source`` read against ``events``: the static rule, the envelope
-    check over all events, its declared expectations, and each constant key it reads
-    (a payload key the script reads must be on at least one supplied event)."""
+    check over all events (no events at all is a problem), its declared expectations, and
+    each constant key it reads (a payload key the script reads must be on at least one
+    supplied event of every action it declares that has events: another action's event is
+    no evidence)."""
     problems = protocol_problems(source) + source_problems(source)
+    if not isinstance(events, list | tuple):
+        problems.append(f"{label}: the events are a {type(events).__name__}, not a list")
+        return [p.strip() for p in problems]
+    decl = declared(source)
     try:
-        check(events, declared(source), label=label, out=lambda _line: None)
+        check(events, decl, label=label, out=lambda _line: None)
     except PreflightError as exc:
-        problems += str(exc).splitlines()[1:]
+        lines = str(exc).splitlines()
+        problems += lines[1:] if len(lines) > 1 else lines
     evs = [e for e in events if isinstance(e, Mapping)]
+    # A read that compares no event's action with a constant may take any action's events.
+    filtered = bool(compared_actions(source))
+    acts = (
+        sorted({x.action for x in decl})
+        if filtered
+        else sorted({a for e in evs if isinstance(a := e.get("action"), str)})
+    )
+    why = "" if filtered else "; the read names no action, so every action's events count"
     for where, key in sorted(reads(source)):
+        hint = f"; served at envelope.{LIFTED[key]}" if key in LIFTED else ""
         if not any(key in _holder(e, where) for e in evs):
-            hint = f"; served at envelope.{LIFTED[key]}" if key in LIFTED else ""
             problems.append(f"{where}.{key} is read but is on 0 of {len(evs)} events{hint}")
+            continue
+        for action in acts if where == "payload" else ():
+            mine = [e for e in evs if e.get("action") == action]
+            if mine and not any(key in _holder(e, where) for e in mine):
+                problems.append(
+                    f"{where}.{key} is read but is on 0 of {len(mine)} {action} events{hint}{why}"
+                )
     return [p.strip() for p in problems]
 
 

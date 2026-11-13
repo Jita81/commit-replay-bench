@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import ast
 import functools
+import hashlib
 import inspect
 import re
 from dataclasses import dataclass
@@ -46,7 +47,7 @@ from typing import Any
 
 from crb.factory.loop import FactoryLoop
 from crb.observability.events import Emitter
-from test_event_served_shape import NOT_KEYS, _keys, _probe, _rows
+from test_event_served_shape import ENVELOPE, NOT_KEYS, _probe, _rows
 from test_event_vocabulary import _SCOPES, SRC, _bindings, _call_actions, _own_nodes
 
 ROOT = SRC.parents[1]
@@ -202,16 +203,24 @@ def top_keys(cell: str) -> set[str]:
 
 #: A code span that names a key and says more about it: ``new[]``, ``refusals[{code, n}]``,
 #: ``status_at_request ∈ queued|running``, ``reason: ""``.
-_ANNOTATED = re.compile(r"([a-z_][a-z0-9_]*)(?:\[.*\]|\s*[∈=:].*)")
+#: A plain key span is the same pattern with no annotation.
+_ANNOTATED = re.compile(r"([a-z_][a-z0-9_]*)(?:\[.*\]|\s*[∈=:].*)?")
+
+
+def documented_keys(cell: str) -> set[tuple[str, bool]]:
+    """``(key, on_envelope)`` for every key a payload cell names anywhere, an annotated span
+    normalised to its key and the " on the envelope" after the span kept as its placement.
+    The one reader of a cell for every check that asks "does the table document this key"."""
+    return {
+        (k.group(1), bool(m.group(2)))
+        for m in re.finditer(r"`([^`]+)`(" + ENVELOPE + ")?", cell)
+        if (k := _ANNOTATED.fullmatch(m.group(1)))
+    }
 
 
 def named_keys(cell: str) -> set[str]:
     """Every key a payload cell names anywhere (the B direction reads the cell leniently)."""
-    out = {k for k, _on_env in _keys(cell)}
-    for span in re.findall(r"`([^`]+)`", cell):
-        if m := _ANNOTATED.fullmatch(span):
-            out.add(m.group(1))
-    return out
+    return {k for k, _on_env in documented_keys(cell)}
 
 
 def _actions(action_cell: str) -> list[str]:
@@ -296,19 +305,203 @@ def test_the_gap_baseline_only_shrinks() -> None:
 
 #: How many lines tests/fixtures/event_key_gaps.txt holds. The two tests above only force
 #: the file to equal today's gaps, so a commit that adds a gap AND its line would pass them;
-#: this count is the ratchet. Lower it with every deleted line; never raise it.
+#: this count and ``INITIAL_GAPS`` below are the ratchet. Lower it with every deleted line;
+#: never raise it.
 BASELINE_SIZE = 79
+
+#: The baseline as this suite first found it (2026-11-13), copied here so a commit that
+#: fixes one gap and adds another cannot swap the two lines in the fixture: every line of
+#: tests/fixtures/event_key_gaps.txt must be one of these. Never add to it; its digest is
+#: pinned below.
+INITIAL_GAPS: frozenset[str] = frozenset(
+    line.strip()
+    for line in """
+A connect.stage.chained auto_stages
+B author.attempt cost_known
+B author.attempt item
+B author.attempt provider
+B author.done item
+B author.start item
+B author.start route
+B build.attempt builder
+B build.attempt fixture
+B build.done files
+B build.done fixture
+B build.start auth
+B build.start files
+B build.tool fixture
+B builder.build.attempt builder
+B builder.build.attempt fixture
+B builder.build.done builder
+B builder.build.done fixture
+B builder.build.start auth
+B builder.build.start builder
+B builder.build.start mode
+B builder.build.start model
+B builder.build.tool fixture
+B builder.sealed network
+B controls.done passed
+B controls.done repo
+B delivery.override cell
+B grade.belt rc
+B grade.belt timed_out
+B grade.tamper detail
+B grade.tamper violations
+B label.task capability_class
+B label.task taxonomy
+B ledger.append clean
+B ledger.append disqualified
+B ledger.append item
+B ledger.append pack
+B ledger.append row_hash
+B ledger.append trial
+B legacy.grade clean
+B mine.candidate repo
+B mine.done repo
+B mine.red baseline_failing
+B mine.red cls
+B mine.red size
+B oracle.mutation.scored oracle_strength
+B red.proved item
+B red.refused item
+B red.start item
+B repo.created config
+B repo.created github
+B review.corrected grade_row_hash
+B review.corrected review_id
+B review.corrected row_hash
+B review.created findings
+B review.created grade_row_hash
+B review.created mergeable
+B review.created minutes
+B review.created patch_sha256_reviewed
+B review.created review_id
+B review.created row_hash
+B review.created verdict
+B review.probe detail
+B review.probe item
+B review.refused code
+B review.refused envelope_code
+B review.refused grade_row_hash
+B review.start item
+B review.verdict item
+B route.decided cell_route
+B setup.auto reason
+B setup.start path
+B signoff.created controls_run_id
+B signoff.created controls_verdict
+B signoff.created oracle_scored
+B signoff.created oracle_strength
+B signoff.created oracle_tasks
+B signoff.created reviewed_row_hash
+B signoff.created route_reason_code
+""".splitlines()
+    if line.strip()
+)
+INITIAL_GAPS_SHA256 = "dc44adf2b50d96933388e13e4fe11e177a749f0621950f8365bae97f6687019e"
+
+
+#: Every gap fixed since ``INITIAL_GAPS`` was written. Fixing a gap moves its line here in
+#: the commit that deletes it from the fixture; never remove a line. The fixture must hold
+#: exactly ``INITIAL_GAPS - FIXED_GAPS``, so a fixed gap cannot be swapped back in for a
+#: later fix even once ``BASELINE_SIZE`` has gone down.
+FIXED_GAPS: frozenset[str] = frozenset()
+
+
+def baseline_problems(
+    entries: set[str], fixed: frozenset[str] = FIXED_GAPS, size: int = BASELINE_SIZE
+) -> list[str]:
+    """Why ``entries`` is not a baseline that only shrank: a line that was never in
+    ``INITIAL_GAPS`` (a new gap), a line in ``fixed`` (a fixed gap come back), a line gone
+    from the baseline but not recorded in ``fixed``, or a size other than ``size``."""
+    problems = [
+        f"{e!r} was not a gap when the baseline was written: fix the row or the call"
+        for e in sorted(entries - INITIAL_GAPS)
+    ]
+    problems += [
+        f"{e!r} was fixed (it is in FIXED_GAPS) and is a gap again: fix the row or the call"
+        for e in sorted(entries & fixed)
+    ]
+    problems += [
+        f"{e!r} is no longer in the baseline: add it to FIXED_GAPS in the same commit"
+        for e in sorted(INITIAL_GAPS - fixed - entries)
+    ]
+    problems += [
+        f"{e!r} is in FIXED_GAPS but never was a gap" for e in sorted(fixed - INITIAL_GAPS)
+    ]
+    if size != len(INITIAL_GAPS - fixed):
+        problems.append(
+            f"BASELINE_SIZE is {size} but INITIAL_GAPS less FIXED_GAPS holds "
+            f"{len(INITIAL_GAPS - fixed)}: they move together"
+        )
+    n = len(entries)
+    if n > size:
+        problems.append(
+            f"tests/fixtures/event_key_gaps.txt grew to {n} lines (pinned at {size}): "
+            "a new gap is fixed in the row or the call, never added to the baseline"
+        )
+    elif n < size:
+        problems.append(
+            f"the baseline shrank to {n}: lower BASELINE_SIZE to {n} in the same commit"
+        )
+    return problems
+
+
+def test_the_initial_allow_list_is_the_one_first_written() -> None:
+    digest = hashlib.sha256("\n".join(sorted(INITIAL_GAPS)).encode()).hexdigest()
+    assert digest == INITIAL_GAPS_SHA256, "INITIAL_GAPS is never edited; it may not grow"
+    assert len(INITIAL_GAPS) == 79
 
 
 def test_the_gap_baseline_size_is_pinned_and_only_goes_down() -> None:
-    n = len(baseline())
-    assert n <= BASELINE_SIZE, (
-        f"tests/fixtures/event_key_gaps.txt grew to {n} lines (pinned at {BASELINE_SIZE}): a "
-        "new gap is fixed in the row or the call, never added to the baseline"
-    )
-    assert n == BASELINE_SIZE, (
-        f"the baseline shrank to {n}: lower BASELINE_SIZE to {n} in the same commit"
-    )
+    assert baseline_problems(baseline()) == []
+
+
+def test_a_new_gap_swapped_for_a_fixed_one_is_refused() -> None:
+    """A commit that fixes one gap and adds another keeps the size; membership stops it."""
+    fixed = sorted(baseline())[0]
+    swapped = (baseline() - {fixed}) | {"B build.start brand_new_key"}
+    assert len(swapped) == BASELINE_SIZE
+    assert baseline_problems(swapped) == [
+        "'B build.start brand_new_key' was not a gap when the baseline was written: fix the "
+        "row or the call",
+        f"{fixed!r} is no longer in the baseline: add it to FIXED_GAPS in the same commit",
+    ]
+    assert baseline_problems(baseline() - {fixed}) == [
+        f"{fixed!r} is no longer in the baseline: add it to FIXED_GAPS in the same commit",
+        f"the baseline shrank to {BASELINE_SIZE - 1}: lower BASELINE_SIZE to "
+        f"{BASELINE_SIZE - 1} in the same commit",
+    ]
+
+
+def test_a_fixed_gap_cannot_come_back_in_place_of_a_later_fix() -> None:
+    """Fix X (record it, lower the size), then fix Y and swap X back: the size matches, every
+    line is an initial gap, and X is still refused because it was recorded fixed."""
+    x, y = sorted(INITIAL_GAPS)[:2]
+    after_x = frozenset({x})
+    assert baseline_problems(set(INITIAL_GAPS - after_x), after_x, len(INITIAL_GAPS) - 1) == []
+    swapped = set(INITIAL_GAPS - {y})
+    assert baseline_problems(swapped, after_x, len(INITIAL_GAPS) - 1) == [
+        f"{x!r} was fixed (it is in FIXED_GAPS) and is a gap again: fix the row or the call",
+        f"{y!r} is no longer in the baseline: add it to FIXED_GAPS in the same commit",
+    ]
+    after_y = after_x | {y}
+    assert baseline_problems(swapped, after_y, len(INITIAL_GAPS) - 2) == [
+        f"{x!r} was fixed (it is in FIXED_GAPS) and is a gap again: fix the row or the call",
+        f"tests/fixtures/event_key_gaps.txt grew to {len(INITIAL_GAPS) - 1} lines (pinned at "
+        f"{len(INITIAL_GAPS) - 2}): a new gap is fixed in the row or the call, never added to "
+        "the baseline",
+    ]
+
+
+def test_the_size_and_the_fixed_list_move_together() -> None:
+    assert baseline_problems(set(INITIAL_GAPS), size=len(INITIAL_GAPS) - 1) == [
+        f"BASELINE_SIZE is {len(INITIAL_GAPS) - 1} but INITIAL_GAPS less FIXED_GAPS holds "
+        f"{len(INITIAL_GAPS)}: they move together",
+        f"tests/fixtures/event_key_gaps.txt grew to {len(INITIAL_GAPS)} lines (pinned at "
+        f"{len(INITIAL_GAPS) - 1}): a new gap is fixed in the row or the call, never added to "
+        "the baseline",
+    ]
 
 
 # -- the walker on planted code and planted rows ------------------------------------------

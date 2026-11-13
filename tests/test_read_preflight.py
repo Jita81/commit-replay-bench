@@ -47,7 +47,8 @@ import pytest
 from crb.observability.events import Emitter, MemorySink
 from crb.server.routes.runs import EVENT_KEYS
 from served_events import served_event, served_run
-from test_event_served_shape import _keys, _probe, _rows
+from test_event_key_contract import documented_keys
+from test_event_served_shape import _probe, _rows
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "scripts"
@@ -572,14 +573,15 @@ def test_the_pre_dating_readers_still_break_the_rule(rp: ModuleType) -> None:
 
 
 def table_problems(expects: list[Any]) -> list[str]:
-    """Each expectation names a table row that documents the key where it is read."""
+    """Each expectation's action has a table row, and one of its rows (an action can have a
+    row per emitter: ``build.start``) documents the key where it is read."""
     rows = _rows()
     bad = []
     for x in expects:
-        row = next((r for r in rows if f"`{x.action}`" in r[1]), None)
-        if row is None:
+        cells = [r[3] for r in rows if f"`{x.action}`" in r[1]]
+        if not cells:
             bad.append(f"{x.action} is not in the event table")
-        elif (x.key, x.where == "envelope") not in set(_keys(row[3])):
+        elif not any((x.key, x.where == "envelope") in documented_keys(c) for c in cells):
             bad.append(f"table lacks {x.where}.{x.key} for {x.action}")
     return bad
 
@@ -600,3 +602,419 @@ def test_a_declared_expectation_matches_the_table(rp: ModuleType) -> None:
         if str(p.relative_to(ROOT)) not in PRE_DATES:
             bad += [f"{p.name}: {b}" for b in table_problems(rp.declared(p.read_text("utf-8")))]
     assert not bad, "\n".join(bad)
+
+
+# -- review of #142, round 1 ---------------------------------------------------------------
+
+_OPTIONAL_COMMIT = (
+    "import read_preflight\n"
+    'X = read_preflight.Expect("builder.author_test.start", "commit", optional=True)\n'
+    "EVENT_EXPECTATIONS = (X,)\n"
+)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        'p.setdefault("commit")',
+        'dict.setdefault(p, "commit")',
+        'getattr(p, "setdefault")("commit")',
+    ],
+)
+def test_setdefault_is_a_default_in_every_call_form(rp: ModuleType, call: str) -> None:
+    """``setdefault(key)`` inserts and returns ``None`` for a missing key: a default."""
+    src = _OPTIONAL_COMMIT + f'def keep(item):\n    p = item["payload"]\n    return {call}\n'
+    problems = rp.source_problems(src)
+    assert any("(payload.commit) turns a missing key into a value" in p for p in problems), problems
+
+
+def test_pop_without_a_default_stays_strict(rp: ModuleType) -> None:
+    src = (
+        _OPTIONAL_COMMIT + 'def keep(item):\n    p = item["payload"]\n    return p.pop("commit")\n'
+    )
+    assert rp.source_problems(src) == []
+
+
+_MODULE_PAYLOAD = 'import json\nEVENTS = json.load(open("x"))\nbody = EVENTS[0]["payload"]\n'
+
+
+@pytest.mark.parametrize(
+    "fn",
+    [
+        'def title(body):\n    return body.get("title", "")\n',
+        'def title(*body):\n    return body.get("title", "")\n',
+        'def title(**body):\n    return body.get("title", "")\n',
+        'def title(meta):\n    body = meta\n    return body.get("title", "")\n',
+        'def title(meta):\n    for body in meta:\n        return body.get("title", "")\n',
+    ],
+)
+def test_a_local_name_shadows_a_module_payload_of_the_same_name(rp: ModuleType, fn: str) -> None:
+    """A parameter (or any name bound in the function) is not the module's payload."""
+    src = _MODULE_PAYLOAD + fn + 'def keep():\n    return title({"title": "t"})\n'
+    assert rp.source_problems(src) == []
+
+
+def test_a_global_declaration_keeps_the_module_payload(rp: ModuleType) -> None:
+    src = _MODULE_PAYLOAD + "def keep(x):\n    global body\n    if x:\n        body = {}\n"
+    src += '    return body.get("task")\n'
+    problems = rp.source_problems(src)
+    assert any("(payload.task) turns a missing key into a value" in p for p in problems), problems
+
+
+#: Reads through ``value`` only, so nothing but the declarations ties them to the events.
+ALIASED = {
+    "from-import alias": (
+        "from read_preflight import Expect as E, check, nonzero, value\n"
+        'X = E("builder.author_test.start", "commit")\n'
+    ),
+    "module alias": (
+        "import read_preflight as R\n"
+        "from read_preflight import check, nonzero, value\n"
+        'X = R.Expect("builder.author_test.start", "commit")\n'
+    ),
+}
+_VALUE_READ = (
+    "EVENT_EXPECTATIONS = (X,)\n"
+    "def n(evs):\n    check(evs, EVENT_EXPECTATIONS)\n"
+    '    return nonzero("n", sum(1 for e in evs if value(e, X)), len(evs))\n'
+)
+
+
+@pytest.mark.parametrize("form", sorted(ALIASED))
+def test_an_aliased_expect_is_declared_and_checked(
+    rp: ModuleType, tmp_path: Path, form: str
+) -> None:
+    source = ALIASED[form] + _VALUE_READ
+    assert rp.declared(source) == [rp.Expect("builder.author_test.start", "commit")]
+    no_commit = served_run([("build", "builder.author_test.start", {"task": "T"})])
+    done = _cli(tmp_path, source, no_commit)
+    assert done.returncode == 6, (done.stdout, done.stderr)
+    assert "payload.commit is on 0 of 1 events" in done.stderr
+
+
+def test_an_expect_of_another_module_is_not_a_declaration(rp: ModuleType) -> None:
+    assert rp.declared('import other\nX = other.Expect("a.b", "k")\n') == []
+
+
+UNEVALUABLE = {
+    "a name for the key": (
+        'KEY = "commit"\nX = read_preflight.Expect("builder.author_test.start", KEY)\n',
+        "line 3: read_preflight.Expect(...) cannot be read without running the script",
+    ),
+    "a splat": (
+        'A = ("builder.author_test.start", "commit")\nX = read_preflight.Expect(*A)\n',
+        "line 3: read_preflight.Expect(...) cannot be read without running the script",
+    ),
+    "a keyword splat": (
+        'K = {"key": "commit"}\nX = read_preflight.Expect("builder.author_test.start", **K)\n',
+        "line 3: read_preflight.Expect(...) cannot be read without running the script",
+    ),
+    "a refused declaration": (
+        'X = read_preflight.Expect("builder.author_test.start", "task")\n',
+        "line 2: read_preflight.Expect(...) is refused: builder.author_test.start: 'task' is "
+        "never kept in payload",
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(UNEVALUABLE))
+def test_a_declaration_that_cannot_be_read_is_a_problem(
+    rp: ModuleType, tmp_path: Path, shape: str
+) -> None:
+    decl, expected = UNEVALUABLE[shape]
+    source = (
+        "import read_preflight\n"
+        + decl
+        + "EVENT_EXPECTATIONS = (X,)\n"
+        + "def n(evs):\n    read_preflight.check(evs, EVENT_EXPECTATIONS)\n"
+        + '    return read_preflight.nonzero("n", sum(1 for e in evs\n'
+        + "        if read_preflight.value(e, X)), len(evs))\n"
+    )
+    problems = rp.source_problems(source)
+    assert any(expected in p for p in problems), problems
+    no_commit = served_run([("build", "builder.author_test.start", {"task": "T"})])
+    assert _cli(tmp_path, source, no_commit).returncode == 6
+
+
+#: ``commit`` is declared for the start events only; the read takes it from failed events.
+CROSS_ACTION = (
+    "import read_preflight\n"
+    'C = read_preflight.Expect("builder.author_test.start", "commit")\n'
+    'F = read_preflight.Expect("builder.author_test.failed", "task_id", "envelope")\n'
+    "EVENT_EXPECTATIONS = (C, F)\n"
+    "def n(events):\n    read_preflight.check(events, EVENT_EXPECTATIONS)\n"
+    "    failed = [e for e in events if read_preflight.has(e, F)]\n"
+    '    k = sum(1 for e in failed if e["payload"]["commit"])\n'
+    '    return read_preflight.nonzero("n", k, len(failed))\n'
+)
+
+
+def _start_and_failed() -> list[dict[str, Any]]:
+    return served_run(
+        [
+            ("build", "builder.author_test.start", {"task": "T", "commit": "c"}),
+            ("build", "builder.author_test.failed", {"task": "T"}),
+        ]
+    )
+
+
+def test_a_payload_read_is_checked_against_every_action_it_may_read(
+    rp: ModuleType, tmp_path: Path
+) -> None:
+    """Another action's declaration (or event) is no evidence for this lookup."""
+    problems = rp.source_problems(CROSS_ACTION)
+    assert (
+        "line 8: payload.commit is read but no Expect declares it for "
+        "builder.author_test.failed; a raw lookup is not tied to one action, so declare the "
+        "key for every action the script reads or read it with read_preflight.value"
+    ) in problems, problems
+    runtime = rp.preflight(CROSS_ACTION, _start_and_failed())
+    lacking = "payload.commit is read but is on 0 of 1 builder.author_test.failed events"
+    assert any(p.startswith(lacking) for p in runtime), runtime
+    done = _cli(tmp_path, CROSS_ACTION, _start_and_failed())
+    assert done.returncode == 6, done.stdout
+
+
+def test_a_key_declared_for_every_action_read_passes(rp: ModuleType) -> None:
+    both = CROSS_ACTION.replace(
+        "EVENT_EXPECTATIONS = (C, F)\n",
+        'G = read_preflight.Expect("builder.author_test.failed", "commit")\n'
+        "EVENT_EXPECTATIONS = (C, F, G)\n",
+    )
+    assert not [p for p in rp.source_problems(both) if "payload.commit" in p]
+
+
+#: A compliant reader that reads only through ``value``: ``reads(source)`` is empty.
+VALUE_ONLY = (
+    "import read_preflight\n"
+    'START = read_preflight.Expect("builder.author_test.start", "task_id", "envelope")\n'
+    "EVENT_EXPECTATIONS = (START,)\n"
+    "def started(events):\n    read_preflight.check(events, EVENT_EXPECTATIONS)\n"
+    "    tasks = {read_preflight.value(e, START) for e in events}\n"
+    '    return read_preflight.nonzero("started", len(tasks), len(events))\n'
+)
+
+
+def test_no_events_is_a_problem_even_for_a_value_only_read(rp: ModuleType, tmp_path: Path) -> None:
+    assert rp.reads(VALUE_ONLY) == set()
+    assert rp.preflight(VALUE_ONLY, _run()) == []
+    problems = rp.preflight(VALUE_ONLY, [], label="t")
+    assert problems == ["t: no events to read; a read over nothing proves nothing"]
+    done = _cli(tmp_path, VALUE_ONLY, [])
+    assert done.returncode == 6, done.stdout
+    assert "no events to read" in done.stderr
+
+
+def test_every_table_row_of_an_action_counts(rp: ModuleType) -> None:
+    """``build.start`` has a core row and a factory row; ``item`` is the factory row's."""
+    assert table_problems([rp.Expect("build.start", "item")]) == []
+    assert table_problems([rp.Expect("build.start", "trial")]) == []
+    assert table_problems([rp.Expect("build.start", "nope")]) == [
+        "table lacks payload.nope for build.start"
+    ]
+
+
+def test_an_annotated_field_name_counts_where_it_is_documented(rp: ModuleType) -> None:
+    """``status_at_request ∈ queued\\|running`` documents ``status_at_request``."""
+    assert table_problems([rp.Expect("run.cancel_requested", "status_at_request")]) == []
+    assert table_problems([rp.Expect("run.cancel_requested", "actor", "envelope")]) == []
+    assert table_problems([rp.Expect("run.cancel_requested", "actor")]) == [
+        "table lacks payload.actor for run.cancel_requested"
+    ]
+
+
+# -- review of #142, round 2 ---------------------------------------------------------------
+
+_COMMIT_ON_START = (
+    "import read_preflight\n"
+    'C = read_preflight.Expect("builder.author_test.start", "commit")\n'
+    "EVENT_EXPECTATIONS = (C,)\n"
+)
+_COUNT = (
+    "def n(events):\n    read_preflight.check(events, EVENT_EXPECTATIONS)\n"
+    "{pool}"
+    '    k = sum(1 for e in pool if "commit" in e["payload"])\n'
+    '    return read_preflight.nonzero("n", k, len(pool))\n'
+)
+#: Filters that pick events by a rule the static rule cannot read: each may take
+#: ``builder.author_test.failed`` events, on which ``commit`` is never served.
+UNREAD_FILTERS = {
+    "startswith": (
+        '    pool = [e for e in events if e["action"].startswith("builder.author_test")]\n'
+    ),
+    "a module set": ('    pool = [e for e in events if e["action"] in WANT]\n'),
+    "a helper's parameter": ('    pool = pick(events, "builder.author_test.failed")\n'),
+}
+_UNREAD_PRELUDE = (
+    'WANT = {"builder.author_test.start", "builder.author_test.failed"}\n'
+    'def pick(events, act):\n    return [e for e in events if e["action"] == act]\n'
+)
+
+
+@pytest.mark.parametrize("shape", sorted(UNREAD_FILTERS))
+def test_an_action_filter_the_rule_cannot_read_is_refused(
+    rp: ModuleType, tmp_path: Path, shape: str
+) -> None:
+    source = _COMMIT_ON_START + _UNREAD_PRELUDE + _COUNT.format(pool=UNREAD_FILTERS[shape])
+    problems = rp.source_problems(source)
+    assert any("an event's action is used other than compared with constant" in p for p in problems)
+    assert rp.preflight(source, _start_and_failed())
+    done = _cli(tmp_path, source, _start_and_failed())
+    assert done.returncode == 6, done.stdout
+
+
+def test_a_read_that_names_no_action_is_checked_against_every_action(
+    rp: ModuleType, tmp_path: Path
+) -> None:
+    """No filter at all: the read takes every event, so a declaration for one action is no
+    evidence that the failed events carry the key."""
+    source = _COMMIT_ON_START + _COUNT.format(pool="    pool = events\n")
+    assert rp.source_problems(source) == []
+    runtime = rp.preflight(source, _start_and_failed())
+    assert any(
+        p.startswith("payload.commit is read but is on 0 of 1 builder.author_test.failed")
+        and "the read names no action" in p
+        for p in runtime
+    ), runtime
+    assert _cli(tmp_path, source, _start_and_failed()).returncode == 6
+    filtered = _COMMIT_ON_START + _COUNT.format(
+        pool='    pool = [e for e in events if e["action"] == C.action]\n'
+    )
+    assert rp.preflight(filtered, _start_and_failed()) == []
+
+
+#: ``Expect`` reached other than by a direct call: none is a declaration the rule can read.
+HIDDEN_EXPECTS = {
+    "a local rebinding": (
+        'E = read_preflight.Expect\nX = E("builder.author_test.start", "commit")\n'
+    ),
+    "getattr": ('X = getattr(read_preflight, "Expect")("builder.author_test.start", "commit")\n'),
+    "functools.partial": (
+        "import functools\n"
+        'S = functools.partial(read_preflight.Expect, "builder.author_test.start")\n'
+        'X = S("commit")\n'
+    ),
+    "dataclasses.replace": (
+        "import dataclasses\n"
+        'Y = read_preflight.Expect("builder.author_test.start", "task_id", "envelope")\n'
+        'X = dataclasses.replace(Y, key="commit", where="payload")\n'
+    ),
+    "a second binding": (
+        'X = read_preflight.Expect("builder.author_test.start", "task_id", "envelope")\n'
+        'for X in [read_preflight.Expect("builder.author_test.start", "seq", "envelope")]:\n'
+        "    pass\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(HIDDEN_EXPECTS))
+def test_an_expectation_the_rule_cannot_see_declared_is_refused(
+    rp: ModuleType, tmp_path: Path, shape: str
+) -> None:
+    source = (
+        "import read_preflight\n"
+        + HIDDEN_EXPECTS[shape]
+        + "EVENT_EXPECTATIONS = (X,)\n"
+        + "def n(evs):\n    read_preflight.check(evs, EVENT_EXPECTATIONS)\n"
+        + '    return read_preflight.nonzero("n", sum(1 for e in evs\n'
+        + "        if read_preflight.value(e, X)), len(evs))\n"
+    )
+    problems = rp.source_problems(source)
+    assert any("is handed an expectation the rule cannot see declared" in p for p in problems), (
+        problems
+    )
+    no_commit = served_run([("build", "builder.author_test.start", {"task": "T"})])
+    assert rp.preflight(source, no_commit)
+    assert _cli(tmp_path, source, no_commit).returncode == 6
+
+
+def test_a_rebound_expect_is_named_as_such(rp: ModuleType) -> None:
+    source = "import read_preflight\nE = read_preflight.Expect\n"
+    assert rp.source_problems(source) == [
+        "line 2: read_preflight.Expect is used other than in a direct call; the rule reads a "
+        "declaration only as read_preflight.Expect(<constants>)"
+    ]
+
+
+@pytest.mark.parametrize(
+    "fn",
+    [
+        'def title(x):\n    return (lambda body: body.get("title", ""))(x)\n',
+        'def title(x):\n    return [body.get("title", "") for body in x]\n',
+        'def title(x):\n    def inner(body):\n        return body.get("title", "")\n'
+        "    return inner(x)\n",
+    ],
+)
+def test_a_nested_scope_name_shadows_a_module_payload(rp: ModuleType, fn: str) -> None:
+    src = _MODULE_PAYLOAD + fn + 'def keep():\n    return title([{"title": "t"}])\n'
+    assert rp.source_problems(src) == []
+
+
+def test_a_nested_scope_still_sees_what_it_does_not_bind(rp: ModuleType) -> None:
+    """A closure over an enclosing payload, and a mark made inside a comprehension, still
+    count: the nested scope only hides the names it binds."""
+    closure = (
+        'def keep(item):\n    p = item["payload"]\n'
+        '    def inner():\n        return p.get("task")\n    return inner()\n'
+    )
+    assert any("(payload.task) turns a missing key" in p for p in rp.source_problems(closure))
+    marked = (
+        "def keep(item, rows):\n"
+        '    n = sum(1 for r in rows if item["action"] == "builder.author_test.start")\n'
+        '    return item.get("task_id")\n'
+    )
+    assert any("(envelope.task_id) turns a missing key" in p for p in rp.source_problems(marked))
+
+
+@pytest.mark.parametrize("events", ['{"events": null}', "null", "5", '"x"', '{"events": {}}'])
+def test_events_that_are_not_a_list_exit_6(rp: ModuleType, tmp_path: Path, events: str) -> None:
+    script, data = tmp_path / "a_read.py", tmp_path / "events.json"
+    script.write_text(GOOD_READ, encoding="utf-8")
+    data.write_text(events, encoding="utf-8")
+    done = subprocess.run(
+        [sys.executable, str(SCRIPT), "--script", str(script), "--events", str(data)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 6, done.stderr
+    assert "not a list" in done.stderr
+    loaded = json.loads(events)
+    inner = loaded.get("events", loaded) if isinstance(loaded, dict) else loaded
+    with pytest.raises(rp.PreflightError, match="not a list"):
+        rp.check(inner, [])
+
+
+def test_an_unreadable_declaration_names_its_argument_stably(rp: ModuleType) -> None:
+    decl, _expected = UNEVALUABLE["a name for the key"]
+    problems = rp.source_problems("import read_preflight\n" + decl)
+    assert problems == [
+        "line 3: read_preflight.Expect(...) cannot be read without running the script (KEY is "
+        "not a constant); write its arguments as constants"
+    ]
+    splat, _expected = UNEVALUABLE["a keyword splat"]
+    assert "(**K is not a constant)" in rp.source_problems("import read_preflight\n" + splat)[0]
+
+
+#: Ways to read a key of a payload as a value that the lookup forms alone did not see.
+VALUE_READS = {
+    "walrus getter": "(f := p.get)('commit')",
+    "a copy": "p.copy().get('commit')",
+    "dict unpacking": "{**p}.get('commit')",
+    "type(p).get": "type(p).get(p, 'commit')",
+    "ChainMap": "collections.ChainMap(p).get('commit')",
+    "methodcaller": "operator.methodcaller('get', 'commit')(p)",
+    "__getitem__": "p.__getitem__('commit')",
+    "items": "next((v for k, v in p.items() if k == 'commit'), None)",
+    "getattr other": "getattr(p, '__getitem__')('commit')",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(VALUE_READS))
+def test_every_other_way_to_read_a_payload_is_flagged(rp: ModuleType, shape: str) -> None:
+    src = (
+        "import collections, operator\n"
+        + _OPTIONAL_COMMIT
+        + f'def keep(item):\n    p = item["payload"]\n    return {VALUE_READS[shape]}\n'
+    )
+    assert rp.source_problems(src), shape
