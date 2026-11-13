@@ -394,6 +394,11 @@ def test_a_changed_file_that_maps_to_no_test_gets_a_note() -> None:
     assert len(notes) == 1 and notes[0].startswith("docs/CONTRIBUTING.md maps to no test")
 
 
+def test_a_changed_git_hook_selects_the_tests_that_run_it() -> None:
+    tests, notes = pre_push.tests_for(["scripts/hooks/pre-push"])
+    assert tests == ["tests/test_pre_push.py"] and notes == []
+
+
 def _gates(*required: str | None) -> tuple[Any, ...]:
     """Gates that pass at once, each needing ``required`` (``None``: nothing) to run."""
     return tuple(
@@ -632,6 +637,7 @@ def _hook_run(
     monkeypatch.setattr(pre_push, "dirty_paths", lambda: [])
     monkeypatch.setattr(pre_push, "changed_files", lambda base: changed)
     monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
+    monkeypatch.setattr(pre_push, "not_checked_out", lambda shas: [])
     monkeypatch.delenv(pre_push.TITLE_ENV, raising=False)
     return int(pre_push.main(["--hook", "--base", "HEAD"]))
 
@@ -655,7 +661,6 @@ def test_the_hook_stops_a_push_whose_gate_fails(
     assert _hook_run(monkeypatch, (failing,), [], _PUSH_LINE) == 1
     out = capsys.readouterr().out
     assert "0 passed, 1 failed, 0 not run (--fast)" in out
-    assert "not this checkout's HEAD" in out
 
 
 def test_in_the_hook_a_gate_not_run_stops_the_push_unless_it_could_hide_nothing(
@@ -670,6 +675,11 @@ def test_in_the_hook_a_gate_not_run_stops_the_push_unless_it_could_hide_nothing(
     assert pre_push.hook_tolerates(title, ["ui/src/a.ts"])
     assert pre_push.hook_tolerates(folder, ["src/crb/x.py", "uix/a.ts"])
     assert not pre_push.hook_tolerates(folder, ["ui/src/a.ts"])
+    reader = pre_push.Gate(
+        "reader", ("python", "-c", "pass"), (), cwd="ui", requires="ui/no-such-dir", reads=("docs",)
+    )
+    assert not pre_push.hook_tolerates(reader, ["docs/adr/0099-new.md"])
+    assert pre_push.hook_tolerates(reader, ["docsite/x.md", "src/crb/x.py"])
     assert _hook_run(monkeypatch, (title, folder), ["src/crb/x.py"], _PUSH_LINE) == 0
     assert "2 not run" in capsys.readouterr().out
     assert _hook_run(monkeypatch, (title, folder), ["ui/src/a.ts"], _PUSH_LINE) == 3
@@ -685,6 +695,7 @@ def test_the_hook_reads_the_title_from_the_environment(
     monkeypatch.setattr(pre_push, "dirty_paths", lambda: [])
     monkeypatch.setattr(pre_push, "changed_files", lambda base: [])
     monkeypatch.setattr(sys, "stdin", io.StringIO(_PUSH_LINE))
+    monkeypatch.setattr(pre_push, "not_checked_out", lambda shas: [])
     monkeypatch.setenv(pre_push.TITLE_ENV, "not a conventional subject")
     assert pre_push.main(["--hook", "--base", "HEAD"]) == 1
     assert "0 passed, 1 failed, 0 not run" in capsys.readouterr().out
@@ -701,3 +712,53 @@ def test_a_run_outside_the_hook_says_when_the_hook_is_not_installed(
     monkeypatch.setattr(pre_push, "hook_installed", lambda: True)
     assert pre_push.main(["--base", "HEAD"]) == 0
     assert "--install-hook" not in capsys.readouterr().out
+
+
+def test_the_ui_gates_are_not_waived_for_a_push_that_changes_the_docs_they_read() -> None:
+    """The UI suites read ``docs`` (``ui/src/help/adrs.test.ts`` globs ``docs/adr``): every
+    ``../../../<folder>`` a UI test names must be a folder the UI gates declare they read."""
+    named = set()
+    for path in (ROOT / "ui" / "src").rglob("*.ts*"):
+        named.update(re.findall(r"(?:\.\./){3,}(\w[\w-]*)/", path.read_text(encoding="utf-8")))
+    ui_gates = [g for g in pre_push.GATES if g.cwd == "ui"]
+    assert ui_gates and "docs" in named
+    for gate in ui_gates:
+        assert named - {"ui"} <= set(gate.reads), (gate.name, named)
+
+
+def test_not_checked_out_reads_a_tag_as_its_commit_and_keeps_every_other_ref(clone: Path) -> None:
+    head = _git_in(clone, "rev-parse", "HEAD").stdout.strip()
+    _git_in(
+        clone, "-c", "user.name=t", "-c", "user.email=t@example.com", "tag", "-a", "v1", "-m", "v1"
+    )
+    tag = _git_in(clone, "rev-parse", "v1").stdout.strip()
+    assert tag != head
+    assert pre_push.not_checked_out([head, tag], clone) == []
+    (clone / "new.txt").write_text("x", encoding="utf-8")
+    _git_in(clone, "add", "new.txt")
+    _git_in(clone, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "two")
+    assert pre_push.not_checked_out([head, tag], clone) == [head, tag]
+    assert pre_push.not_checked_out(["f" * 40], clone) == ["f" * 40]
+
+
+def test_the_hook_stops_a_push_that_sends_anything_but_head(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two refs, one of them HEAD: the other would leave unchecked, so the push stops before
+    any gate runs."""
+    head = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    other = "b" * 40
+    lines = f"refs/heads/a {head} refs/heads/a {'0' * 40}\nrefs/heads/b {other} refs/heads/b {'0' * 40}\n"
+    passing = _gates(None)
+    monkeypatch.setattr(pre_push, "GATES", passing)
+    monkeypatch.setattr(pre_push, "dirty_paths", lambda: [])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(lines))
+    assert pre_push.main(["--hook", "--base", "HEAD"]) == 3
+    captured = capsys.readouterr()
+    assert other[:12] in captured.err and head[:12] not in captured.err
+    assert "passed" not in captured.out
+    monkeypatch.setattr(sys, "stdin", io.StringIO(lines.splitlines()[0] + "\n"))
+    monkeypatch.setattr(pre_push, "changed_files", lambda base: [])
+    assert pre_push.main(["--hook", "--base", "HEAD"]) == 0

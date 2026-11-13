@@ -30,11 +30,15 @@ NOT RUN and the exit is 3, unless ``--allow-skip`` accepts it.
 **The git hook.** ``--install-hook`` points this clone's ``core.hooksPath`` at
 ``scripts/hooks``, whose ``pre-push`` runs ``--hook`` before a push leaves: the ``--fast`` set,
 with the title read from ``CRB_PR_TITLE`` when it is set. In the hook a gate NOT RUN stops the
-push, with two exceptions that cannot hide a failure the push carries: the title gate when no
-title is known (a pull request may not exist yet), and a gate whose folder (``ui``) holds no
-changed file. A push that only deletes refs runs nothing. ``git push --no-verify`` skips every
-git hook, this one included, and nothing local can stop that: CI remains the gate. A run
-outside the hook says so when the hook is not installed.
+push, with two exceptions: the title gate when no title is known (a pull request may not
+exist yet), and a gate whose own folder and the folders it reads (``ui`` and ``docs`` for the
+UI gates) hold no changed file. The gates check what is checked out, so a push that sends
+anything but this checkout's ``HEAD`` (another branch, several refs, a tag on an older
+commit) is stopped with exit 3. Once the hook has found an interpreter, a push that only
+deletes refs runs no gate. A worktree whose branch does not carry ``scripts/hooks`` has no
+hook to run. ``git push --no-verify`` skips every git hook, this one included, and nothing
+local can stop that: CI remains the gate. A run outside the hook says so when the hook is not
+installed.
 
 Nothing here fetches: ``--base`` (``origin/main``) is read as it is in this clone, so a stale
 one widens the range the subjects and ``--fast`` read. CI sees only commits; a dirty tree is
@@ -149,6 +153,9 @@ class Gate:
     env: dict[str, str] = field(default_factory=dict)
     #: a path (from the root) the gate needs; when it is missing the gate is NOT RUN, and said
     requires: str | None = None
+    #: folders outside ``cwd`` whose files the gate also reads (the UI tests read ``docs``);
+    #: the hook lets the gate go NOT RUN only when the push changes nothing it reads
+    reads: tuple[str, ...] = ()
     #: stream the output (the suite) instead of showing it only on failure
     stream: bool = False
 
@@ -218,6 +225,7 @@ GATES: tuple[Gate, ...] = (
         (r"(ui-unit|fresh-clone-gates): npm run typecheck",),
         cwd="ui",
         requires="ui/node_modules",
+        reads=("docs",),
     ),
     Gate(
         "vitest run (ui-unit)",
@@ -225,6 +233,7 @@ GATES: tuple[Gate, ...] = (
         (r"(ui-unit|fresh-clone-gates): npx vitest run",),
         cwd="ui",
         requires="ui/node_modules",
+        reads=("docs",),
     ),
     Gate(
         "commit subjects since --base (commit-subjects)",
@@ -603,12 +612,19 @@ def changed_files(base: str) -> list[str]:
     return sorted(names)
 
 
+#: Where the tracked git hooks live, from the root; ``--install-hook`` points git at it.
+HOOKS_DIR = "scripts/hooks"
+#: The title the hook checks, when the author has one before the pull request exists.
+TITLE_ENV = "CRB_PR_TITLE"
+
+
 def tests_for(paths: Sequence[str]) -> tuple[list[str], list[str]]:
     """The test files that cover ``paths``, and a note for each path no test file maps from.
 
     A test file is its own test; any other file is covered by the ``tests/*.py`` its header's
     ``Tested by`` names (scripts/code_map.py reads the header) and by ``tests/test_<stem>.py``
-    when that exists. A deleted path has no header to read: a deleted test file is not run,
+    when that exists; a git hook under ``scripts/hooks`` has no header and is covered by
+    ``tests/test_pre_push.py``. A deleted path has no header to read: a deleted test file is not run,
     and a deleted source maps to ``tests/test_<stem>.py`` alone."""
     found: set[str] = set()
     notes: list[str] = []
@@ -631,6 +647,8 @@ def tests_for(paths: Sequence[str]) -> tuple[list[str], list[str]]:
         guess = f"tests/test_{path.stem}.py"
         if (ROOT / guess).is_file():
             named.add(guess)
+        if rel.startswith(f"{HOOKS_DIR}/"):
+            named.add("tests/test_pre_push.py")
         mapped = {n for n in named if (ROOT / n).is_file()}
         if not mapped:
             notes.append(f"{rel} maps to no test: only the ratchets and the full run read it")
@@ -693,12 +711,6 @@ def not_run_here() -> list[str]:
         "of the tests before it can pass here and fail there, or the reverse"
     )
     return lines
-
-
-#: Where the tracked git hooks live, from the root; ``--install-hook`` points git at it.
-HOOKS_DIR = "scripts/hooks"
-#: The title the hook checks, when the author has one before the pull request exists.
-TITLE_ENV = "CRB_PR_TITLE"
 
 
 def _git_out(root: Path, *args: str) -> str:
@@ -768,14 +780,22 @@ def pushed_shas(stdin_text: str) -> list[str]:
 
 
 def hook_tolerates(gate: Gate, changed: Sequence[str]) -> bool:
-    """In the hook a gate NOT RUN stops the push unless it cannot hide a failure the push
-    carries: the title gate with no title known, or a gate that needs a path missing here
-    and whose own folder holds no changed file."""
+    """In the hook a gate NOT RUN stops the push unless the push changes nothing the gate
+    reads: the title gate with no title known, or a gate that needs a path missing here when
+    no changed file is under its own folder or a folder it ``reads``."""
     if gate.argv == ("<title>",):
         return True
     if gate.requires and gate.cwd != "." and not (ROOT / gate.requires).exists():
-        return not any(path.startswith(f"{gate.cwd}/") for path in changed)
+        folders = (gate.cwd, *gate.reads)
+        return not any(path.startswith(f"{folder}/") for path in changed for folder in folders)
     return False
+
+
+def not_checked_out(shas: Sequence[str], root: Path = ROOT) -> list[str]:
+    """The pushed objects that are not ``root``'s ``HEAD`` commit. An annotated tag is read
+    as the commit it names; one git cannot resolve is kept, since nothing here checked it."""
+    head = _git_out(root, "rev-parse", "HEAD")
+    return [s for s in shas if _git_out(root, "rev-parse", f"{s}^{{commit}}") != head or not head]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -818,17 +838,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.hook:
         shas = pushed_shas(sys.stdin.read())
         if not shas:
-            print("pre_push: this push sends no commit (deletions only); no gate runs")
+            print("pre_push: this push sends no commit (no ref, or deletions only); no gate runs")
             return 0
+        other = not_checked_out(shas)
+        if other:
+            print(
+                "pre_push: exit 3 — the push is stopped: it sends "
+                f"{', '.join(sha[:12] for sha in other)}, which is not this checkout's HEAD, "
+                "and the gates can only check what is checked out. Check that ref out (a "
+                "worktree will do) and push it from there, one ref at a time.",
+                file=sys.stderr,
+            )
+            return 3
         args.fast = True
         args.title = args.title or os.environ.get(TITLE_ENV) or None
-        head = _git_out(ROOT, "rev-parse", "HEAD")
-        if head not in shas:
-            print(
-                "pre_push: WARNING — the push sends a commit that is not this checkout's HEAD; "
-                "the gates below check what is checked out here, not what is pushed",
-                flush=True,
-            )
     if not args.list and not base_is_commit(args.base):
         print(
             f"pre_push: --base {args.base} is not a commit in this clone; run "

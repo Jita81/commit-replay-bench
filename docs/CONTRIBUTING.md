@@ -67,7 +67,9 @@ instead of the whole suite; `--list` prints what it covers.
 It covers every worktree of the clone whose branch carries `scripts/hooks`. Set `CRB_PR_TITLE`
 to have the hook check the title too; it uses the checkout's `.venv`, or `CRB_PYTHON`, and
 refuses the push when it finds neither. In the hook a gate that cannot run stops the push,
-unless it is the title with none given or a `ui` gate when no `ui` file changed.
+unless it is the title with none given or a `ui` gate when no `ui` or `docs` file changed.
+The gates check what is checked out, so the hook also stops a push of anything but the
+checkout's `HEAD`: push each branch from a checkout of it.
 `git push --no-verify` skips every git hook, this one included, so CI stays the gate.
 
 No test may fail because of the machine it runs on **[aspiration — the rule DL-053 sets; the
