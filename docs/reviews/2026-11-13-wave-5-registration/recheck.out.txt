@@ -1,4 +1,5 @@
 == 1 lists
+[hypothesis — design input: sha256 over the 12 C1 and 11 L2 names; exact arithmetic on stated inputs, no sample; not a measurement of the product]
 C2 order ok: True
 sha C1: b38fb8b6b8de3bf50ebc88b54e6dd54c1d9578bc2c5209c47fcc8350a612a1de
 L2 order ok: True
@@ -28,6 +29,7 @@ run order of C1 names (crb.w5.run):
    hashicorp/go-version C1
    hynek/structlog C1
 == 2 costs
+[hypothesis — cost and time projection from Wave 4's rate over 120 commit-arms; unconfirmed]
 rate 0.400963
 6 80 32.08 80.19 81 0 -49.83
 7 92 36.89 92.22 93 0 -37.8
@@ -42,6 +44,7 @@ D2 n10 340 136.33 340.82 D2 n7 250 100.24 250.6
 author n10 central 0.177 D2 S1 220 0.305
 hours n10 10.51 n6 6.57
 == 3 p floors and method A
+[hypothesis — exact sign test and binomial power at q = 11/12, n = 5..12; exact arithmetic on stated inputs, no sample; not a measurement of the product]
 5 0.0625
 6 0.03125
 7 0.015625
@@ -58,6 +61,7 @@ n=10 needs 9/10 power 0.7997
 n=11 needs 10/11 power 0.7680
 n=12 needs 10/12 power 0.9280
 == 4 method B: sign-flip, D_r~N(z,1), my seed
+[hypothesis — 3,000 simulated waves a cell for n = 6..10 and 1,500 for n = 11, 12, seed 777; simulation under stated assumptions, not a measurement of the product]
 z 1.383
 n=6 B 0.590 se 0.009
 n=7 B 0.837 se 0.007
@@ -67,6 +71,7 @@ n=10 B 0.968 se 0.003
 n=11 B 0.985 se 0.003
 n=12 B 0.992 se 0.002
 == 5 K sets
+[hypothesis — seven synthetic sets, exact sign-flip and t; exact arithmetic on stated inputs, no sample; not a measurement of the product]
 K1 (-50.0, 0.0078125, 8, 0.0, 'Worse')
 K2 (0.0, 1.0, 8, 7.1608, 'Within 15')
 K3 (-33.3333, 0.0625, 5, 13.4337, 'Undecided')
@@ -75,6 +80,7 @@ K5 (-17.0, 0.00390625, 10, 5.4993, 'Worse')
 K6 (0.0, 1.0, 8, 7.1608, 'Undecided')
 K7 (-36.1111, 0.03125, 6, 5.5974, 'Worse')
 == 6 discrete sim, my implementation
+[hypothesis — 600 simulated waves a cell for n = 6..8, 400 for n = 10 and 800 a thin-repository cell, one stream, seed 4242; simulation under stated assumptions, not a measurement of the product]
 t0.95 {5: 2.015, 6: 1.9432, 7: 1.8946, 8: 1.8595, 9: 1.8331, 10: 1.8125, 11: 1.7959}
 tau=0.1 delta=0.0 n=6 {'dec': 0.0, 'w15': 0.032, 'und': 0.96, 'und_lt6': 0.763, 'wrong': 0.008}
 tau=0.1 delta=0.0 n=7 {'dec': 0.0, 'w15': 0.14, 'und': 0.843, 'und_lt6': 0.428, 'wrong': 0.017}

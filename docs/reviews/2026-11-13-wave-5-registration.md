@@ -1294,10 +1294,10 @@ is run with `python3 -I <script> > <output>` from that folder; a re-run on 2026-
 
 | Script | sha256 of the script | Output | sha256 of the output |
 |---|---|---|---|
-| `w5v3_calc.py` | `aeb7618d70058c59e6877d3418c8ad08402ac2db6b393d046bda6975c93f1a21` | `w5v3_calc.out.txt` | `1feb560cd9f7b353f524ee2f5b8c2ebdfe964328285d6f0d2888b00faaab59e1` |
-| `recheck.py` | `0a12c18f6cbacecec099bde3f05e7c3ae70703a25329cd8f7cf6357dc6817fe8` | `recheck.out.txt` | `3e5c165e54daed6faa3ac679582247c4fb7a9784e352d73d2ed0e30cf87ff409` |
-| `w5_calc.py` | `34be7a5ddf3ab571ac958758fb43d4bf093f73784d69d202b17a6becbc31d034` | `w5_calc.out.txt` | `3b12685e54a3fcb97f54fc48485e02c84ffb16f45852ed8772363dbcbd982bb7` |
-| `regcheck.py` | `8caab374570b0cf474887d86d36810c28f2c192f927dbc45052a139300034317` | `regcheck.out.txt` | `971b651de1a5f4872203b5310332e5db3508e338cf9979decca5036694e8e262` |
+| `w5v3_calc.py` | `842d57c32ca304a363c0646dc39cb880bb274d9232009ae95bd49cec3468f4ae` | `w5v3_calc.out.txt` | `c9ec2a027aa54512376f47e9e1e26d59a8b4ab5b2c0cd4f4ffbe5634a325a5c4` |
+| `recheck.py` | `1494ec338540ec0359daa92f820496f9da59249640cb08379a73d4a1b781c1c9` | `recheck.out.txt` | `14a451f189feff8a4cde0ac9cb445ebbc520356ba7540405c6dccdbde1bb31e5` |
+| `w5_calc.py` | `b9e80ef4ab1d42cf38e137a56e1b5af8765daa84c945edfcdad54913e5698132` | `w5_calc.out.txt` | `ca053315d5600520e5c2b65391891ca64489c5a3241d49ae3262b225467f5352` |
+| `regcheck.py` | `0eacc88160f4676113c9239481df98a2da7541aa6a44d2dbbfd98cc33d767c40` | `regcheck.out.txt` | `75e40784d0f852d826085f862f03f5944300dce01bee4469f099e1b6ca0b4031` |
 
 `w5v3_calc.py` makes every figure of this appendix. `recheck.py` is the forking-path check's
 independent recomputation (seeds 777 and 4242), which matched every figure within Monte Carlo
@@ -1308,15 +1308,20 @@ Notes: in part 4, the last column is "any decisive word" when delta is 0, which 
 call rate at a null effect; for a negative delta it is a decisive word of the wrong sign. The
 known-answer sets in part 6 are written in points. In part 2, "lift over 130.02" is the line
 minus $130.02, as in section 7.3; the bracketed "high minus 130.02" is shown for reference only.
+In part 5, P(Worse) counts every Worse word, so at delta 0 it is the false-Worse rate (0.009
+in both rows); it was printed as 0.000 by construction before review. Each part's first line
+is its claim tag, printed by the script, with its method and its sample size or seed.
 
 ```
 ======== 1. C1 in C2 order and L2, recomputed
+[hypothesis — design input: sha256 over the 12 C1 and 11 L2 names; exact arithmetic on stated inputs, no sample; not a measurement of the product]
 sha256(C1 in C2 order) = b38fb8b6b8de3bf50ebc88b54e6dd54c1d9578bc2c5209c47fcc8350a612a1de match: True
 L2 order unchanged: True
 sha256(L2 in hash order) = c62cf5f1f39b336e9842b43beb9794cf848051bb84078ba1331213bfa84e8145 match: True
 seeded-order key example (R11 item 5, Wave 4 part 2 step 2): crb.reading.v1|<repo>|<cell key>|<commit>
 
 ======== 2. Costs, product dollars, unconfirmed
+[hypothesis — cost and time projection from Wave 4's rate over 120 commit-arms and its 49 runs; unconfirmed]
 rate per commit-arm (2 attempts) = 48.115522/120 = 0.400963; left = 130.02
 high per full repository = 6 commits x 2 arms x 0.400963 x 2.5 = 12.0289
 pilot high = 8 x 0.400963 x 2.5 = 8.0193
@@ -1350,6 +1355,7 @@ D2 n=7  m=10 (A0,S1,W; pilot 10 commits x 4 arms): 250 commit-arms, central 100.
 D2 S1 attempts n=10: (100 + 10) x 2 = 220 ; author central = 0.305
 
 ======== 3. Power at q = 11/12, n = 6..12, alpha 0.05 (J = 1)
+[hypothesis — method A exact binomial; method B 4,000 simulated waves a cell, seed 20261123; simulation under stated assumptions, not a measurement of the product]
 method A: exact sign test, equal magnitudes (binomial); method B: exact sign-flip,
 unit difference ~ Normal(z,1), z = Phi^-1(11/12) = 1.3830, 4000 waves a cell, seed 20261123
 n= 6: A 0.593 (needs >= 6 of 6 same sign) | B 0.595 (MC s.e. 0.008) | p_min 2/2^n = 0.031250
@@ -1361,6 +1367,7 @@ n=11: A 0.768 (needs >= 10 of 11 same sign) | B 0.985 (MC s.e. 0.002) | p_min 2/
 n=12: A 0.928 (needs >= 10 of 12 same sign) | B 0.991 (MC s.e. 0.001) | p_min 2/2^n = 0.000488
 
 ======== 4. Discrete simulation of the D3 read, n = 6..12 (model as v2 appendix A part 6)
+[hypothesis — 1,000 simulated waves a cell, seed 20261133; simulation under stated assumptions, not a measurement of the product]
 A0 repo mean ~ N(0.7,0.15) clipped; commit chance Beta, ICC 0.25; S1 shift per repo
 ~ N(delta, tau_e); 2 attempts/arm; m = 6; 1,000 waves a cell; seed 20261133
 cols: P(correct Better/Worse) | P(Within 15) | P(Undecided) | P(Undecided and n' < 6) | P(wrong-sign decisive)
@@ -1408,12 +1415,15 @@ tau_e=0.20 delta=-0.46 n=11: 0.999 | 0.000 | 0.001 | 0.000 | 0.000
 tau_e=0.20 delta=-0.46 n=12: 0.999 | 0.000 | 0.001 | 0.000 | 0.000
 
 ======== 5. One thin R11 repository (m_r = 2: one XS, one S) among n = 7, tau_e 0.10
-delta=+0.00 thin repos=0: P(Worse)=0.000 P(Within 15)=0.114
-delta=+0.00 thin repos=1: P(Worse)=0.000 P(Within 15)=0.056
+[hypothesis — 1,000 simulated waves a cell, seed 20261143; simulation under stated assumptions, not a measurement of the product]
+P(Worse) counts every Worse word, so at delta 0 it is the false-Worse rate
+delta=+0.00 thin repos=0: P(Worse)=0.009 P(Within 15)=0.114
+delta=+0.00 thin repos=1: P(Worse)=0.009 P(Within 15)=0.056
 delta=-0.46 thin repos=0: P(Worse)=0.987 P(Within 15)=0.000
 delta=-0.46 thin repos=1: P(Worse)=0.967 P(Within 15)=0.000
 
 ======== 6. Known-answer sets K1..K7 through the registered word rule (J = 1)
+[hypothesis — seven synthetic sets, exact sign-flip and t; exact arithmetic on stated inputs, no sample; not a measurement of the product]
 K1 eight repos all -50: D=-50.0000 p=0.0078125 (2/256) nonzero=8 90% half-width=0.0000 -> Worse
 K2 eight repos +-10 alternating: D=+0.0000 p=1.0000000 (256/256) nonzero=8 90% half-width=7.1608 -> Within 15
 K3 six repos, one 0, five -40: D=-33.3333 p=0.0625000 (4/64) nonzero=5 90% half-width=13.4337 -> Undecided
@@ -1440,7 +1450,11 @@ Figures carried unchanged from version 2 (script `w5_calc.py` and its output
 `w5_calc.out.txt`, filed beside this page, independently matched by the checker's
 `regcheck.py`, output `regcheck.out.txt`): the per-name C1 and L2 hashes (part 1), the t
 quantiles (part 3), and the q(m) normal-model table (part 5). Version 2's part 7 (W pilot
-rule) and its D2 figures at n = 7 are withdrawn.
+rule) and its D2 figures at n = 7 are withdrawn. On review, `w5_calc.py` part 6 now counts
+Within 15 at every effect (it had counted it only at effect 0) and prints the seed it uses,
+20261114; none of part 6's figures is quoted on this page **[measured — n = 1 file, method:
+code read of `w5_calc.py` and a re-run with `python3 -I`, compared byte for byte twice,
+apparatus n/a]**.
 
 ## Closing table: findings and rulings to sections
 

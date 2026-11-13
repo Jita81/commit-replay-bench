@@ -1,5 +1,6 @@
 
 ======== 1. C1 in C2 order (recomputed) and the second list L2
+[hypothesis — design input: sha256 over the 12 C1 and 11 L2 names; exact arithmetic on stated inputs, no sample; not a measurement of the product]
 C2  1 gorilla/mux                      0c423f70451c20084e6e23ee26d0c8527b9f001f4c14123754ed8b72ad6e8ffb
 C2  2 jpadilla/pyjwt                   1570d839d6ea6d427c7f5c078e6b3249ac81b9f84eb37fa6baf8ba925e44031b
 C2  3 rs/zerolog                       3e1c2a5b20c514db528e02fc2ebed837b4eec44aee82a53cca6c4e69476bff9c
@@ -29,6 +30,7 @@ sha256(L2 list in hash order, one owner/name a line, newline-ended) = c62cf5f1f3
 L2 size 11 ; C1 size 12 ; names to qualify 23
 
 ======== 2. p_min and the exact sign test
+[hypothesis — exact sign test and binomial power, n = 5..10; exact arithmetic on stated inputs, no sample; not a measurement of the product]
 n= 5 2^n=   32 p_min=2/2^n=0.0625000  one dissenter (sign test)=0.37500  reachable at 0.05:False  at 0.025:False
 n= 6 2^n=   64 p_min=2/2^n=0.0312500  one dissenter (sign test)=0.21875  reachable at 0.05:True  at 0.025:False
 n= 7 2^n=  128 p_min=2/2^n=0.0156250  one dissenter (sign test)=0.12500  reachable at 0.05:True  at 0.025:True
@@ -43,6 +45,7 @@ sign test power q=11/12 n=10: alpha .05 0.800  alpha .025 0.800
 (11/12)^6=0.5933 (11/12)^8=0.4985 (11/12)^10+10(11/12)^9(1/12)=0.7997
 
 ======== 3. t quantiles used by the intervals
+[hypothesis — bisection on a numeric t cdf; exact arithmetic on stated inputs, no sample; not a measurement of the product]
 df= 5 t(0.95)=2.0150 t(0.975)=2.5706
 df= 6 t(0.95)=1.9432 t(0.975)=2.4469
 df= 7 t(0.95)=1.8946 t(0.975)=2.3646
@@ -52,6 +55,7 @@ df=11 t(0.95)=1.7959 t(0.975)=2.2010
 check: t(0.975,11) should be 2.2010 -> 2.201
 
 ======== 4. Sign-flip power, unit difference ~ Normal(z,1), z = Phi^-1(q); 3000 waves
+[hypothesis — 3,000 simulated waves a cell, seed 20261113; simulation under stated assumptions, not a measurement of the product]
 q      n=6:a.05/a.025  n=7:a.05/a.025  n=8:a.05/a.025  n=9:a.05/a.025  n=10:a.05/a.025
 0.990      0.94/0.00      1.00/0.93      1.00/1.00      1.00/1.00      1.00/1.00
 0.917      0.59/0.00      0.82/0.55      0.90/0.79      0.95/0.88      0.97/0.93
@@ -60,6 +64,7 @@ q      n=6:a.05/a.025  n=7:a.05/a.025  n=8:a.05/a.025  n=9:a.05/a.025  n=10:a.05
 0.750      0.18/0.00      0.30/0.13      0.36/0.23      0.41/0.28      0.47/0.32
 
 ======== 5. q per repository from effect, tau, s_c, m: q = Phi(effect / sqrt(tau^2+s_c^2/m))
+[hypothesis — normal model on assumed effect, tau, s_c and m; exact arithmetic on stated inputs, no sample; not a measurement of the product]
 s_c=45 tau=10: eff15[m5:0.748 m6:0.763 m10:0.806 m20:0.855] | eff25[m5:0.867 m6:0.884 m10:0.925 m20:0.961] | eff30[m5:0.909 m6:0.924 m10:0.958 m20:0.983] | eff46[m5:0.980 m6:0.986 m10:0.996 m20:0.999]
 s_c=45 tau=15: eff15[m5:0.725 m6:0.736 m10:0.766 m20:0.797] | eff25[m5:0.840 m6:0.854 m10:0.887 m20:0.917] | eff30[m5:0.884 m6:0.897 m10:0.927 m20:0.952] | eff46[m5:0.967 m6:0.974 m10:0.987 m20:0.995]
 s_c=45 tau=20: eff15[m5:0.701 m6:0.710 m10:0.729 m20:0.749] | eff25[m5:0.811 m6:0.821 m10:0.846 m20:0.868] | eff30[m5:0.855 m6:0.865 m10:0.889 m20:0.910] | eff46[m5:0.948 m6:0.955 m10:0.970 m20:0.980]
@@ -69,25 +74,26 @@ s_c=60 tau=20: eff15[m5:0.673 m6:0.682 m10:0.707 m20:0.733] | eff25[m5:0.772 m6:
 worked: sqrt(15^2+45^2/20)= 18.06  sqrt(15^2+60^2/6)= 28.72  sqrt(15^2+60^2/10)= 24.19
 
 ======== 6. Discrete simulation of the registered read (repository unit, exact sign-flip)
+[hypothesis — 1,500 simulated waves a cell, seed 20261114; simulation under stated assumptions, not a measurement of the product]
 model: repo A0 mean ~ N(mu0,0.15) clipped [.05,.95]; commit chance Beta, ICC 0.25;
 lever shift per repo ~ N(delta, tau_e); lever chance clipped [0,1]; 2 attempts/arm;
-1,500 waves a cell; seed 20261113. cols: P(correct Better/Worse) a.05 | a.025 |
+1,500 waves a cell; seed 20261114. cols: P(correct Better/Worse) a.05 | a.025 |
 P(Within15 | J=1) | P(Within15 | J=2) | P(wrong-sign decisive) | P(<6 nonzero) | realised
 m= 6 tau_e=0.10 mu0=0.7 delta=+0.00 n= 6: 0.007 | 0.000 | 0.029 | 0.011 | 0.000 | 0.752 | real -0.7
 m= 6 tau_e=0.10 mu0=0.7 delta=+0.00 n= 7: 0.015 | 0.002 | 0.129 | 0.053 | 0.000 | 0.446 | real -0.8
 m= 6 tau_e=0.10 mu0=0.7 delta=+0.00 n= 8: 0.021 | 0.006 | 0.277 | 0.130 | 0.000 | 0.237 | real -0.8
 m= 6 tau_e=0.10 mu0=0.7 delta=+0.00 n=10: 0.039 | 0.017 | 0.535 | 0.352 | 0.000 | 0.051 | real -0.8
-m= 6 tau_e=0.10 mu0=0.7 delta=-0.15 n= 6: 0.117 | 0.000 | 0.000 | 0.000 | 0.000 | 0.593 | real -14.7
-m= 6 tau_e=0.10 mu0=0.7 delta=-0.15 n= 7: 0.239 | 0.095 | 0.000 | 0.000 | 0.000 | 0.242 | real -14.6
-m= 6 tau_e=0.10 mu0=0.7 delta=-0.15 n= 8: 0.358 | 0.179 | 0.000 | 0.000 | 0.001 | 0.078 | real -14.7
-m= 6 tau_e=0.10 mu0=0.7 delta=-0.15 n=10: 0.511 | 0.364 | 0.000 | 0.000 | 0.000 | 0.007 | real -14.6
-m= 6 tau_e=0.10 mu0=0.7 delta=-0.25 n= 6: 0.387 | 0.000 | 0.000 | 0.000 | 0.000 | 0.393 | real -24.1
-m= 6 tau_e=0.10 mu0=0.7 delta=-0.25 n= 7: 0.653 | 0.330 | 0.000 | 0.000 | 0.000 | 0.088 | real -24.0
-m= 6 tau_e=0.10 mu0=0.7 delta=-0.25 n= 8: 0.798 | 0.597 | 0.000 | 0.000 | 0.000 | 0.021 | real -24.1
-m= 6 tau_e=0.10 mu0=0.7 delta=-0.25 n=10: 0.927 | 0.829 | 0.000 | 0.000 | 0.000 | 0.000 | real -24.0
+m= 6 tau_e=0.10 mu0=0.7 delta=-0.15 n= 6: 0.117 | 0.000 | 0.005 | 0.002 | 0.000 | 0.593 | real -14.7
+m= 6 tau_e=0.10 mu0=0.7 delta=-0.15 n= 7: 0.239 | 0.095 | 0.021 | 0.006 | 0.000 | 0.242 | real -14.6
+m= 6 tau_e=0.10 mu0=0.7 delta=-0.15 n= 8: 0.358 | 0.179 | 0.038 | 0.017 | 0.001 | 0.078 | real -14.7
+m= 6 tau_e=0.10 mu0=0.7 delta=-0.15 n=10: 0.511 | 0.364 | 0.059 | 0.035 | 0.000 | 0.007 | real -14.6
+m= 6 tau_e=0.10 mu0=0.7 delta=-0.25 n= 6: 0.387 | 0.000 | 0.001 | 0.000 | 0.000 | 0.393 | real -24.1
+m= 6 tau_e=0.10 mu0=0.7 delta=-0.25 n= 7: 0.653 | 0.330 | 0.001 | 0.001 | 0.000 | 0.088 | real -24.0
+m= 6 tau_e=0.10 mu0=0.7 delta=-0.25 n= 8: 0.798 | 0.597 | 0.001 | 0.001 | 0.000 | 0.021 | real -24.1
+m= 6 tau_e=0.10 mu0=0.7 delta=-0.25 n=10: 0.927 | 0.829 | 0.001 | 0.000 | 0.000 | 0.000 | real -24.0
 m= 6 tau_e=0.10 mu0=0.7 delta=-0.30 n= 6: 0.547 | 0.000 | 0.000 | 0.000 | 0.000 | 0.287 | real -28.6
 m= 6 tau_e=0.10 mu0=0.7 delta=-0.30 n= 7: 0.813 | 0.491 | 0.000 | 0.000 | 0.000 | 0.053 | real -28.6
-m= 6 tau_e=0.10 mu0=0.7 delta=-0.30 n= 8: 0.914 | 0.780 | 0.000 | 0.000 | 0.000 | 0.008 | real -28.5
+m= 6 tau_e=0.10 mu0=0.7 delta=-0.30 n= 8: 0.914 | 0.780 | 0.001 | 0.000 | 0.000 | 0.008 | real -28.5
 m= 6 tau_e=0.10 mu0=0.7 delta=-0.30 n=10: 0.975 | 0.937 | 0.000 | 0.000 | 0.000 | 0.000 | real -28.6
 m= 6 tau_e=0.10 mu0=0.7 delta=-0.46 n= 6: 0.887 | 0.000 | 0.000 | 0.000 | 0.000 | 0.083 | real -41.8
 m= 6 tau_e=0.10 mu0=0.7 delta=-0.46 n= 7: 0.987 | 0.851 | 0.000 | 0.000 | 0.000 | 0.002 | real -42.0
@@ -97,16 +103,16 @@ m= 6 tau_e=0.20 mu0=0.7 delta=+0.00 n= 6: 0.013 | 0.000 | 0.011 | 0.005 | 0.000 
 m= 6 tau_e=0.20 mu0=0.7 delta=+0.00 n= 7: 0.024 | 0.004 | 0.059 | 0.019 | 0.000 | 0.333 | real -2.3
 m= 6 tau_e=0.20 mu0=0.7 delta=+0.00 n= 8: 0.030 | 0.011 | 0.133 | 0.046 | 0.000 | 0.144 | real -1.9
 m= 6 tau_e=0.20 mu0=0.7 delta=+0.00 n=10: 0.037 | 0.015 | 0.297 | 0.133 | 0.000 | 0.021 | real -2.1
-m= 6 tau_e=0.20 mu0=0.7 delta=-0.15 n= 6: 0.072 | 0.000 | 0.000 | 0.000 | 0.000 | 0.561 | real -14.9
-m= 6 tau_e=0.20 mu0=0.7 delta=-0.15 n= 7: 0.176 | 0.060 | 0.000 | 0.000 | 0.000 | 0.232 | real -14.7
-m= 6 tau_e=0.20 mu0=0.7 delta=-0.15 n= 8: 0.251 | 0.129 | 0.000 | 0.000 | 0.000 | 0.093 | real -14.8
-m= 6 tau_e=0.20 mu0=0.7 delta=-0.15 n=10: 0.327 | 0.197 | 0.000 | 0.000 | 0.000 | 0.002 | real -14.7
-m= 6 tau_e=0.20 mu0=0.7 delta=-0.25 n= 6: 0.221 | 0.000 | 0.000 | 0.000 | 0.000 | 0.451 | real -23.6
-m= 6 tau_e=0.20 mu0=0.7 delta=-0.25 n= 7: 0.418 | 0.173 | 0.000 | 0.000 | 0.000 | 0.141 | real -23.3
-m= 6 tau_e=0.20 mu0=0.7 delta=-0.25 n= 8: 0.573 | 0.341 | 0.000 | 0.000 | 0.000 | 0.031 | real -23.5
-m= 6 tau_e=0.20 mu0=0.7 delta=-0.25 n=10: 0.733 | 0.571 | 0.000 | 0.000 | 0.000 | 0.001 | real -23.3
+m= 6 tau_e=0.20 mu0=0.7 delta=-0.15 n= 6: 0.072 | 0.000 | 0.003 | 0.002 | 0.000 | 0.561 | real -14.9
+m= 6 tau_e=0.20 mu0=0.7 delta=-0.15 n= 7: 0.176 | 0.060 | 0.019 | 0.005 | 0.000 | 0.232 | real -14.7
+m= 6 tau_e=0.20 mu0=0.7 delta=-0.15 n= 8: 0.251 | 0.129 | 0.030 | 0.011 | 0.000 | 0.093 | real -14.8
+m= 6 tau_e=0.20 mu0=0.7 delta=-0.15 n=10: 0.327 | 0.197 | 0.047 | 0.022 | 0.000 | 0.002 | real -14.7
+m= 6 tau_e=0.20 mu0=0.7 delta=-0.25 n= 6: 0.221 | 0.000 | 0.002 | 0.001 | 0.000 | 0.451 | real -23.6
+m= 6 tau_e=0.20 mu0=0.7 delta=-0.25 n= 7: 0.418 | 0.173 | 0.003 | 0.001 | 0.000 | 0.141 | real -23.3
+m= 6 tau_e=0.20 mu0=0.7 delta=-0.25 n= 8: 0.573 | 0.341 | 0.002 | 0.001 | 0.000 | 0.031 | real -23.5
+m= 6 tau_e=0.20 mu0=0.7 delta=-0.25 n=10: 0.733 | 0.571 | 0.003 | 0.001 | 0.000 | 0.001 | real -23.3
 m= 6 tau_e=0.20 mu0=0.7 delta=-0.30 n= 6: 0.340 | 0.000 | 0.000 | 0.000 | 0.000 | 0.379 | real -27.9
-m= 6 tau_e=0.20 mu0=0.7 delta=-0.30 n= 7: 0.587 | 0.279 | 0.000 | 0.000 | 0.000 | 0.085 | real -28.1
+m= 6 tau_e=0.20 mu0=0.7 delta=-0.30 n= 7: 0.587 | 0.279 | 0.001 | 0.000 | 0.000 | 0.085 | real -28.1
 m= 6 tau_e=0.20 mu0=0.7 delta=-0.30 n= 8: 0.737 | 0.516 | 0.000 | 0.000 | 0.000 | 0.015 | real -27.8
 m= 6 tau_e=0.20 mu0=0.7 delta=-0.30 n=10: 0.879 | 0.769 | 0.000 | 0.000 | 0.000 | 0.001 | real -27.8
 m= 6 tau_e=0.20 mu0=0.7 delta=-0.46 n= 6: 0.721 | 0.000 | 0.000 | 0.000 | 0.000 | 0.168 | real -40.7
@@ -117,13 +123,13 @@ m=10 tau_e=0.10 mu0=0.7 delta=+0.00 n= 6: 0.013 | 0.000 | 0.109 | 0.046 | 0.000 
 m=10 tau_e=0.10 mu0=0.7 delta=+0.00 n= 7: 0.027 | 0.007 | 0.351 | 0.223 | 0.000 | 0.279 | real -0.9
 m=10 tau_e=0.10 mu0=0.7 delta=+0.00 n= 8: 0.027 | 0.008 | 0.567 | 0.377 | 0.000 | 0.113 | real -0.9
 m=10 tau_e=0.10 mu0=0.7 delta=+0.00 n=10: 0.031 | 0.011 | 0.783 | 0.627 | 0.000 | 0.012 | real -0.7
-m=10 tau_e=0.10 mu0=0.7 delta=-0.15 n= 6: 0.227 | 0.000 | 0.000 | 0.000 | 0.001 | 0.405 | real -14.8
-m=10 tau_e=0.10 mu0=0.7 delta=-0.15 n= 7: 0.403 | 0.173 | 0.000 | 0.000 | 0.000 | 0.113 | real -14.5
-m=10 tau_e=0.10 mu0=0.7 delta=-0.15 n= 8: 0.539 | 0.367 | 0.000 | 0.000 | 0.000 | 0.035 | real -14.6
-m=10 tau_e=0.10 mu0=0.7 delta=-0.15 n=10: 0.690 | 0.522 | 0.000 | 0.000 | 0.000 | 0.001 | real -14.7
+m=10 tau_e=0.10 mu0=0.7 delta=-0.15 n= 6: 0.227 | 0.000 | 0.022 | 0.012 | 0.001 | 0.405 | real -14.8
+m=10 tau_e=0.10 mu0=0.7 delta=-0.15 n= 7: 0.403 | 0.173 | 0.033 | 0.019 | 0.000 | 0.113 | real -14.5
+m=10 tau_e=0.10 mu0=0.7 delta=-0.15 n= 8: 0.539 | 0.367 | 0.044 | 0.025 | 0.000 | 0.035 | real -14.6
+m=10 tau_e=0.10 mu0=0.7 delta=-0.15 n=10: 0.690 | 0.522 | 0.051 | 0.034 | 0.000 | 0.001 | real -14.7
 m=10 tau_e=0.10 mu0=0.7 delta=-0.25 n= 6: 0.573 | 0.000 | 0.000 | 0.000 | 0.000 | 0.225 | real -24.0
-m=10 tau_e=0.10 mu0=0.7 delta=-0.25 n= 7: 0.841 | 0.544 | 0.000 | 0.000 | 0.000 | 0.020 | real -24.1
-m=10 tau_e=0.10 mu0=0.7 delta=-0.25 n= 8: 0.921 | 0.792 | 0.000 | 0.000 | 0.000 | 0.002 | real -24.2
+m=10 tau_e=0.10 mu0=0.7 delta=-0.25 n= 7: 0.841 | 0.544 | 0.001 | 0.001 | 0.000 | 0.020 | real -24.1
+m=10 tau_e=0.10 mu0=0.7 delta=-0.25 n= 8: 0.921 | 0.792 | 0.001 | 0.000 | 0.000 | 0.002 | real -24.2
 m=10 tau_e=0.10 mu0=0.7 delta=-0.25 n=10: 0.986 | 0.949 | 0.000 | 0.000 | 0.000 | 0.000 | real -23.8
 m=10 tau_e=0.10 mu0=0.7 delta=-0.30 n= 6: 0.751 | 0.000 | 0.000 | 0.000 | 0.000 | 0.142 | real -28.4
 m=10 tau_e=0.10 mu0=0.7 delta=-0.30 n= 7: 0.942 | 0.717 | 0.000 | 0.000 | 0.000 | 0.017 | real -28.5
@@ -137,17 +143,17 @@ m=10 tau_e=0.20 mu0=0.7 delta=+0.00 n= 6: 0.014 | 0.000 | 0.059 | 0.023 | 0.000 
 m=10 tau_e=0.20 mu0=0.7 delta=+0.00 n= 7: 0.031 | 0.008 | 0.147 | 0.061 | 0.000 | 0.185 | real -2.2
 m=10 tau_e=0.20 mu0=0.7 delta=+0.00 n= 8: 0.036 | 0.009 | 0.235 | 0.120 | 0.000 | 0.055 | real -2.2
 m=10 tau_e=0.20 mu0=0.7 delta=+0.00 n=10: 0.039 | 0.020 | 0.415 | 0.228 | 0.000 | 0.004 | real -2.4
-m=10 tau_e=0.20 mu0=0.7 delta=-0.15 n= 6: 0.127 | 0.000 | 0.000 | 0.000 | 0.000 | 0.386 | real -15.0
-m=10 tau_e=0.20 mu0=0.7 delta=-0.15 n= 7: 0.231 | 0.090 | 0.000 | 0.000 | 0.001 | 0.110 | real -14.7
-m=10 tau_e=0.20 mu0=0.7 delta=-0.15 n= 8: 0.292 | 0.148 | 0.000 | 0.000 | 0.000 | 0.026 | real -14.9
-m=10 tau_e=0.20 mu0=0.7 delta=-0.15 n=10: 0.424 | 0.278 | 0.000 | 0.000 | 0.000 | 0.000 | real -14.8
+m=10 tau_e=0.20 mu0=0.7 delta=-0.15 n= 6: 0.127 | 0.000 | 0.013 | 0.007 | 0.000 | 0.386 | real -15.0
+m=10 tau_e=0.20 mu0=0.7 delta=-0.15 n= 7: 0.231 | 0.090 | 0.029 | 0.011 | 0.001 | 0.110 | real -14.7
+m=10 tau_e=0.20 mu0=0.7 delta=-0.15 n= 8: 0.292 | 0.148 | 0.045 | 0.013 | 0.000 | 0.026 | real -14.9
+m=10 tau_e=0.20 mu0=0.7 delta=-0.15 n=10: 0.424 | 0.278 | 0.049 | 0.025 | 0.000 | 0.000 | real -14.8
 m=10 tau_e=0.20 mu0=0.7 delta=-0.25 n= 6: 0.335 | 0.000 | 0.000 | 0.000 | 0.000 | 0.277 | real -23.9
-m=10 tau_e=0.20 mu0=0.7 delta=-0.25 n= 7: 0.566 | 0.257 | 0.000 | 0.000 | 0.000 | 0.049 | real -23.7
-m=10 tau_e=0.20 mu0=0.7 delta=-0.25 n= 8: 0.677 | 0.476 | 0.000 | 0.000 | 0.000 | 0.006 | real -23.6
-m=10 tau_e=0.20 mu0=0.7 delta=-0.25 n=10: 0.807 | 0.673 | 0.000 | 0.000 | 0.000 | 0.000 | real -23.2
+m=10 tau_e=0.20 mu0=0.7 delta=-0.25 n= 7: 0.566 | 0.257 | 0.007 | 0.003 | 0.000 | 0.049 | real -23.7
+m=10 tau_e=0.20 mu0=0.7 delta=-0.25 n= 8: 0.677 | 0.476 | 0.002 | 0.001 | 0.000 | 0.006 | real -23.6
+m=10 tau_e=0.20 mu0=0.7 delta=-0.25 n=10: 0.807 | 0.673 | 0.003 | 0.000 | 0.000 | 0.000 | real -23.2
 m=10 tau_e=0.20 mu0=0.7 delta=-0.30 n= 6: 0.436 | 0.000 | 0.000 | 0.000 | 0.000 | 0.240 | real -27.3
 m=10 tau_e=0.20 mu0=0.7 delta=-0.30 n= 7: 0.707 | 0.395 | 0.000 | 0.000 | 0.000 | 0.035 | real -27.5
-m=10 tau_e=0.20 mu0=0.7 delta=-0.30 n= 8: 0.826 | 0.658 | 0.000 | 0.000 | 0.000 | 0.006 | real -27.9
+m=10 tau_e=0.20 mu0=0.7 delta=-0.30 n= 8: 0.826 | 0.658 | 0.001 | 0.001 | 0.000 | 0.006 | real -27.9
 m=10 tau_e=0.20 mu0=0.7 delta=-0.30 n=10: 0.939 | 0.863 | 0.000 | 0.000 | 0.000 | 0.000 | real -27.9
 m=10 tau_e=0.20 mu0=0.7 delta=-0.46 n= 6: 0.811 | 0.000 | 0.000 | 0.000 | 0.000 | 0.092 | real -40.7
 m=10 tau_e=0.20 mu0=0.7 delta=-0.46 n= 7: 0.969 | 0.781 | 0.000 | 0.000 | 0.000 | 0.007 | real -40.8
@@ -155,6 +161,7 @@ m=10 tau_e=0.20 mu0=0.7 delta=-0.46 n= 8: 0.994 | 0.962 | 0.000 | 0.000 | 0.000 
 m=10 tau_e=0.20 mu0=0.7 delta=-0.46 n=10: 0.999 | 0.996 | 0.000 | 0.000 | 0.000 | 0.000 | real -41.0
 
 ======== 7. W pilot rule: P(pilot gap >= 30 points), pilot of P commits x 2 attempts per arm
+[hypothesis — 20,000 simulated pilots a gap, seed 20261115; simulation under stated assumptions, not a measurement of the product]
 P=10 true gap 10 points: P(selected) = 0.087
 P=10 true gap 15 points: P(selected) = 0.172
 P=10 true gap 20 points: P(selected) = 0.283
@@ -162,6 +169,7 @@ P=10 true gap 30 points: P(selected) = 0.561
 P=10 true gap 45 points: P(selected) = 0.887
 
 ======== 8. Synthetic known-answer sets for the read script (expected outputs)
+[hypothesis — five synthetic sets, exact sign-flip and t; exact arithmetic on stated inputs, no sample; not a measurement of the product]
 K1 eight repos all -0.5: D=-50.0000 p=0.0078125 (2/256) nonzero=8 90% half-width=0.0000 points
 K2 eight repos +-0.1 alternating: D=+0.0000 p=1.0000000 (256/256) nonzero=8 90% half-width=7.1608 points
 K3 six repos, one zero, five -0.4: D=-33.3333 p=0.0625000 (4/64) nonzero=5 90% half-width=13.4337 points
@@ -169,6 +177,7 @@ K4 seven repos all +0.3: D=+30.0000 p=0.0156250 (2/128) nonzero=7 90% half-width
 K5 ten repos, nine -0.2 one +0.1: D=-17.0000 p=0.0039062 (4/1024) nonzero=10 90% half-width=5.4993 points
 
 ======== 9. Costs, product dollars, unconfirmed
+[hypothesis — cost projection from Wave 4's rate over 120 commit-arms; unconfirmed]
 rate all-in per commit-arm = 48.115522/120 = 0.400963; wave rows only = 0.354799
 money left on the line = 200 - 69.98 = 130.02
 Wave 4 authoring (Cerebras) = 0.174468; per S1 attempt over 126 attempts = 0.001385
@@ -182,6 +191,7 @@ D3 two arms m=6 n=7 : n=7 m=6 arms=2 wave commit-arms=84 pilot=8 total=92; centr
 D3 two arms m=4 n=10 (rejected: q below 11/12): n=10 m=4 arms=2 wave commit-arms=80 pilot=8 total=88; central=35.28 high=88.21 line=89 lift=0.00; high per repo=8.02; whole repos inside $130.02 at high=15; S1 attempts=88, author $ central=0.12
 
 ======== 10. Run time, from Wave 4: 49 runs x 5 commits in 10.06 h
+[hypothesis — time projection from Wave 4's 49 runs; exact arithmetic on stated inputs, no sample; not a measurement of the product]
 minutes per commit-attempt-run slot = 2.464
 D1 n10: 208 commit-arms x 2 attempts x 2.464 min = 17.1 h
 D2 n10: 340 commit-arms x 2 attempts x 2.464 min = 27.9 h
