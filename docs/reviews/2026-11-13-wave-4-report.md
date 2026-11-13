@@ -1,14 +1,15 @@
 # Wave 4 — the report — 2026-11-13
 
-DRAFT — not final until Paul's audit is in and the TO FILL lines are closed.
+DRAFT — Paul's audit of ten is in (2026-11-13); not final until the TO FILL lines are closed.
 
 **Status.** The Wave 4 primary read was run once, at 12:53Z on 2026-11-12, and filed its output.
 The decision word is *Inconclusive*. The review draw was made once, on 2026-11-12. When the wave
 record's last entry was written, no patch had yet been shown to the reviewer (WRN, "The review
 draw is made"). The blind reviewer has since given a verdict on each of the 37 labels; the
 delivery manager sealed them by 01:53Z on 2026-11-13 (the delivery manager's file times, not
-filed in this repository). Paul's audit of ten is not yet in. Nothing
-in this draft states a reviewer verdict or maps a blinded label to an arm **[hypothesis — read
+filed in this repository). Paul's audit of ten came in by 09:04Z on 2026-11-13, so section 7 now
+gives verdict counts by arm. Nothing
+in this draft states one label's verdict or maps a blinded label to an arm **[hypothesis — read
 from `wave-record-notes.md` (Part E, "Read run once") and `primary-read-output.txt` line 60, both
 under `docs/reviews/2026-11-10-wave-4-registration/`; the rows they rest on are not in this
 repository]**.
@@ -325,17 +326,46 @@ The draw, as filed **[hypothesis — RDO, WRN and REG; the patches are not in th
   (RDO lines 47-49).
 - When WRN's last entry was written, no patch had been shown to the reviewer (WRN, "Draw made").
   Since then the reviewer has given 37 verdicts, one per label, sealed by the delivery manager
-  by 01:53Z on 2026-11-13 (file times; not filed in this repository). They stay sealed until
-  Paul's audit is in.
-- Paul's audit of ten is not yet in. "Paul checks five" in Part 6 item 8 is read as ten (REG, R8).
+  by 01:53Z on 2026-11-13 (file times; not filed in this repository). They stayed sealed until
+  Paul's audit was in.
+- Paul's audit of ten is in. "Paul checks five" in Part 6 item 8 is read as ten (REG, R8).
   Paul's audit file uses a second salted order; only the longest unbroken checked run counts (WRN).
+  Paul gave all ten verdicts on the audit page between 09:01Z and 09:04Z on 2026-11-13 (the
+  page's own save times), without the arm or the reviewer's verdict shown. The delivery manager
+  recorded them at 09:04Z and only then compared them. Shortfall: 0 of 10.
 
-| Figure | Value |
-|---|---|
-| Reviewer verdicts by arm | TO FILL after Paul's audit, from the key file |
-| B2 item 3 counts by repository and arm (RDO line 50) | TO FILL after Paul's audit, from the key file |
-| Step counts per arm (key file, reading 3) | TO FILL after Paul's audit, from the key file |
-| Paul's audit agreement with the reviewer | TO FILL after Paul's audit, from the key file |
+The figures below were counted by the delivery manager on 2026-11-13 from the key file, the 37
+sealed verdict files and Paul's ten verdicts. Method: join on the blinded label, then count.
+None of the three sources is filed in this repository **[hypothesis — the key file, the reviewer's
+verdict files and Paul's verdicts are held by the delivery manager, not in this repository]**.
+
+Reviewer verdicts by arm, clean drawn patches only (37):
+
+| Repository | Arm | Drawn | Merge as is | Merge with small edits | Do not merge |
+|---|---|---|---|---|---|
+| click | A0 | 10 | 1 | 9 | 0 |
+| click | S1 | 7 | 0 | 7 | 0 |
+| cobra | A0 | 10 | 9 | 1 | 0 |
+| cobra | S1 | 10 | 6 | 3 | 1 |
+| both | A0 | 20 | 10 | 10 | 0 |
+| both | S1 | 17 | 6 | 10 | 1 |
+
+These rows describe the patches that passed the tests and were drawn. They are not a comparison
+of the arms: an arm with fewer clean rows puts fewer, and differently chosen, patches in the draw.
+
+B2 item 3 counts and step counts, by repository and arm (key file; RDO line 50):
+
+| Repository | Arm | Step 1 | Step 2 | Step 3 | Drawn of 10 | Shortfall |
+|---|---|---|---|---|---|---|
+| click | A0 | 5 | 5 | 0 | 10 | 0 |
+| click | S1 | 5 | 0 | 2 | 7 | 3 |
+| cobra | A0 | 10 | 0 | 0 | 10 | 0 |
+| cobra | S1 | 10 | 0 | 0 | 10 | 0 |
+
+Clean rows that carry an error: 0 in each of the four rows.
+
+Paul's audit agreement with the reviewer: 8 of 10 the same verdict, 2 of 10 different. B3 allows
+the count of agreement and nothing more, so no further split is given here.
 
 Beside the agreement row: R9 holds in what Paul and the reviewer are told, and not against a
 reader who works the public B3 hash (WRN, review draw rules; see below).
@@ -585,6 +615,6 @@ ACR and ERR; the rows are not in this repository]**.
 
 ## The close
 
-This draft closes when Paul's audit of ten is in, the TO FILL lines are filled from their named
+Paul's audit of ten is in. This draft closes when the TO FILL lines are filled from their named
 sources, and the decisions above are recorded. Auditor B's recommendation stands open: keep or tag
 the branch that holds `ca90419a` and `32630d12` (ACR item 10). Until then it is a DRAFT.
