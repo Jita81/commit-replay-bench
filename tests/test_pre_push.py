@@ -115,7 +115,9 @@ def _unaccounted_command(job: str, cmd: str) -> bool:
     if _mirrored(job, cmd) or _listed(job, cmd):
         return False
     if pre_push.matches(pre_push.SETUP, cmd):
-        return False
+        # plumbing may not carry a gate inside a command substitution
+        nested = "$(" in cmd or "`" in cmd
+        return nested and bool(pre_push.gate_words(cmd, GATE_PROGRAMS))
     if job in pre_push.UNCOVERED_JOBS:
         allowed = (*pre_push.UNCOVERED_JOB_TOOLS.get(job, ()), *pre_push.SHELL_SYNTAX)
         if pre_push.program(cmd) not in allowed:
@@ -181,6 +183,10 @@ def test_a_new_static_gate_in_any_job_is_caught() -> None:
         ("container", "echo $(pytest>/dev/null)"),
         ("container", "[ -z $(mypy<x) ]"),
         ("container", "echo {ruff,x} check"),
+        # a gate inside a substitution on a plumbing line
+        ("lint", 'uv pip install -r "$(python scripts/new_gate.py --check)"'),
+        ("types", "mkdir -p `.venv/bin/mypy src`"),
+        ("security", 'cd "$(ruff check src)"'),
     ]
     assert unaccounted(planted) == [f"{j}: {line}" for j, line in planted]
     assert unaccounted([("lint", ".venv/bin/ruff check src tests")]) == []
@@ -404,6 +410,21 @@ def test_a_gate_not_run_exits_3_unless_skips_are_allowed(
     monkeypatch.setattr(pre_push, "GATES", _gates(None))
     assert pre_push.main(["--base", "HEAD"]) == 0
     assert capsys.readouterr().out.strip().splitlines()[-1] == "1 passed, 0 failed, 0 not run"
+
+
+def test_a_gate_whose_tool_is_not_installed_is_not_run_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    absent = pre_push.Gate("absent tool", ("no-such-tool-for-pre-push", "--version"), ())
+    result = pre_push.run_gate(absent, "HEAD", "0")
+    assert (
+        result.status == "NOT RUN" and "no-such-tool-for-pre-push is not installed" in result.detail
+    )
+    monkeypatch.setattr(pre_push, "GATES", (*_gates(None), absent))
+    monkeypatch.setattr(pre_push, "dirty_paths", lambda: [])
+    assert pre_push.main(["--base", "HEAD"]) == 3
+    assert "1 passed, 0 failed, 1 not run" in capsys.readouterr().out
+    assert pre_push.main(["--base", "HEAD", "--allow-skip"]) == 0
 
 
 def test_a_dirty_tree_is_named_in_a_warning_that_does_not_change_the_exit(

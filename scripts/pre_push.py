@@ -511,14 +511,15 @@ class Result:
     detail: str = ""
 
 
-def _tool(name: str) -> str:
-    """``python`` is this interpreter; a venv tool is the one beside it, else the PATH's."""
+def _tool(name: str) -> str | None:
+    """``python`` is this interpreter; a venv tool is the one beside it, else the PATH's.
+    ``None`` when the tool is in neither place: the gate is then NOT RUN, not a crash."""
     if name == "python":
         return sys.executable
     beside = Path(sys.executable).parent / name
     if beside.exists():
         return str(beside)
-    return shutil.which(name) or name
+    return shutil.which(name)
 
 
 def _env(extra: dict[str, str]) -> dict[str, str]:
@@ -633,7 +634,10 @@ def run_gate(gate: Gate, base: str, floor: str, argv: Sequence[str] | None = Non
     if gate.requires and not (ROOT / gate.requires).exists():
         return Result(gate.name, "NOT RUN", 0.0, f"{gate.requires} is missing (npm ci)")
     words = [_substitute(w, base, floor) for w in (argv or gate.argv)]
-    words[0] = _tool(words[0])
+    tool = _tool(words[0])
+    if tool is None:
+        return Result(gate.name, "NOT RUN", 0.0, f"{words[0]} is not installed here")
+    words[0] = tool
     env = _env({k: _substitute(v, base, floor) for k, v in gate.env.items()})
     started = time.monotonic()
     proc = subprocess.run(
