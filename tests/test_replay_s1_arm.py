@@ -1203,3 +1203,28 @@ def test_an_oversized_refusal_is_kept_bounded_head_and_tail(
     assert test.endswith("END") and "sk-live-" not in test
     # within the bound nothing is cut
     assert adapter._bounded("short") == ("short", False)
+
+
+def test_a_credential_in_the_error_path_or_failing_ids_is_not_kept_raw(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The kept file is redacted at write, not only when served: a credential in the
+    refusal error, the authored path or a failing test id never rests on disk."""
+    from crb.core.runners.base import TestRun
+
+    secret = "sk-live-abcdefghijklmnopqrstuvwxyz0123"
+    red = TestRun(1, frozenset({f"tests/test_x.py::test_a[{secret}]"}), tail="out")
+    ref = adapter._write_refused_author(
+        tmp_path,
+        pyrepo.feat_task(),
+        None,
+        f"authoring: the key {secret} was echoed",
+        authored=(f"tests/{secret}_test.py", "x = 1\n"),
+        red=red,
+    )
+    raw = Path(ref).read_text(encoding="utf-8")
+    assert secret not in raw
+    body = json.loads(raw)["authoring_refused"]
+    assert body["error"].startswith("authoring: the key ")
+    assert body["authored_test"]["path"].startswith("tests/")
+    assert len(body["parent_run"]["failing"]) == 1

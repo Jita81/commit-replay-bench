@@ -725,27 +725,30 @@ def _write_refused_author(
 ) -> str:
     """Keep a refused ``S1`` author's evidence beside the transcripts — the authored test
     (path, content) and the parent run the gate judged — and return its reference (path),
-    which the attempt carries as its ``transcript_ref``. Retention only: never raises (any
-    ``Exception`` is logged, a partial file removed and ``""`` returned), so the refusal it
-    records stays exactly the refusal it was. The author's text is a model's reply and may
-    hold a lone surrogate, which UTF-8 cannot encode: it is kept as ``?``."""
+    which the attempt carries as its ``transcript_ref``. Every string a model or a test run
+    wrote (the error, the path, the failing ids, the content, the output) is redacted
+    before the file is written, so no credential rests on disk. Retention only: never
+    raises (any ``Exception`` is logged, a partial file removed and ``""`` returned), so the
+    refusal it records stays exactly the refusal it was. The author's text is a model's
+    reply and may hold a lone surrogate, which UTF-8 cannot encode: it is kept as ``?``."""
     path: Path | None = None
     try:
         body: dict[str, Any] = {
             "task_id": task.task_id,
             "repo": task.repo,
             "rung": rung.to_dict() if rung is not None else None,
-            "authoring_refused": {"error": error},
+            "authoring_refused": {"error": redact(error)},
         }
         if authored is not None:
             content, cut = _bounded(authored[1])
             body["authoring_refused"]["authored_test"] = {
-                "path": authored[0],
+                "path": redact(authored[0]),
                 "content": content,
                 "truncated": cut,
             }
         if red is not None:
             parent = red.to_dict()
+            parent["failing"] = sorted(redact(test_id) for test_id in red.failing)
             parent["tail"], cut = _bounded(red.tail)
             for key in ("parse_error", "env_error"):
                 if key in parent:
