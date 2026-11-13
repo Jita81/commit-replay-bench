@@ -1107,6 +1107,67 @@ UNFOLLOWED_HANDOFFS = {
         "        p = functools.partial(task_of)\n"
         "        tasks |= {str(x) for x in sorted([body], key=p)}\n"
     ),
+    # A method taken as a value, or called, through ``self`` other than as ``self.name(...)``.
+    "a method value through self": (
+        "        class R(Get):\n"
+        "            def run(self):\n"
+        "                return set(map(self.g, [body]))\n"
+        "        tasks |= R().run()\n"
+    ),
+    "a method value through cls": (
+        "        class R(Get):\n"
+        "            @classmethod\n"
+        "            def run(cls):\n"
+        "                return set(map(cls.f, [body]))\n"
+        "        tasks |= R.run()\n"
+    ),
+    "a method through super": (
+        "        class R(Get):\n"
+        "            def run(self):\n"
+        "                return super().g(body)\n"
+        "        tasks.add(R().run())\n"
+    ),
+    "a method through the class of self": (
+        "        class R(Get):\n"
+        "            def run(self):\n"
+        "                return self.__class__.g(self, body)\n"
+        "        tasks.add(R().run())\n"
+    ),
+    "a method through type of self": (
+        "        class R(Get):\n"
+        "            def run(self):\n"
+        "                return type(self).g(self, body)\n"
+        "        tasks.add(R().run())\n"
+    ),
+    "a method through getattr": (
+        "        class R(Get):\n"
+        "            def run(self):\n"
+        '                return set(map(getattr(self, "g"), [body]))\n'
+        "        tasks |= R().run()\n"
+    ),
+    # The method's name bound another way as well: still the method ``super()`` reaches.
+    "a method through super, its name also a loop variable": (
+        "        for g in ():\n"
+        "            pass\n"
+        "        class R(Get):\n"
+        "            def run(self):\n"
+        "                return super().g(body)\n"
+        "        tasks.add(R().run())\n"
+    ),
+    "a function kept on an attribute": (
+        "        class R:\n"
+        "            def run(self):\n"
+        "                self.h = task_of\n"
+        "                return self.h(body)\n"
+        "        tasks.add(R().run())\n"
+    ),
+    "a function kept on an attribute, as a value": (
+        "        class R:\n"
+        "            def run(self):\n"
+        "                self.h = task_of\n"
+        "                return set(map(self.h, [body]))\n"
+        "        tasks |= R().run()\n"
+    ),
     # A key function handed to a method of the payload list.
     "a sort of the payloads": (
         '        bodies = [x["payload"] for x in events]\n'
@@ -1131,6 +1192,31 @@ DATA_HANDOFFS = {
     "a map over rows": "        xs = set(map(lambda r: r + 1, [1]))\n        tasks.add(len(xs))\n",
     "an event appended": (
         "        pool = []\n        pool.append(e)\n        tasks.add(len(pool))\n"
+    ),
+    # An attribute that is no function of this module, handed with a payload elsewhere.
+    "a data attribute beside a payload": (
+        "        class Box:\n"
+        "            def __init__(self):\n"
+        "                self.rows = []\n"
+        "            def keep(self, n):\n"
+        "                self.rows.append(n)\n"
+        "                return len(self.rows)\n"
+        "        tasks.add(Box().keep(1))\n"
+    ),
+    # A set's own method, beside a function of this module with the same name: the
+    # receiver decides, not the name.
+    "a builtin method named like a function": (
+        "        def add(a, b):\n"
+        "            return a + b\n"
+        "        tasks.add(read_preflight.value(e, S))\n"
+    ),
+    "an import's function named like a function": (
+        "        def value(x):\n"
+        "            return x\n"
+        "        tasks.add(read_preflight.value(e, S))\n"
+    ),
+    "an option read by getattr beside a value": (
+        '        print(getattr(tasks, "label", ""), read_preflight.value(e, S))\n'
     ),
 }
 

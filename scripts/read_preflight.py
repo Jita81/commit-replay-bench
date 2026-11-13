@@ -42,7 +42,9 @@ break was a figure, not an error. Here every such break is a ``PreflightError`` 
   ``__getitem__``, ``methodcaller``); an event or payload handed where it cannot follow
   what a function's parameters receive (``map(f, payloads)``, ``payloads.sort(key=f)``,
   ``*args``, a default argument, or a callee it cannot resolve: ``g = task_of``,
-  ``functools.partial(f)(b)``, ``mk()(b)``, a method of a class); ``Expect`` used other
+  ``functools.partial(f)(b)``, ``mk()(b)``, a method of a class reached other than by
+  ``self.name``: ``super().g(b)``, ``type(self).g(self, b)``, ``getattr(self, "g")(b)``);
+  ``Expect`` used other
   than in a direct call with constant arguments; and ``value``/``has`` handed an
   expectation that is not one such call or a name bound once to one.
 * ``preflight`` applies ``check`` to the declarations and checks every raw payload read
@@ -828,6 +830,26 @@ _ELEMENT_BUILTINS = frozenset(
 )
 
 
+def _classish(recv: ast.AST) -> bool:
+    """Whether ``recv`` is an instance or a class of this module by its form: ``self``,
+    ``cls``, ``super()``, ``type(x)``, ``cls()`` or ``x.__class__``."""
+    if isinstance(recv, ast.Name):
+        return recv.id in {"self", "cls"}
+    if isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name):
+        return recv.func.id in {"super", "type", "cls"}
+    return isinstance(recv, ast.Attribute) and recv.attr == "__class__"
+
+
+def _attr_fn(attr: str, funcs: Mapping[str, list[_Callee]], fnish: set[str]) -> bool:
+    """Whether an attribute of this name, on an instance or a class of this module
+    (``_classish``), may be a function of this module: a ``def`` or ``name = lambda`` of
+    that name, followed or not (kept in ``fnish`` as ``.g``), a name bound to a value that
+    holds one (a class body's ``f = staticmethod(lambda b: ...)``), or an attribute a
+    function was assigned to (``self.h = task_of``; kept in ``fnish`` as ``.h``). The
+    receiver decides first: ``tasks.add(x)`` beside a ``def add`` is the set's method."""
+    return attr in funcs or attr in fnish or f".{attr}" in fnish
+
+
 def _fnref(
     node: ast.AST,
     funcs: Mapping[str, list[_Callee]],
@@ -836,13 +858,18 @@ def _fnref(
     returns_fn: set[int],
 ) -> bool:
     """Whether ``node`` may evaluate to, or hold, a function of this module: a lambda, a
-    function's name taken as a value, a name bound to one, or a call that may return one."""
+    function's name taken as a value, a name bound to one, an attribute of an instance or a
+    class that may be one (``self.g``, ``cls.g``, ``super().g``, ``self.__class__.g``,
+    ``type(self).g``; see ``_attr_fn``), a ``getattr`` of one, or a call that may return
+    one."""
 
     def ref(n: ast.AST) -> bool:
         if isinstance(n, ast.Lambda):
             return True
         if isinstance(n, ast.Name):
             return isinstance(n.ctx, ast.Load) and (n.id in funcs or n.id in fnish)
+        if isinstance(n, ast.Attribute) and _classish(n.value):
+            return _attr_fn(n.attr, funcs, fnish)
         if isinstance(n, ast.Call):
             f = n.func
             if isinstance(f, ast.Lambda):
@@ -851,6 +878,24 @@ def _fnref(
                 return ref(f)
             if callees := _callees(n, funcs, methods):
                 return any(id(g) in returns_fn for g, _m in callees)
+            if isinstance(f, ast.Name) and f.id == "getattr" and "getattr" not in funcs:
+                # ``getattr(self, "g")``: a function when the name may be one (a name the
+                # rule cannot read may be any); ``getattr(args, "label")`` is data.
+                if not n.args or not (_classish(n.args[0]) or ref(n.args[0])):
+                    return False
+                name = n.args[1] if len(n.args) > 1 else None
+                if isinstance(name, ast.Constant) and isinstance(name.value, str):
+                    return _attr_fn(name.value, funcs, fnish)
+                return True
+            if (
+                isinstance(f, ast.Attribute)
+                and _classish(f.value)
+                and _attr_fn(f.attr, funcs, fnish)
+            ):
+                # ``super().g(x)``, ``type(self).g(self, x)``: what the function of that
+                # name may return (one the rule does not follow may return anything).
+                named = funcs.get(f.attr, [])
+                return not named or any(id(g) in returns_fn for g in named)
             if ref(f.value if isinstance(f, ast.Attribute) else f):
                 return True  # a call of something that holds a function (a class, a partial)
             if isinstance(f, ast.Name) and f.id in _SCALAR_BUILTINS and f.id not in funcs:
@@ -917,6 +962,13 @@ def _function_values(
                         for m in ast.walk(t)
                         if isinstance(m, ast.Name) and m.id not in {"self", "cls"}
                     }
+                    # ``self.h = task_of``: the attribute name (``_attr_fn``).
+                    fnish |= {
+                        f".{m.attr}"
+                        for t in targets
+                        for m in ast.walk(t)
+                        if isinstance(m, ast.Attribute)
+                    }
         for g in callees:
             if isinstance(g, ast.Lambda):
                 out = [g.body]
@@ -951,7 +1003,6 @@ def _analyse(tree: ast.Module) -> _Analysis:
     # A name bound any other way as well is not followed: a call through it is refused when
     # it hands an event value (see ``_unfollowed``).
     kinds = _binding_kinds(tree)
-    funcs = {k: v for k, v in funcs.items() if kinds.get(k, set()) <= {"def", "lambda"}}
     unresolved = {k for k, v in kinds.items() if not v <= {"def", "lambda"} and not v <= {"import"}}
     methods = {
         id(f)
@@ -960,7 +1011,12 @@ def _analyse(tree: ast.Module) -> _Analysis:
         for f in c.body
         if isinstance(f, ast.FunctionDef | ast.AsyncFunctionDef)
     }
+    every_def = set(funcs)
+    funcs = {k: v for k, v in funcs.items() if kinds.get(k, set()) <= {"def", "lambda"}}
     fnish, returns_fn = _function_values(tree, funcs, methods)
+    # A method whose name is also bound another way (``for g in ...``) is still a method:
+    # ``super().g(b)`` reaches it, so the attribute name stays a function (``_attr_fn``).
+    fnish |= {f".{k}" for k in every_def}
     handed: dict[int, dict[str, str]] = {id(s): {} for s, _nodes, _parent in scopes}
     while True:
         envs: dict[int, dict[str, str]] = {}
@@ -1100,8 +1156,11 @@ def _resolved(n: ast.Call, an: _Analysis) -> bool:
     of this module (by ``def`` or ``name = lambda``) or a method of one by ``self.name``, or
     something defined elsewhere (a builtin, an import, a method of a value that holds no
     function of this module). A callee computed by an expression (``mk()(b)``,
-    ``FNS["f"](b)``, ``(f if c else g)(b)``, ``(g := ...)(b)``) or reached through a name
-    bound any other way (``g = task_of``, a parameter) is not."""
+    ``FNS["f"](b)``, ``(f if c else g)(b)``, ``(g := ...)(b)``), reached through a name
+    bound any other way (``g = task_of``, a parameter), or reached as an attribute of an
+    instance or a class that may be a function of this module, other than a method by
+    ``self.name`` / ``cls.name`` (``super().g(b)``, ``self.__class__.g(b)``,
+    ``type(self).g(self, b)``, ``self.h(b)`` after ``self.h = task_of``), is not."""
     f = n.func
     if isinstance(f, ast.Lambda):
         return True
@@ -1110,6 +1169,8 @@ def _resolved(n: ast.Call, an: _Analysis) -> bool:
     if isinstance(f, ast.Attribute):
         if isinstance(f.value, ast.Name) and f.value.id in {"self", "cls"}:
             return bool(_callees(n, an.funcs, an.methods))
+        if _classish(f.value) and _attr_fn(f.attr, an.funcs, an.fnish):
+            return False
         return not an.fnref(f.value)
     return False
 
