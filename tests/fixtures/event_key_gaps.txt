@@ -1,0 +1,91 @@
+# The payload-key gaps between docs/API.md's event table and the emit sites, as
+# tests/test_event_key_contract.py found them on its first run (2026-11-13). This file may
+# only shrink: a new gap fails the suite and is fixed in the row or the call, never added
+# here; a fixed gap fails the suite until its line is deleted.
+#
+# A <action> <key>: the row names a top-level key that no emit site of the row passes.
+# B <action> <key>: an emit site passes a key that no row of the action names.
+#
+# Every B line below is a key the code passes and the table does not name (an undocumented
+# payload key); the doc rows were left as they are because each needs a sentence on what
+# the key means, which the code alone does not give. Owner: whoever next edits the row.
+
+A connect.stage.chained auto_stages  # prose: the repo setting the actor switched on, not a payload key
+B author.attempt cost_known
+B author.attempt item
+B author.attempt provider
+B author.done item
+B author.start item
+B author.start route
+B build.attempt builder
+B build.attempt fixture
+B build.done files
+B build.done fixture
+B build.start auth
+B build.start files
+B build.tool fixture
+B builder.build.attempt builder
+B builder.build.attempt fixture
+B builder.build.done builder
+B builder.build.done fixture
+B builder.build.start auth
+B builder.build.start builder
+B builder.build.start mode
+B builder.build.start model
+B builder.build.tool fixture
+B builder.sealed network
+B controls.done passed
+B controls.done repo
+B delivery.override cell
+B grade.belt rc
+B grade.belt timed_out
+B grade.tamper detail
+B grade.tamper violations
+B label.task capability_class
+B label.task taxonomy
+B ledger.append clean
+B ledger.append disqualified
+B ledger.append item
+B ledger.append pack
+B ledger.append row_hash
+B ledger.append trial
+B legacy.grade clean
+B mine.candidate repo
+B mine.done repo
+B mine.red baseline_failing
+B mine.red cls
+B mine.red size
+B oracle.mutation.scored oracle_strength
+B red.proved item
+B red.refused item
+B red.start item
+B repo.created config
+B repo.created github
+B review.corrected grade_row_hash
+B review.corrected review_id
+B review.corrected row_hash
+B review.created findings
+B review.created grade_row_hash
+B review.created mergeable
+B review.created minutes
+B review.created patch_sha256_reviewed
+B review.created review_id
+B review.created row_hash
+B review.created verdict
+B review.probe detail
+B review.probe item
+B review.refused code
+B review.refused envelope_code
+B review.refused grade_row_hash
+B review.start item
+B review.verdict item
+B route.decided cell_route
+B setup.auto reason
+B setup.start path
+B signoff.created controls_run_id
+B signoff.created controls_verdict
+B signoff.created oracle_scored
+B signoff.created oracle_strength
+B signoff.created oracle_tasks
+B signoff.created reviewed_row_hash
+B signoff.created route_reason_code

@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **A read script proves it can see its event keys before it counts.** `scripts/read_preflight.py`
+  refuses an expectation of a key the emitter lifts out of the payload, checks every fetched event,
+  stops a zero count that has no signed waiver, and exits 6. Its AST rule follows event dicts
+  through aliases, targets, call sites and getter helpers and flags lifted-key lookups, defaults
+  and compared actions no `Expect` declares; a reader must call `check` and `nonzero`. A positive
+  control plants the Wave 4 lookup over events built by the real emitter and must exit 6.
+  `tests/test_event_key_contract.py` compares the event table with each emit site's keys against a
+  baseline whose size is pinned; ten table rows were corrected (P-819)
+  ([#142](https://github.com/Jita81/commit-replay-bench/pull/142)).
+
 - **A git hook runs the fast gate set before every push.** `scripts/pre_push.py --install-hook`, a setup line, points `core.hooksPath` at the tracked `scripts/hooks`; its `pre-push` runs the static gates, the changed files' tests and the ratchets before a push leaves. A failure stops the push, as does a missing interpreter, a gate that could not run and might hide a failure, a push of anything but the checked-out commit, or uncommitted files the gates would read instead. The install refuses to switch off hooks a clone already runs. Limits: a clone that skipped the setup line, or a worktree whose branch lacks `scripts/hooks`, has no hook, and `git push --no-verify` skips it, so CI stays the gate. ([#140](https://github.com/Jita81/commit-replay-bench/pull/140))
 
 - **One local command runs the gates CI runs, before a push.** `scripts/pre_push.py` runs the static gates of the CI workflow and then the test suite as CI runs it; `--fast` runs the gates and the tests for the changed files. It checks the pull request title as the squash subject, names every CI job it does not run, and exits non-zero when a gate could not run. A ratchet test reads each `run:` line of the workflows and fails on a command the runner neither mirrors, nor lists as not run, nor knows as plumbing. Nothing yet makes an author run it; the register row stays pending. ([#137](https://github.com/Jita81/commit-replay-bench/pull/137))
