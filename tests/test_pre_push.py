@@ -785,3 +785,38 @@ def test_the_hook_stops_a_push_from_a_checkout_whose_files_are_not_the_commit(
     monkeypatch.setattr(sys, "stdin", io.StringIO(_PUSH_LINE))
     assert pre_push.main(["--hook", "--base", "HEAD"]) == 0
     assert "1 passed, 0 failed, 0 not run (--fast)" in capsys.readouterr().out
+
+
+def test_the_hook_stops_a_push_when_the_checkout_changes_while_the_gates_run(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The checkout is clean when the hook starts and a file is edited while a gate runs: the
+    gate may have read the edit, so its pass is not a pass of the pushed commit and the push
+    stops. The same holds when ``HEAD`` moves off the pushed commit during the gates."""
+    edits_a_file: list[str] = []
+    gate = pre_push.Gate("a gate", ("python", "-c", "pass"), ())
+    monkeypatch.setattr(pre_push, "GATES", (gate,))
+    monkeypatch.setattr(pre_push, "changed_files", lambda base: [])
+    monkeypatch.setattr(pre_push, "not_checked_out", lambda shas: [])
+    monkeypatch.setattr(pre_push, "dirty_paths", lambda: list(edits_a_file))
+    real_run = pre_push.run_gate
+
+    def run_then_edit(*a: object, **k: object) -> object:
+        result = real_run(*a, **k)  # type: ignore[arg-type]
+        edits_a_file.append("src/crb/late.py")
+        return result
+
+    monkeypatch.setattr(pre_push, "run_gate", run_then_edit)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(_PUSH_LINE))
+    assert pre_push.main(["--hook", "--base", "HEAD"]) == 3
+    captured = capsys.readouterr()
+    assert "1 passed, 0 failed" in captured.out
+    assert "changed while the gates ran" in captured.err and "src/crb/late.py" in captured.err
+
+    edits_a_file.clear()
+    monkeypatch.setattr(pre_push, "run_gate", real_run)
+    head_moves = iter([[], ["f" * 40]])
+    monkeypatch.setattr(pre_push, "not_checked_out", lambda shas: next(head_moves))
+    monkeypatch.setattr(sys, "stdin", io.StringIO(_PUSH_LINE))
+    assert pre_push.main(["--hook", "--base", "HEAD"]) == 3
+    assert "HEAD is no longer the pushed commit" in capsys.readouterr().err

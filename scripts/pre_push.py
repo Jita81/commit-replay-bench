@@ -944,6 +944,19 @@ def main(argv: list[str] | None = None) -> int:
         if stops:
             print(f"pre_push: exit 3 — the push is stopped; not run here: {'; '.join(stops)}")
             return 3
+        moved, edited = not_checked_out(shas), dirty_paths()
+        if moved or edited:
+            print(
+                "pre_push: exit 3 — the push is stopped: the checkout changed while the gates "
+                "ran, so they may have read files the pushed commit does not hold. "
+                + ("HEAD is no longer the pushed commit. " if moved else "")
+                + "Commit or stash, then push again"
+                + (":" if edited else "."),
+                file=sys.stderr,
+            )
+            for path in edited:
+                print(f"  {path}", file=sys.stderr)
+            return 3
         return 0
     if skipped and not args.allow_skip:
         print(f"pre_push: exit 3 — {skipped} gate(s) not run here; --allow-skip accepts that")
