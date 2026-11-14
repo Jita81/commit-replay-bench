@@ -13,8 +13,9 @@ What it does: Reads the API location and a local account from the environment th
               server reads (``CRB_API_URL``, ``CRB_MCP_USERNAME``, ``CRB_MCP_PASSWORD``),
               sends the request and prints the API's answer; a refusal is a one-line
               ``CliError`` naming the API's code.
-How:          :class:`crb.mcp.client.CrbApi` (login, CSRF, the error envelope); ``--json``
-              prints the API's JSON as-is.
+How:          :class:`crb.mcp.client.CrbApi` (login, CSRF, the error envelope), imported on
+              use so a base install's CLI still loads; ``--json`` prints the API's JSON
+              as-is.
 Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0050-context-set-arms.md
 Works with:   src/crb/server/routes/ctxsets.py (the routes), src/crb/mcp/client.py (the
@@ -31,13 +32,24 @@ import argparse
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from crb.cli.commands import EXIT_OK, CliError, add_common, print_json, print_lines
-from crb.mcp.client import CrbApi, CrbApiError
 
-#: Builds the API client; tests swap it for one over FastAPI's ``TestClient``.
-api_factory: Callable[[], CrbApi] = CrbApi.from_env
+if TYPE_CHECKING:
+    from crb.mcp.client import CrbApi
+
+
+def api_factory() -> CrbApi:
+    """Build the API client; tests swap this name for one over FastAPI's ``TestClient``.
+
+    The client is imported here, not at module load: ``crb.mcp`` needs the ``[mcp]`` extra
+    (``mcp``, ``httpx``), and ``crb.cli.main`` imports this module, so a load-time import
+    would stop every CLI verb on a base install.
+    """
+    from crb.mcp.client import CrbApi
+
+    return CrbApi.from_env()
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -65,6 +77,10 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
 
 
 def _call(fn: Callable[[CrbApi], Any]) -> Any:
+    try:
+        from crb.mcp.client import CrbApiError
+    except ImportError as e:
+        raise CliError(f"crb ctxset needs `pip install commit-replay-bench[mcp]` ({e})") from e
     api = api_factory()
     try:
         return fn(api)

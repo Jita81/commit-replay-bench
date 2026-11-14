@@ -155,3 +155,35 @@ def test_compare_lines_without_a_banner() -> None:
     assert lines[0].startswith("control")
     assert any(line.startswith("PENDING 1") for line in lines)
     assert any(line.startswith("dose_imbalance") for line in lines)
+
+
+def test_cli_loads_and_runs_without_the_mcp_extra() -> None:
+    """A base install has neither ``httpx`` nor ``mcp``: ``crb.cli.main`` must still import.
+
+    ``crb ctxset`` reaches the API through ``crb.mcp.client``; a load-time import made every
+    verb, ``crb --help`` included, fail before dispatch on a base install.
+    """
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys\n"
+        "class _Block:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name.split('.')[0] in ('httpx', 'mcp'):\n"
+        "            raise ModuleNotFoundError(f'No module named {name!r}')\n"
+        "        return None\n"
+        "sys.meta_path.insert(0, _Block())\n"
+        "import crb.cli.main\n"
+        "from crb.cli.commands import ctxset\n"
+        "try:\n"
+        "    ctxset._call(lambda api: None)\n"
+        "except Exception as e:\n"
+        "    print(type(e).__name__, e)\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, timeout=120, check=False
+    )
+    assert done.returncode == 0, done.stderr
+    assert "CliError" in done.stdout
+    assert "[mcp]" in done.stdout

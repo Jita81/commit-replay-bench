@@ -103,6 +103,7 @@ ignore = [
 "tests/**" = ["S", "PL", "B011"]
 # the CLI imports the optional server/store layers lazily so the base install works
 "src/crb/cli/commands/service.py" = ["PLC0415"]
+"src/crb/cli/commands/ctxset.py" = ["PLC0415"]
 
 [tool.ruff.format]
 quote-style = "double"
