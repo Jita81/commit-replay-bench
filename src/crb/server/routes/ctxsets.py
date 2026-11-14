@@ -9,7 +9,10 @@ read is the paired, fail-closed comparison served here.
   registered tasks (coverage) and, for a placebo, against the stored set it is matched to;
   then writes it once under ``<home>/ctxsets/<digest>.json``. The same body again is
   idempotent; a different body at one digest is 409 ``ctxset_conflict``. Each store is a
-  ``system/ctxset.stored`` event.
+  ``system/ctxset.stored`` event; an identical retry writes that event when an earlier store
+  published the file but never committed it. The file is published from a per-request
+  temporary file by an atomic link that never replaces an existing one, so two identical
+  submissions racing each other both answer the idempotent result.
 * ``GET /ctxsets/compare?control=RUN&treatment=RUN`` (viewer) pairs the two runs' rows task
   by task (:func:`crb.core.ctx_compare.ctx_pair`); a refusal is 422 with its reason as the
   code. It is declared before ``GET /ctxsets/{name}`` so ``compare`` is never read as a name.
@@ -24,8 +27,9 @@ What it does: Maps :class:`~crb.core.ctxset.CtxSetRefused` and
               :class:`~crb.core.ctx_compare.CtxPairRefused` to 422 with the reason as the code;
               writes a set content-addressed and never overwrites a different body; loads the
               sets a comparison's rows name from the store.
-How:          ``ctxset.parse`` → ``verify_coverage`` (+ ``verify_placebo``) → write →
-              ``append_system_event`` → commit; ``rows_of_runs`` → ``ctx_pair``.
+How:          ``ctxset.parse`` → ``verify_coverage`` (+ ``verify_placebo``) → publish (a
+              per-request temporary file, hard-linked into place) → ``append_system_event``
+              → commit; ``rows_of_runs`` → ``ctx_pair``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0050-context-set-arms.md
 Works with:   src/crb/core/ctxset.py (the record and its verifiers), src/crb/core/ctx_compare.py
@@ -39,11 +43,14 @@ Touch when:   never for a new repository; the set record, its store layout or th
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Query, status
+from sqlalchemy import select
 
 from crb.core.context_arm import LABEL_CTX_SET
 from crb.core.ctx_compare import CtxPairRefused, ctx_pair
@@ -66,8 +73,9 @@ from crb.server.routes.runs import (
     system_trace_id,
 )
 from crb.server.settings import Settings
+from crb.store.events import lock_event_writes
 from crb.store.ledger import rows_of_runs
-from crb.store.models import Repo, Run
+from crb.store.models import Event, Repo, Run
 
 router = APIRouter(tags=["ctxsets"])
 
@@ -75,6 +83,8 @@ _ERR: dict[str, Any] = {"model": ErrorEnvelope}
 
 #: A different body already stored at one digest (never overwritten).
 REFUSAL_CONFLICT = "ctxset_conflict"
+#: The ``system`` event each stored set carries, once (on its trace ``ctxset:<digest>``).
+ACTION_STORED = "ctxset.stored"
 #: A stored set the request names (a placebo's treatment, a comparison's set) is absent.
 REFUSAL_NOT_STORED = "ctxset_not_stored"
 
@@ -169,23 +179,69 @@ def store_ctxset(
     text = canonical_json(ctxset.to_doc())
     path = store_dir(settings) / f"{ctxset.digest}.json"
     if path.is_file():
-        if path.read_text(encoding="utf-8") != text:
-            raise ApiError(
-                409,
-                REFUSAL_CONFLICT,
-                f"a different body is stored at {ctxset.digest[:12]}; a set is never overwritten",
-            )
+        _same_body(path, text, ctxset)
+        # an earlier store published the file but its event never committed: record it now,
+        # once, so every stored set has its audit event (the payload a new store writes)
+        lock_event_writes(db)
+        if not _stored_event_exists(db, ctxset):
+            _append_stored_event(db, ctxset, operator.id)
+        db.commit()
         return {**_meta(ctxset), "stored": False}
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.replace(path)
+    if not _publish(path, text):
+        # a concurrent request published the same digest first: its event is its own
+        _same_body(path, text, ctxset)
+        return {**_meta(ctxset), "stored": False}
+    _append_stored_event(db, ctxset, operator.id)
+    db.commit()
+    return {**_meta(ctxset), "stored": True}
+
+
+def _same_body(path: Path, text: str, ctxset: CtxSet) -> None:
+    """Refuse 409 when ``path`` holds a body other than ``text``: a set is never overwritten."""
+    if path.read_text(encoding="utf-8") != text:
+        raise ApiError(
+            409,
+            REFUSAL_CONFLICT,
+            f"a different body is stored at {ctxset.digest[:12]}; a set is never overwritten",
+        )
+
+
+def _publish(path: Path, text: str) -> bool:
+    """Write ``text`` to ``path`` atomically, never replacing an existing file: the body goes
+    to a temporary file unique to this request, then is hard-linked into place (``link``
+    fails when the destination exists, so two identical submissions cannot race on one
+    temporary name or replace each other). ``False`` when ``path`` already existed."""
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.chmod(tmp, 0o644)  # what a plain write leaves under the usual umask
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _stored_event_exists(db: DbDep, ctxset: CtxSet) -> bool:
+    trace_id = system_trace_id("ctxset", ctxset.digest)
+    found = db.execute(
+        select(Event.id).where(Event.trace_id == trace_id, Event.action == ACTION_STORED).limit(1)
+    ).first()
+    return found is not None
+
+
+def _append_stored_event(db: DbDep, ctxset: CtxSet, actor: str) -> None:
     append_system_event(
         db,
         trace_id=system_trace_id("ctxset", ctxset.digest),
-        action="ctxset.stored",
+        action=ACTION_STORED,
         repo=ctxset.repo,
-        actor=operator.id,
+        actor=actor,
         payload={
             "digest": ctxset.digest,
             "name": ctxset.name,
@@ -194,8 +250,6 @@ def store_ctxset(
             "tasks": len(ctxset.task_ids),
         },
     )
-    db.commit()
-    return {**_meta(ctxset), "stored": True}
 
 
 @router.get(
@@ -251,6 +305,7 @@ def get_ctxset(name: str, _viewer: ViewerDep, settings: SettingsDep) -> dict[str
 
 
 __all__ = [
+    "ACTION_STORED",
     "REFUSAL_CONFLICT",
     "REFUSAL_NOT_STORED",
     "find_by_name",

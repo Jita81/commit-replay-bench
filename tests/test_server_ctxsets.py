@@ -36,7 +36,13 @@ from sqlalchemy import select
 from crb.core import ctx_compare as cc
 from crb.core import ctxset
 from crb.core.ledger import GradeRow
-from crb.server.routes.ctxsets import REFUSAL_CONFLICT, REFUSAL_NOT_STORED, store_dir
+from crb.server.routes import ctxsets as ctxsets_route
+from crb.server.routes.ctxsets import (
+    ACTION_STORED,
+    REFUSAL_CONFLICT,
+    REFUSAL_NOT_STORED,
+    store_dir,
+)
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Run
 from fixtures.ctx_rows import ctx_doc, side
@@ -99,6 +105,59 @@ class TestStore:
         with env.factory() as s:
             n = len(list(s.execute(select(Event).where(Event.action == "ctxset.stored"))))
         assert n == 1
+
+    def test_identical_retry_writes_a_missing_stored_event_once(self, env: Env) -> None:
+        """An earlier store published the file but its event never committed: the identical
+        retry records the event (the payload a new store writes), and a later retry adds no
+        second one."""
+        parsed = ctxset.parse(_doc(env))
+        path = store_dir(env.settings) / f"{parsed.digest}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(ctxset.canonical_json(parsed.to_doc()), encoding="utf-8")
+        for _ in range(2):
+            again = _put(env, _doc(env))
+            assert again.status_code == 201 and again.json()["stored"] is False
+            with env.factory() as s:
+                events = list(
+                    s.execute(select(Event).where(Event.action == ACTION_STORED)).scalars()
+                )
+            assert len(events) == 1
+            assert events[0].payload_json == {
+                "digest": parsed.digest,
+                "name": parsed.name,
+                "source": parsed.source,
+                "repo": ALPHA,
+                "tasks": 4,
+            }
+
+    def test_a_concurrent_identical_store_answers_the_idempotent_result(
+        self, env: Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Another request publishes the same set between this request's check and its
+        publish: this one answers ``stored: false`` (no 500, no overwrite) and leaves no
+        temporary file behind."""
+        parsed = ctxset.parse(_doc(env))
+        text = ctxset.canonical_json(parsed.to_doc())
+        path = store_dir(env.settings) / f"{parsed.digest}.json"
+        real = ctxsets_route._publish
+
+        def raced(dest: Path, body: str) -> bool:
+            assert real(dest, body)  # the other request wins
+            return real(dest, body)
+
+        monkeypatch.setattr(ctxsets_route, "_publish", raced)
+        r = _put(env, _doc(env))
+        assert r.status_code == 201, r.text
+        assert r.json()["stored"] is False
+        assert path.read_text(encoding="utf-8") == text
+        assert sorted(p.name for p in path.parent.iterdir()) == [path.name]
+
+    def test_publish_never_replaces_an_existing_file(self, tmp_path: Path) -> None:
+        dest = tmp_path / "set.json"
+        assert ctxsets_route._publish(dest, "first") is True
+        assert ctxsets_route._publish(dest, "second") is False
+        assert dest.read_text(encoding="utf-8") == "first"
+        assert [p.name for p in tmp_path.iterdir()] == ["set.json"]
 
     def test_different_body_at_one_digest_is_409(self, env: Env) -> None:
         digest = ctxset.parse(_doc(env)).digest
