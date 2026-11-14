@@ -18,8 +18,10 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   same tasks. A length-matched placebo is its own set and never pools with its treatment;
   each row carries an `anchor.v1` gap label. `GET /ctxsets/compare` pairs the runs with an
   exact McNemar test that fails closed on pending tasks. These arms are measurement only: no
-  reading, route, sign-off or value figure counts them, and a hindsight set is a labelled
-  ceiling. Runs without `context_set` are unchanged; the leak guard and apparatus 2.5 are too
+  reading, route, sign-off, re-measure price, spend rule or value figure counts them, and a
+  hindsight set is a labelled reference for that one brief. `crb ctxset` needs the `[mcp]`
+  extra and says so; the CLI still starts without it. Runs without `context_set` are
+  unchanged; the leak guard and apparatus 2.5 are too
   ([#148](https://github.com/Jita81/commit-replay-bench/pull/148)).
 
 - **The Go controls' compile probe is the belt run's own command.** The negative controls

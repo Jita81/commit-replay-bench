@@ -42,7 +42,9 @@ Add opt-in context-set arms. A run without `context_set` behaves exactly as befo
    (`crb.core.ctxset`). A run naming a set replays exactly the set's tasks.
 2. **Arm ids (amends ADR-0026 item 1).** A library NAME starting with `ctx.` is reserved for
    context sets, must match `^ctx\.(oracle|oracle-placebo|mech|mech-placebo)\.[0-9a-f]{12}$`,
-   and may only follow base `A0`, without `+facts` and `+L`. The grammar does not change.
+   and may only follow base `A0`, without `+facts` and `+L`. A malformed name in the reserved
+   namespace (`ctx.` followed by anything else) is outside the arm grammar, so `parse_arm`
+   refuses it rather than reading it as an ordinary library arm.
    `hindsight_arm` (name starts `ctx.oracle`) and `measurement_only` (any ctx name) are derived
    from the arm id alone (`crb.core.context_arm`).
 3. **Leak guard (amends ADR-0026 item 7).** The novel-token set is computed whenever a brief
@@ -81,9 +83,11 @@ Add opt-in context-set arms. A run without `context_set` behaves exactly as befo
    executor, checks arm, builder, model, taxonomy or gap rule, and any unsealed row.
 9. **Never certifies (new rule).** No reading accepts a measurement-only arm. The value
    scorecard, capability, routing and re-measure readers drop its rows, and an explicit arm
-   selector refuses it. Its spend is measurement spend and stays outside the north star. A
-   hindsight result is shown as a ceiling of a hindsight brief that may restate the answer,
-   never as a builder capability.
+   selector refuses it. The re-measure plan never prices a top-up from its rows, a run's
+   escalation yield and calibrated caps never read them, and the north star drops review
+   verdicts joined to them. Its spend is measurement spend and stays outside the north star. A
+   hindsight result is shown as a reference for one hindsight brief that may restate the
+   answer, never as a builder capability.
 10. **Runs.** A context-set run is kind `blind`, learning off, needs a sealed deployment, and
     is refused in a reserved reading; the reserved parameter whitelist is unchanged.
 
@@ -93,8 +97,9 @@ Add opt-in context-set arms. A run without `context_set` behaves exactly as befo
 
 - A context source can be tried against a matched placebo on the same commits, with n,
   intervals and an exact test.
-- A mechanical source and a hindsight ceiling share one mechanism; the ceiling bounds what any
-  source could add on those commits.
+- A mechanical source and a hindsight brief share one mechanism. The hindsight result is a
+  reference for that one brief on those commits, not a bound on what any source could add: a
+  hindsight brief can omit useful information, and another source can beat it.
 
 **Harder.**
 
