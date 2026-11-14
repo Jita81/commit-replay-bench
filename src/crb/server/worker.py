@@ -183,7 +183,7 @@ How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (g
               row with trial labels before it is chained → ``JobQueue.finish``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0005-fail-closed-docker-sandbox.md,
-              docs/adr/0012-builder-in-a-sealed-container.md
+              docs/adr/0012-builder-in-a-sealed-container.md, docs/adr/0050-context-set-arms.md
 Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finish; the
               check-in row the health probe reads is ``WorkerRow`` in src/crb/store/models.py),
               src/crb/observability/metrics.py (the recorders, ``record_event`` on
@@ -222,7 +222,8 @@ Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/te
               tests/test_p792_reserved_refusals.py (the claim's ``reading_run_fields`` refusal,
               C7, the reserver's recheck under the lock, the lint and checks-arm halts and the
               team's own ``format_step`` keeping ``A0+L`` on the reading's arm),
-              tests/test_p792_pool.py (the claim's ``pool_drift`` refusal)
+              tests/test_p792_pool.py (the claim's ``pool_drift`` refusal),
+              tests/test_worker_ctx.py (a context-set run's plan, refusals and stamps)
 Touch when:   never for a new repository — repository behaviour lives in the runner and the
               repo config; a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
               src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
@@ -272,7 +273,7 @@ from crb.builders.adapter import (
     rungs_from_entries,
 )
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
-from crb.builders.brief import ARM_S1, S1Arm
+from crb.builders.brief import ARM_S1, ContextEntry, S1Arm
 from crb.builders.budget import budget_for_rung
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
 from crb.builders.container import BuilderContainerSettings, UnconfirmedKill
@@ -282,7 +283,21 @@ from crb.core.capability import PROJECTION_CLASS_SIZE, CapabilityMap
 from crb.core.checks import ARM_OFF, RepoChecks
 from crb.core.checks import resolve as resolve_checks
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
-from crb.core.context_arm import BASE_S1, BASE_S2, REPLAY_MODE, parse_arm
+from crb.core.context_arm import BASE_S1, BASE_S2, REPLAY_MODE, measurement_only, parse_arm
+from crb.core.ctxset import REASON_DIGEST as REASON_CTX_DIGEST
+from crb.core.ctxset import REASON_MODE as REASON_CTX_MODE
+from crb.core.ctxset import REASON_POSTURE as REASON_CTX_POSTURE
+from crb.core.ctxset import REASON_SCHEMA as REASON_CTX_SCHEMA
+from crb.core.ctxset import ROLE_ENTRIES as ROLE_CTX_ENTRIES
+from crb.core.ctxset import ROLES as CTX_ROLES
+from crb.core.ctxset import (
+    CtxSet,
+    CtxSetRefused,
+    ctx_gap_anchor,
+    run_stamps,
+    verify_coverage,
+    verify_source_revs,
+)
 from crb.core.deps import DepsProvider, ProvisionRefused
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.execution import (
@@ -446,6 +461,7 @@ from crb.server.routes.runs import (
     append_system_event,
     credential_refusal,
     new_run,
+    stored_ctxset,
     submit_refusals,
     system_trace_id,
 )
@@ -453,6 +469,7 @@ from crb.server.schemas import BUILD_KINDS, BUILDER_CONFIG_SECRET_MARKERS, RunCr
 from crb.server.settings import (
     ALLOW_UNSEALED_PROD_ENV,
     ROLE_RANK,
+    SEALED_EXECUTOR,
     FactorySettings,
     GitHubAppSettings,
     IntakeSettings,
@@ -1227,6 +1244,35 @@ class _RunLedger:
 # ---------------------------------------------------------------------------
 
 Handler = Callable[[RunContext], tuple[str, dict[str, Any], str]]
+
+
+@dataclass(frozen=True)
+class _CtxPlan:
+    """A context-set run's plan (ADR-0050), fixed at claim before anything is qualified or
+    built: the stored set, re-verified; its tasks in set order (exactly what the run
+    replays); the stamps every row of each task carries; and, on the ``entries`` role, each
+    task's entry and the set name its arm carries (``arm_set``; empty on ``control``)."""
+
+    ctxset: CtxSet
+    role: str
+    tasks: tuple[TaskSpec, ...]
+    stamps: Mapping[str, Mapping[str, str]]
+    entries: Mapping[str, ContextEntry]
+    arm_set: str
+
+
+def tree_has_at(git: GitRepo, rev: str) -> Callable[[str], bool]:
+    """``tree_has(token)`` for rule ``anchor.v1``: whether ``rev``'s tree holds ``token``
+    (``git grep -q -F``, fixed string). A git failure other than "not found" raises
+    :class:`GitError`, so a gap label is never written from a broken read."""
+
+    def has(token: str) -> bool:
+        res = git.run("grep", "-q", "-F", "-e", token, rev)
+        if res.returncode not in (0, 1):
+            raise GitError(["git", "grep", rev], res.returncode, res.stderr)
+        return res.returncode == 0
+
+    return has
 
 
 def run_executor_kind(params: Mapping[str, Any], settings: WorkerSettings) -> str:
@@ -3062,9 +3108,14 @@ class Worker:
         repository's ``spend`` block under the prevention loop's overlay (the team's keys
         win); ``None`` reads the configuration as stored. Only rows of the run's own
         ``checks`` arm are read: a calibrated cap or an escalation yield never pools rows
-        graded with the format step or belt 6 set otherwise (ADR-0024)."""
+        graded with the format step or belt 6 set otherwise (ADR-0024). Context-set rows
+        are measurement-only and never feed a yield or a cap (ADR-0050)."""
         try:
-            rows = rows_for_checks(self.ledger.rows(), checks_arm)
+            rows = [
+                r
+                for r in rows_for_checks(self.ledger.rows(), checks_arm)
+                if not measurement_only(r.context_arm)
+            ]
         except Exception as exc:  # the rules are advisory spend, never a reason to fail a run
             rows = []
             ctx.emit(
@@ -3320,8 +3371,14 @@ class Worker:
         pre-flight, escalation policy, posture and repository configuration — shared by
         every arm, so the S1 author is the arm's), the arm half per task (:func:`arm_projection`, with the r1 budget calibration
         gives that task, and the S1 author's label on the S1 arm). The hold is the r1 rung's
-        cost cap (``None`` when the rung has none)."""
+        cost cap (``None`` when the rung has none). A context-set run (ADR-0050) is measurement
+        only: no reading counts it, so it never reserves — refused here as at submit."""
         p = ctx.params
+        if p.get("context_set"):
+            raise ValueError(
+                f"a context-set run ({p['context_set']}) is measurement only: no reading "
+                "reserves its commits (ADR-0050)"
+            )
         kind = run_executor_kind(p, self.settings).strip().lower()
         r1 = ladder.rungs[0]
         base = budget_for_rung(r1, budget)
@@ -3432,10 +3489,86 @@ class Worker:
 
         return reserve
 
+    def _ctx_plan(self, ctx: RunContext, *, mode: str) -> _CtxPlan:
+        """ADR-0050 at claim, before any spend: the run's context set re-read from the store
+        and re-checked exactly as ``POST /runs`` checked it, plus what only the clone can
+        check. Raises :class:`CtxSetRefused` for ``ctxset_mode`` (not a blind ``A0`` run with
+        the loop off, or an unknown role), ``ctxset_posture`` (the run's sandbox or the
+        deployment's builder is not ``docker``), a set not stored, its digest, repository or
+        coverage, a placebo whose treatment is not stored or no longer matches it
+        (``ctxset_placebo_*``, re-verified by ``stored_ctxset``), and ``ctxset_mechanical`` (a ``mech*`` entry not drafted at its task's
+        parent); a git read failing raises :class:`GitError`. The gap label (``anchor.v1``)
+        reads each task's commit message and its parent tree, nothing else."""
+        p = ctx.params
+        name = str(p.get("context_set") or "")
+        role = str(p.get("context_role") or ROLE_CTX_ENTRIES)
+        if role not in CTX_ROLES:
+            raise CtxSetRefused(REASON_CTX_MODE, f"context_role {role!r} is not one of {CTX_ROLES}")
+        if mode != MODE_BLIND or p.get("arm") or p.get("learning") != "off":
+            raise CtxSetRefused(
+                REASON_CTX_MODE, "a context-set run is blind A0 with learning 'off' and no arm"
+            )
+        if p.get("task_ids") or p.get("limit"):
+            raise CtxSetRefused(REASON_CTX_MODE, "a context-set run replays the set's own tasks")
+        executors = (self._executor_kind(ctx), self.settings.builder_executor)
+        if any(str(e).strip().lower() != SEALED_EXECUTOR for e in executors):
+            raise CtxSetRefused(
+                REASON_CTX_POSTURE, f"sandbox and builder executors are {executors}, not sealed"
+            )
+        ctxset = stored_ctxset(self.settings.home, name)
+        if ctxset is None:
+            raise CtxSetRefused(REASON_CTX_DIGEST, f"no stored context set is {name}")
+        with self.factory() as s:
+            rows = s.execute(select(Task).where(Task.repo == ctx.run.repo)).scalars().all()
+        specs = {r.task_id: TaskSpec.from_dict(r.spec_json) for r in rows}
+        verify_coverage(ctxset, specs.values(), repo=ctx.run.repo)
+        parents = {tid: ctx.git.parent(tid) for tid in ctxset.task_ids}
+        verify_source_revs(ctxset, parents)
+        gaps = {
+            tid: ctx_gap_anchor(ctx.git.message(tid), tree_has_at(ctx.git, parents[tid]))
+            for tid in ctxset.task_ids
+        }
+        entries: dict[str, ContextEntry] = {}
+        if role == ROLE_CTX_ENTRIES:
+            for e in ctxset.entries:
+                entries[e.task_id] = ContextEntry(
+                    entry_id=e.entry_id,
+                    text=e.text,
+                    version=e.version,
+                    produced_at=e.produced_at,
+                    mechanical=e.mechanical,
+                    source_rev=e.source_rev,
+                )
+        return _CtxPlan(
+            ctxset=ctxset,
+            role=role,
+            tasks=tuple(specs[tid] for tid in ctxset.task_ids),
+            stamps=run_stamps(ctxset, role, gaps),
+            entries=entries,
+            arm_set=ctxset.name if role == ROLE_CTX_ENTRIES else "",
+        )
+
     def _run_replay(self, ctx: RunContext, *, mode: str) -> tuple[str, dict[str, Any], str]:
         run = ctx.run
         p = ctx.params
-        tasks = self._select_tasks(ctx)
+        ctx_plan: _CtxPlan | None = None
+        if p.get("context_set"):
+            # ADR-0050: loaded, re-verified and stamped before anything is qualified or built
+            try:
+                ctx_plan = self._ctx_plan(ctx, mode=mode)
+            except (CtxSetRefused, GitError) as e:
+                code = e.reason if isinstance(e, CtxSetRefused) else REASON_CTX_SCHEMA
+                why = f"{code}: context set {p.get('context_set')!r}: {e}; nothing was built"
+                ctx.emit(
+                    "system",
+                    "run.refused",
+                    status=StepStatus.ERROR,
+                    error=why,
+                    code=code,
+                    context_set=str(p.get("context_set")),
+                )
+                return STATUS_FAILED, dict(ctx.counts), why
+        tasks = list(ctx_plan.tasks) if ctx_plan is not None else self._select_tasks(ctx)
         total = len(tasks)
         ctx.counts.update({"tasks": 0, "total": total, "rows": 0, "clean": 0})
         ladder = self._ladder(ctx)
@@ -3621,6 +3754,21 @@ class Worker:
             if self.settings.builder_executor
             else None
         )
+        if ctx_plan is not None and container is None:
+            # ADR-0050 R10: a context-set run (control too) never builds on the host
+            why = (
+                f"{REASON_CTX_POSTURE}: context set {ctx_plan.ctxset.name!r} needs the builder "
+                "in its sealed container; nothing was built"
+            )
+            ctx.emit(
+                "system",
+                "run.refused",
+                status=StepStatus.ERROR,
+                error=why,
+                code=REASON_CTX_POSTURE,
+                context_set=ctx_plan.ctxset.name,
+            )
+            return STATUS_FAILED, dict(ctx.counts), why
         if reading is not None:
             # P-792: under a reserved.v1 reading each task's r1 is reserved before its build
             spec = dataclass_replace(
@@ -3664,6 +3812,10 @@ class Worker:
             checks=checks if checks.any_on or not checks.repo.is_default else None,
             learning=learning,
             s1=self._s1_arm_of(ctx, s1_author) if s1_author is not None else None,
+            # ADR-0050: the entries role's arm and entries; both roles' stamps on every row
+            context_set=ctx_plan.arm_set if ctx_plan is not None else "",
+            ctx_entries=ctx_plan.entries if ctx_plan is not None else None,
+            ctx_stamps=ctx_plan.stamps if ctx_plan is not None else None,
         )
         self._progress(ctx, 0, total)
 

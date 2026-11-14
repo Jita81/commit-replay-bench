@@ -103,6 +103,7 @@ ignore = [
 "tests/**" = ["S", "PL", "B011"]
 # the CLI imports the optional server/store layers lazily so the base install works
 "src/crb/cli/commands/service.py" = ["PLC0415"]
+"src/crb/cli/commands/ctxset.py" = ["PLC0415"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -174,6 +175,14 @@ source_modules = [
 forbidden_modules = [
   "crb.core.library", "crb.core.miners", "crb.store.library", "crb.server.routes.library",
 ]
+
+[[tool.importlinter.contracts]]
+# ADR-0050: a builder receives plain ContextEntry values from the worker; it never reads a
+# context-set record or the paired reader, so no brief can choose its own set or see a result.
+name = "context sets never reach a builder"
+type = "forbidden"
+source_modules = ["crb.builders"]
+forbidden_modules = ["crb.core.ctxset", "crb.core.ctx_compare"]
 
 [[tool.importlinter.contracts]]
 name = "layers depend downward only"

@@ -82,7 +82,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
-from crb.core.context_arm import PROVENANCE_LABELS
+from crb.core.context_arm import PROVENANCE_LABELS, measurement_only
 from crb.core.economics import Economics, fold_economics
 from crb.core.git import GitError, GitRepo
 from crb.core.ledger import (
@@ -505,9 +505,12 @@ class ReadingBook:
         its reading certified, or the richest arm of a ceiling), else ``display_arm`` when the
         cell holds it, else the first arm it holds (in sorted order — shown, and routed on an
         arm no reading licenses). A row from before 2.4 carries no arm and is kept (history,
-        one apparatus). A projected cell never holds two arms (ADR-0026 item 1)."""
+        one apparatus). A projected cell never holds two arms (ADR-0026 item 1). A row of a
+        measurement-only arm (a context set, ADR-0050 item 9) is dropped first: it is never a
+        cell's standard, never shown and never routed."""
         out: list[GradeRow] = []
-        for group in group_by_cell(rows, key_fields=projection).values():
+        kept = [r for r in rows if not measurement_only(r.context_arm)]
+        for group in group_by_cell(kept, key_fields=projection).values():
             outcome = self.outcome_for_rows(group)
             present = sorted({r.context_arm for r in group if r.context_arm})
             arm = display_arm if display_arm in present or not present else present[0]

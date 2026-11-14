@@ -21,6 +21,8 @@ and filterable, never a pooling key:
 ``ctx_author``     the test author's provider stamp, on an ``S1`` brief
 ``ctx_library``    digest of the library entries' ids and versions, when any
 ``ctx_refused``    how many context lines the leak guard refused
+``ctx_delivered``  on a context-set arm (ADR-0050): how many entries reached the brief
+``ctx_chars``      on a context-set arm: the characters of the entries that reached it
 =================  ===================================================================
 
 **The leak guard** (ADR-0026 item 7). A context line — a structural fact, a learned
@@ -35,11 +37,19 @@ selection — at or before the reading's pool began (:func:`admit_retrospective`
 lines are held out and time-ordered before they reach the composer
 (:func:`crb.core.playbook.taught_before`).
 
+**Context-set arms** (ADR-0050 item 4). On an arm whose library NAME is a context set
+(``crb.core.context_arm.ctx_set_name``) the admission is derived from the arm alone: a
+hindsight set (``ctx.oracle*``) skips only the retrospective time rule — never the leak guard
+or the bare-fact refusal; a mechanical set (``ctx.mech*``) is admitted by knowledge boundary
+(:func:`admit_at_parent`: mechanical and drafted at the task's parent commit). Any other
+library NAME keeps :func:`admit_retrospective` unchanged.
+
 Navigation
 ----------
 What it is:   The one brief composer (``compose``), the context-arm name (``context_arm_for``,
               a seam until stream R's ``crb.core.context_arm`` lands), the leak guard
-              (``novel_tokens``, ``refuse_novel``, ``admit_retrospective``), the replay
+              (``novel_tokens``, ``refuse_novel``, ``admit_retrospective``,
+              ``admit_at_parent``), the replay
               ``S1`` arm's hook (``S1Arm``) and the rule for which factory ``S2`` rows a
               reading may count (``counts_as_s2_first_attempt``).
 What it does: Builds every replay and factory ``BuildBrief`` from one arm and one ticket,
@@ -51,7 +61,8 @@ How:          Pure functions over strings plus one ``git`` read (``novel_tokens`
               brief's own validation (a blind brief discloses no test).
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (items 1, 7 and 8),
-              docs/adr/0004-builder-registry-sighted-and-blind.md
+              docs/adr/0004-builder-registry-sighted-and-blind.md,
+              docs/adr/0050-context-set-arms.md (item 4, the context-set admission)
 Works with:   src/crb/builders/adapter.py (the replay brief, the ``S1`` arm),
               src/crb/factory/build.py (the factory brief), src/crb/builders/base.py
               (``BuildBrief``, ``DEFAULT_RULES``), src/crb/core/playbook.py (the learned lines'
@@ -99,6 +110,8 @@ LABEL_CTX_RULES = _arms.LABEL_CTX_RULES
 LABEL_CTX_AUTHOR = _arms.LABEL_CTX_AUTHOR
 LABEL_CTX_LIBRARY = _arms.LABEL_CTX_LIBRARY
 LABEL_CTX_REFUSED = _arms.LABEL_CTX_REFUSED
+LABEL_CTX_DELIVERED = _arms.LABEL_CTX_DELIVERED
+LABEL_CTX_CHARS = _arms.LABEL_CTX_CHARS
 CTX_LABELS: tuple[str, ...] = (
     LABEL_CTX_TICKET,
     LABEL_CTX_BRIEF,
@@ -191,13 +204,16 @@ class Ticket:
 @dataclass(frozen=True)
 class ContextEntry:
     """A fact or library entry offered to a brief, with its provenance: when it was
-    produced and whether mechanically (a pinned process, no person's edit or selection)."""
+    produced and whether mechanically (a pinned process, no person's edit or selection).
+    ``source_rev`` is the commit a mechanical context-set entry was drafted at — its
+    knowledge boundary (ADR-0050 item 4); empty for every other entry."""
 
     entry_id: str
     text: str
     version: str = ""
     produced_at: str = ""
     mechanical: bool = False
+    source_rev: str = ""
 
 
 def admit_retrospective(
@@ -212,6 +228,23 @@ def admit_retrospective(
     for e in entries:
         ok = e.mechanical and bool(e.produced_at) and bool(pool_began)
         if ok and e.produced_at <= pool_began:
+            admitted.append(e)
+        else:
+            refused.append(e.entry_id)
+    return admitted, refused
+
+
+def admit_at_parent(
+    entries: Iterable[ContextEntry], parent_rev: str
+) -> tuple[list[ContextEntry], list[str]]:
+    """``(admitted, refused ids)`` for a MECHANICAL context-set arm (``ctx.mech*``, ADR-0050
+    item 4; ADR-0026 item 1's ``+facts@<drafter>`` condition): an entry is admitted by its
+    knowledge boundary, not by wall-clock time — only when it was produced mechanically and
+    records the task's parent commit as its ``source_rev``. Anything else is refused."""
+    admitted: list[ContextEntry] = []
+    refused: list[str] = []
+    for e in entries:
+        if e.mechanical and bool(parent_rev) and e.source_rev == parent_rev:
             admitted.append(e)
         else:
             refused.append(e.entry_id)
@@ -333,6 +366,7 @@ def compose(
     retrospective: bool = False,
     pool_began: str = "",
     root: str = "",
+    parent_rev: str = "",
 ) -> Composed:
     """THE brief composer (ADR-0026 items 1 and 7): the arm's brief for one ticket.
 
@@ -342,12 +376,33 @@ def compose(
     and refuses every bare fact (it carries no provenance to admit it by);
     every context line naming a ``novel`` token is refused and counted. A blind brief
     discloses no test (``BuildBrief`` refuses one that would). ``root`` — the worktree the
-    brief is for — is kept out of the provenance hashes."""
+    brief is for — is kept out of the provenance hashes.
+
+    On a context-set arm (ADR-0050 item 4) the admission comes from the arm, and the brief is
+    always retrospective: a hindsight set (``ctx.oracle*``) skips the time rule only; a
+    mechanical set (``ctx.mech*``) is admitted by :func:`admit_at_parent` against
+    ``parent_rev`` (the task's parent commit, required); the leak guard and the bare-fact
+    refusal apply to both, and the labels gain ``ctx_delivered`` and ``ctx_chars``."""
+    ctx_name = _arms.ctx_set_name(arm)
+    if ctx_name:
+        retrospective = True
     admitted = list(library)
     lib_refused: list[str] = []
     bare_refused: list[str] = []
     if retrospective:
-        admitted, lib_refused = admit_retrospective(library, pool_began=pool_began)
+        if _arms.hindsight_arm(arm):
+            # written with hindsight of the answer: never stamped mechanical, so the time
+            # rule cannot admit it; it skips that rule ONLY (the guard below still runs)
+            admitted, lib_refused = list(library), []
+        elif ctx_name:
+            if not parent_rev:
+                raise ValueError(
+                    f"a mechanical context-set arm ({arm}) is admitted at the task's parent "
+                    "commit: compose needs parent_rev (ADR-0050 item 4)"
+                )
+            admitted, lib_refused = admit_at_parent(library, parent_rev)
+        else:
+            admitted, lib_refused = admit_retrospective(library, pool_began=pool_began)
         # a bare fact carries no provenance, so it cannot show it was produced mechanically
         # before the pool began: a retrospective brief takes facts only as library entries
         bare_refused, facts = list(facts), ()
@@ -402,6 +457,9 @@ def compose(
         labels[LABEL_CTX_LIBRARY] = _sha(
             json.dumps(sorted([e.entry_id, e.version] for e in kept_entries))
         )[:16]
+    if ctx_name:
+        labels[LABEL_CTX_DELIVERED] = str(len(kept_entries))
+        labels[LABEL_CTX_CHARS] = str(sum(len(e.text) for e in kept_entries))
     return Composed(brief=brief, labels=labels, refused=refused, library=kept_entries)
 
 
@@ -444,6 +502,8 @@ __all__ = [
     "LABEL_CONTEXT_ARM",
     "LABEL_CTX_AUTHOR",
     "LABEL_CTX_BRIEF",
+    "LABEL_CTX_CHARS",
+    "LABEL_CTX_DELIVERED",
     "LABEL_CTX_HARNESS",
     "LABEL_CTX_LIBRARY",
     "LABEL_CTX_REFUSED",
@@ -457,6 +517,7 @@ __all__ = [
     "ContextEntry",
     "S1Arm",
     "Ticket",
+    "admit_at_parent",
     "admit_retrospective",
     "arm_base",
     "arm_carries_loop",

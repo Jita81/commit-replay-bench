@@ -45,7 +45,7 @@ from crb.cli.commands import (
 )
 from crb.core.capability import PROJECTION_CELL, ReadingBook, build_capability_map
 from crb.core.checks import ARM_OFF, ARMS
-from crb.core.context_arm import is_arm, mode_admits
+from crb.core.context_arm import is_arm, measurement_only, mode_admits
 from crb.core.ledger import DEFAULT_READ_ARM, JsonlLedger, rows_for_checks, rows_for_reading
 from crb.core.reading import Reading, first_per_id
 from crb.core.routing import DEFAULT_POLICY, ROUTE_DO_NOT_SHIP, RoutingPolicy
@@ -202,6 +202,11 @@ def cmd_route(args: argparse.Namespace) -> int:
         raise CliError("--apparatus all is refused: a reading has one apparatus (ADR-0025 item 1)")
     if not is_arm(args.arm):
         raise CliError(f"--arm {args.arm!r} is outside the context-arm grammar (ADR-0026 item 1)")
+    if measurement_only(args.arm):
+        raise CliError(
+            f"--arm {args.arm!r} is a measurement-only context-set arm (ADR-0050): it never "
+            "routes; compare it with 'crb ctxset compare --control RUN --treatment RUN'"
+        )
     apparatus = APPARATUS_VERSION if args.apparatus in ("", "current") else args.apparatus
     every = list(JsonlLedger(path).rows())
     by_checks = rows_for_checks(every, args.checks)

@@ -81,7 +81,9 @@ Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
               docs/adr/0019-qualification-is-posture-relative.md,
-              docs/adr/0024-working-by-construction.md; ADR-0025 items 5 and 6 (stream G)
+              docs/adr/0024-working-by-construction.md; ADR-0025 items 5 and 6 (stream G);
+              docs/adr/0050-context-set-arms.md (``ctx_label_violation``: a row's context-set
+              stamps agree with its arm)
 Works with:   src/crb/core/checks.py (the arm a row's ``checks`` stamp names),
               src/crb/core/grade.py (the GradeResult a row reduces; the belt vocabulary),
               src/crb/core/evidence.py (pack hash, canonical JSON, sha256, timestamps),
@@ -91,7 +93,8 @@ Works with:   src/crb/core/checks.py (the arm a row's ``checks`` stamp names),
               writer of v3-legacy rows), src/crb/core/stats.py (the Wilson interval)
 Tested by:    tests/test_ledger.py, tests/test_store_ledger.py, tests/test_census_gate.py,
               tests/test_run.py, tests/test_grade_api_belt.py, tests/test_checks_pooling.py,
-              tests/test_ledger_classification.py, tests/test_failure_rule_golden.py
+              tests/test_ledger_classification.py, tests/test_failure_rule_golden.py,
+              tests/test_ledger_ctx.py
 Touch when:   never for a new repository; adding a belt, a failure kind, a cell-key field or a
               hashed label changes what the chain commits to — needs an ADR, an apparatus bump
               (src/crb/core/version.py), a store migration (as
@@ -120,13 +123,25 @@ from crb.core import version as _version
 from crb.core.acceptance import held_out_graded, held_out_passes
 from crb.core.checks import ARM_OFF, ARMS, LABEL_CHECKS, arm_from_label
 from crb.core.context_arm import (
+    BASE_A0,
     BASE_S1,
     BASE_S2,
+    CTX_SOURCE_CONTROL,
     LABEL_CONTEXT_ARM,
+    LABEL_CTX_CEILING,
+    LABEL_CTX_CHARS,
+    LABEL_CTX_DELIVERED,
+    LABEL_CTX_DRAFTER,
+    LABEL_CTX_GAP,
+    LABEL_CTX_GAP_RULE,
+    LABEL_CTX_SET,
+    LABEL_CTX_SOURCE,
     TEST_AUTHORED,
     TEST_PERSON,
     ContextArmsPooled,
     context_arm_for,
+    ctx_set_name,
+    hindsight_arm,
     is_arm,
     loop_on,
     parse_arm,
@@ -483,6 +498,77 @@ LABEL_API_FINDINGS = "api_findings"
 
 class LedgerIntegrityError(RuntimeError):
     """The hash chain does not verify."""
+
+
+#: The context-set stamps (ADR-0050 item 5): ``CTX_RUN_LABELS`` on every row of a context-set
+#: run, control included; ``CTX_ARM_LABELS`` only on a row whose arm names the set.
+CTX_RUN_LABELS: tuple[str, ...] = (
+    LABEL_CTX_SET,
+    LABEL_CTX_SOURCE,
+    LABEL_CTX_GAP,
+    LABEL_CTX_GAP_RULE,
+)
+CTX_ARM_LABELS: tuple[str, ...] = (
+    LABEL_CTX_DELIVERED,
+    LABEL_CTX_CHARS,
+    LABEL_CTX_CEILING,
+    LABEL_CTX_DRAFTER,
+)
+_CTX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def ctx_label_violation(arm: str, labels: Mapping[str, str]) -> str:
+    """Why a row's context-set stamps disagree with its arm (ADR-0050 item 5), or ``""``.
+
+    A row whose arm names a context set (``A0+library@ctx.<source>.<hex>``) is base ``A0``
+    with no ``+facts`` and no ``+L``; it carries ``ctx_set`` (the full digest, whose first
+    twelve characters are the name's), ``ctx_source`` (the name's source), ``ctx_gap``
+    (``0``/``1``), ``ctx_gap_rule``, ``ctx_delivered`` and ``ctx_chars`` (decimal),
+    ``ctx_drafter`` exactly on a ``mech*`` arm and ``ctx_ceiling`` = ``1`` exactly on a
+    hindsight arm. A control row (``ctx_set`` on any other arm) is plain ``A0`` with
+    ``ctx_source`` = ``control``, ``ctx_gap`` and ``ctx_gap_rule``, and none of the arm's
+    own stamps. A row of neither kind carries no ctx stamp at all."""
+    name = ctx_set_name(arm)
+    present = [k for k in (*CTX_RUN_LABELS, *CTX_ARM_LABELS) if k in labels]
+    if not name and not present:
+        return ""
+    digest = labels.get(LABEL_CTX_SET, "")
+    gap = labels.get(LABEL_CTX_GAP, "")
+    if not _CTX_DIGEST_RE.match(digest):
+        return f"context-set stamps without a full ctx_set digest on arm {arm!r} (ADR-0050)"
+    if gap not in ("0", "1") or not labels.get(LABEL_CTX_GAP_RULE):
+        return f"ctx_gap {gap!r} / ctx_gap_rule missing or outside '0'/'1' (ADR-0050 item 6)"
+    source = labels.get(LABEL_CTX_SOURCE, "")
+    if not name:
+        if arm != BASE_A0:
+            return f"ctx_set on arm {arm!r}: a context-set control row is plain A0 (ADR-0050)"
+        if source != CTX_SOURCE_CONTROL:
+            return f"a control row's ctx_source is {CTX_SOURCE_CONTROL!r}, not {source!r}"
+        stray = [k for k in CTX_ARM_LABELS if k in labels]
+        if stray:
+            return f"a control row carries the context-set arm's own stamps {stray}"
+        return ""
+    parsed = parse_arm(arm)
+    if parsed.base != BASE_A0 or parsed.facts or parsed.loop:
+        return f"context-set arm {arm!r} is not base A0 without +facts and +L (ADR-0050 item 2)"
+    if digest[:12] != name.rsplit(".", 1)[1]:
+        return f"ctx_set {digest[:12]}… is not the set {name!r} names"
+    expected_source = name.split(".")[1]
+    if source != expected_source:
+        return f"ctx_source {source!r} is not the arm's source {expected_source!r}"
+    for k in (LABEL_CTX_DELIVERED, LABEL_CTX_CHARS):
+        if not labels.get(k, "").isdecimal():
+            return f"{k} {labels.get(k)!r} is missing or not a count (ADR-0050 item 5)"
+    hindsight = hindsight_arm(arm)
+    if hindsight != (LABEL_CTX_CEILING in labels) or (
+        hindsight and labels.get(LABEL_CTX_CEILING) != "1"
+    ):
+        return f"ctx_ceiling must be '1' exactly on a hindsight arm ({arm!r})"
+    if hindsight == bool(labels.get(LABEL_CTX_DRAFTER)) or (
+        hindsight and LABEL_CTX_DRAFTER in labels
+    ):
+        return f"ctx_drafter is stamped exactly on a mechanical context-set arm ({arm!r})"
+    return ""
 
 
 class ChecksArmsPooled(ValueError):
@@ -1067,6 +1153,9 @@ class GradeRow:
                 f"{where}: context arm {arm!r} on a {self.process_step} row — S2 is a factory "
                 "arm only, and a factory row's arm is S1@<author> or S2"
             )
+        why = ctx_label_violation(arm, self.labels)
+        if why:
+            raise LedgerIntegrityError(f"{where}: {why}")
         taxonomy = self.labels.get(LABEL_TAXONOMY, "")
         if not is_class_set_version(taxonomy):
             raise LedgerIntegrityError(

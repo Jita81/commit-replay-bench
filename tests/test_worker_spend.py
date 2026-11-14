@@ -48,6 +48,7 @@ from crb.core.spend import (
 from crb.store.jobs import STATUS_SUCCEEDED
 from crb.store.models import EvidencePackRow
 from fixtures import pyrepo as pr
+from fixtures.ctx_rows import ctx_row, ctx_set
 from fixtures.posture import posture_row
 from test_worker import FakeBuilder, Harness
 
@@ -141,6 +142,29 @@ def test_the_escalation_yield_never_reads_another_checks_arm(h: Harness) -> None
     rows = _blind_ladder(h, checks={"api_stable": True})
     assert [r.trial for r in rows] == ["r1", "r2"]
     assert all(r.checks_arm == "api" for r in rows)
+    assert rows[0].labels[LABEL_ESCALATION_RULE].startswith("measured:insufficient:n=0<10")
+
+
+def test_context_set_rows_never_feed_the_escalation_yield(h: Harness) -> None:
+    """ADR-0050: a context-set arm is measurement-only — twelve failed escalations on a
+    ``ctx.`` arm in the run's own cell say nothing about an ordinary run's ladder."""
+    cset = ctx_set(repo=pr.REPO_NAME)
+    size = h.pyrepo.feat_task().size
+    for i in range(12):
+        h.worker.ledger.append(
+            ctx_row(
+                cset,
+                cset.task_ids[i % len(cset.task_ids)],
+                clean=False,
+                size=size,
+                builder="fake",
+                model="sonnet",
+                trial="r2",
+                language="python",
+            )
+        )
+    rows = _blind_ladder(h)
+    assert [r.trial for r in rows] == ["r1", "r2"]
     assert rows[0].labels[LABEL_ESCALATION_RULE].startswith("measured:insufficient:n=0<10")
 
 

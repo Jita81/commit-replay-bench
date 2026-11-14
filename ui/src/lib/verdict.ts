@@ -430,6 +430,7 @@ export const ACTION_HELP: Record<string, string> = {
   'library.freshness': 'After the mine, the files library entries were read from were checked at the head; the changed ones went stale.',
   'library.revoked': 'A person revoked a library entry; the revocation is appended, never an edit.',
   'library.retired': 'A library entry was retired, by a person or by measurement.',
+  'ctxset.stored': 'An operator stored a context set: one brief per task, kept for measurement only. It never certifies, licenses or routes anything.',
   'library.refused': 'A library act was refused — the rule named in the code, nothing written.',
   'class_set.proposed': 'A person proposed the organisation’s next class-set version and became its sponsor; it routes nothing until a different approver signs it and its report passes.',
   'class_set.relabelled': 'Every commit of the version’s repositories was read by its rule and the classes written to the label table; no graded row was touched.',
