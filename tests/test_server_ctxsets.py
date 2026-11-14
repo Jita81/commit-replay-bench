@@ -152,6 +152,30 @@ class TestStore:
         assert path.read_text(encoding="utf-8") == text
         assert sorted(p.name for p in path.parent.iterdir()) == [path.name]
 
+    def test_a_retry_racing_the_publisher_never_writes_a_second_event(
+        self, env: Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An identical retry sees the file this request just published and records the
+        event before this request does: this request answers ``stored: true`` and the set
+        still carries exactly one ``ctxset.stored`` event."""
+        parsed = ctxset.parse(_doc(env))
+        real = ctxsets_route._publish
+
+        def retry_between(dest: Path, body: str) -> bool:
+            won = real(dest, body)
+            again = _put(env, _doc(env))  # the retry, between this publish and its event
+            assert again.status_code == 201 and again.json()["stored"] is False
+            return won
+
+        monkeypatch.setattr(ctxsets_route, "_publish", retry_between)
+        r = _put(env, _doc(env))
+        assert r.status_code == 201, r.text
+        assert r.json()["stored"] is True
+        with env.factory() as s:
+            events = list(s.execute(select(Event).where(Event.action == ACTION_STORED)).scalars())
+        assert len(events) == 1
+        assert events[0].payload_json["digest"] == parsed.digest
+
     def test_publish_never_replaces_an_existing_file(self, tmp_path: Path) -> None:
         dest = tmp_path / "set.json"
         assert ctxsets_route._publish(dest, "first") is True

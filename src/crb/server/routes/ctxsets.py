@@ -178,23 +178,18 @@ def store_ctxset(
         raise _refused(exc) from exc
     text = canonical_json(ctxset.to_doc())
     path = store_dir(settings) / f"{ctxset.digest}.json"
-    if path.is_file():
-        _same_body(path, text, ctxset)
-        # an earlier store published the file but its event never committed: record it now,
-        # once, so every stored set has its audit event (the payload a new store writes)
-        lock_event_writes(db)
-        if not _stored_event_exists(db, ctxset):
-            _append_stored_event(db, ctxset, operator.id)
-        db.commit()
-        return {**_meta(ctxset), "stored": False}
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not _publish(path, text):
-        # a concurrent request published the same digest first: its event is its own
-        _same_body(path, text, ctxset)
-        return {**_meta(ctxset), "stored": False}
-    _append_stored_event(db, ctxset, operator.id)
+    published = not path.is_file() and _publish(path, text)
+    if not published:
+        _same_body(path, text, ctxset)  # stored before, or a concurrent request won
+    # every stored set carries exactly one event, checked and written under the events lock:
+    # a retry of a store that published the file but never committed its event records it,
+    # and a retry racing this request's own publish never leaves a second one
+    lock_event_writes(db)
+    if not _stored_event_exists(db, ctxset):
+        _append_stored_event(db, ctxset, operator.id)
     db.commit()
-    return {**_meta(ctxset), "stored": True}
+    return {**_meta(ctxset), "stored": published}
 
 
 def _same_body(path: Path, text: str, ctxset: CtxSet) -> None:
