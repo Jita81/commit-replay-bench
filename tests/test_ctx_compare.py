@@ -23,7 +23,6 @@ Touch when:   never for a new repository; the paired reader's counts, refusals o
 
 from __future__ import annotations
 
-import dataclasses
 from typing import Any
 
 import pytest
@@ -195,7 +194,7 @@ BLENDS: dict[str, dict[str, Any]] = {
     "checks_arm": {"labels": {LABEL_CHECKS: "fmt=1"}},
     "builder": {"builder": "editblock"},
     "model": {"model": "gpt-oss-120b"},
-    "taxonomy": {"labels": {LABEL_TAXONOMY: "org.v9"}},
+    "taxonomy": {"labels": {LABEL_TAXONOMY: "org/classes@v9"}},
     "mode": {"mode": "sighted"},
 }
 
@@ -206,19 +205,13 @@ class TestRefusals:
 
     @pytest.mark.parametrize("field", sorted(BLENDS))
     def test_blend_refused(self, field: str) -> None:
-        # the ledger re-validates on construction; change one field on a copy without its
-        # checks, so the reader is shown exactly the blend it must refuse
+        # one control row built through the validated fixture (GradeRow's own checks run),
+        # differing from the rest in that field alone
         ctl = _ctl()
-        changed = BLENDS[field]
         row = ctl[0]
-        labels = {**row.labels, **changed.get("labels", {})}
-        odd = object.__new__(GradeRow)
-        for f in dataclasses.fields(GradeRow):
-            object.__setattr__(odd, f.name, getattr(row, f.name))
-        object.__setattr__(odd, "labels", labels)
-        for k, v in changed.items():
-            if k != "labels":
-                object.__setattr__(odd, k, v)
+        odd = ctx_row(
+            ORACLE, row.task_id, clean=row.clean, role=ctxset.ROLE_CONTROL, **BLENDS[field]
+        )
         assert getattr(odd, field) != getattr(row, field)
         with pytest.raises(cc.CtxPairRefused) as exc:
             _pair([odd, *ctl[1:]], _trt())
