@@ -12,6 +12,12 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Apparatus 2.6 separates rows graded after the builder-input fixes.** `APPARATUS_VERSION` moves from 2.5 to 2.6 (ADR-0050), since nothing on a row told the two apart: the treatment fingerprint hashes the image tag and the rules label is provenance, never a pooling key. The belt set stays `v5`; the failure rule, the deny rules and `mutation.v2` are unchanged; there is no migration. Every posture id moves, so every task is qualified again at 2.6, and 2.5 and 2.6 rows are never pooled ([#148](https://github.com/Jita81/commit-replay-bench/pull/148)).
+
+- **The builder is told the rules the guard enforces.** `DEFAULT_RULES` and claude_code's system rules no longer advise a `git checkout` the deny rules refuse; they give one stash-free line to run the tests without the builder's edits, list exactly the git subcommands `DENY_RULES` refuses, say which unparseable forms are refused, and say that only tampering disqualifies while other violations discard the edits. A could-not-parse refusal names its cause. A discard keeps the dropped diff in the evidence pack, labels the row with its file count and names the task on its event (P-821, P-823) ([#148](https://github.com/Jita81/commit-replay-bench/pull/148)).
+
+- **A builder that cannot run its test command is refused before any model call.** Each attempt first runs the runner's tool check, the handed command with only its argv replaced, in the builder's own environment; a failure is a `runner tool missing` harness row, so no model spend is paid for a builder that cannot test. `deploy/Dockerfile.builder` gains `crb-builder-python` and `crb-builder-node` variants, built and smoke-tested in CI; the default `BASE_IMAGE` is unchanged (P-822) ([#148](https://github.com/Jita81/commit-replay-bench/pull/148)).
+
 - **A read script proves it can see its event keys before it counts.** `scripts/read_preflight.py`
   refuses an expectation of a key the emitter lifts out of the payload, checks every fetched event,
   stops an unwaived zero count over a non-empty population, and exits 6. Its AST rule follows

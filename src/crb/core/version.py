@@ -66,4 +66,11 @@ __version__ = "2.0.0a1"
 #: failure rule and ``mutation.v2`` unchanged; no migration). Every posture id moves with it,
 #: so every qualification is measured again; rows stamped 2.4 keep their meaning and are never
 #: pooled with 2.5.
-APPARATUS_VERSION = "2.5"
+#: 2.5 → 2.6 (2026-11-14, ADR-0050: builder input changes — the rules a builder is told now
+#: agree with what is enforced, a refusal names its cause and the stash-free way to test
+#: without the builder's edits, and an attempt whose handed test command cannot run in the
+#: builder's own environment is refused before any model call; the failure rule, belt set
+#: ``v5``, the deny rules and ``mutation.v2`` unchanged; no migration). Every posture id moves
+#: with it, so every qualification is measured again; rows stamped 2.5 keep their meaning and
+#: are never pooled with 2.6.
+APPARATUS_VERSION = "2.6"
