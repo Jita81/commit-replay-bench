@@ -13,15 +13,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **Context-set arms: measure what a brief is worth, governed and default-off (ADR-0050).**
-  An operator stores a frozen, hashed set of one brief per task (`POST /ctxsets`), then runs
-  it as a blind `A0+library@ctx.<source>.<hex12>` run beside a plain `A0` control over the
-  same tasks. A length-matched placebo is its own set and never pools with its treatment;
-  each row carries an `anchor.v1` gap label. `GET /ctxsets/compare` pairs the runs with an
-  exact McNemar test that fails closed on pending tasks. These arms are measurement only: no
-  reading, route, sign-off, re-measure price, spend rule or value figure counts them, and a
-  hindsight set is a labelled reference for that one brief. `crb ctxset` needs the `[mcp]`
-  extra and says so; the CLI still starts without it. Runs without `context_set` are
-  unchanged; the leak guard and apparatus 2.5 are too
+  An operator stores a frozen, hashed set of one brief per task (`POST /ctxsets`) and runs it
+  as a blind `A0+library@ctx.<source>.<hex12>` run beside a plain `A0` control. A
+  length-matched placebo is its own set and never pools with its treatment. `GET
+  /ctxsets/compare` pairs the runs with an exact McNemar test that fails closed on pending
+  tasks. These arms are measurement only: no reading, route, sign-off, re-measure price,
+  spend rule or value figure counts them, and a hindsight set is a labelled reference.
+  `crb ctxset` needs the `[mcp]` extra; the CLI still starts without it. Runs without
+  `context_set` are unchanged
   ([#148](https://github.com/Jita81/commit-replay-bench/pull/148)).
 
 - **The Go controls' compile probe is the belt run's own command.** The negative controls
