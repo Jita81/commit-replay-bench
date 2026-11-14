@@ -183,6 +183,7 @@ def store_ctxset(
     if not published:
         _same_body(path, text, ctxset)  # stored before, or a concurrent request won
         _sync_dir(path.parent)  # a retry acknowledges only a name that is on disk
+    _sync_dir(path.parent.parent)  # the store directory's own name, created on a first store
     # every stored set carries exactly one event, checked and written under the events lock:
     # a retry of a store that published the file but never committed its event records it,
     # and a retry racing this request's own publish never leaves a second one

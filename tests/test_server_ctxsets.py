@@ -206,9 +206,9 @@ class TestStore:
     def test_stored_set_is_owner_only_and_synced_before_the_event(
         self, env: Env, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The body and its directory entry are flushed to disk before the store is
-        acknowledged (a retry flushes the directory again), and the file is never widened
-        past the owner."""
+        """The body, its directory entry and the store directory's own entry are flushed
+        to disk before the store is acknowledged (a retry flushes both directories again),
+        and the file is never widened past the owner."""
         synced: list[bool] = []
         real_fsync = os.fsync
 
@@ -218,12 +218,13 @@ class TestStore:
 
         monkeypatch.setattr(os, "fsync", spy)
         assert _put(env, _doc(env)).status_code == 201
-        assert synced[:2] == [False, True]  # the file first, then its directory
+        # the file first, then its directory, then the directory that holds the store
+        assert synced == [False, True, True]
         path = store_dir(env.settings) / f"{ctxset.parse(_doc(env)).digest}.json"
         assert stat.S_IMODE(path.stat().st_mode) & 0o077 == 0
         synced.clear()
         assert _put(env, _doc(env)).json()["stored"] is False
-        assert synced == [True]
+        assert synced == [True, True]
 
     def test_placebo_needs_its_treatment_stored(self, env: Env) -> None:
         treatment = ctxset.parse(_doc(env))
