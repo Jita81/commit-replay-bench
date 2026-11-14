@@ -365,11 +365,18 @@ UNCOVERED_STEPS: tuple[tuple[str, str, str], ...] = (
             'test -n "$want"',
             'test "$(docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-go:ci '
             'id -u)" = "65534"',
+            'test "$(docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-python:ci '
+            'id -u)" = "65534"',
+            'test "$(docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-node:ci '
+            'id -u)" = "65534"',
             'test "$(docker run --rm --network=none --read-only --tmpfs /tmp "$img" id -u)" '
             '= "65534"',
             # names python as a sandbox language, and runs pytest inside that image
             "for lang in python node go",
             "docker run --rm --network=none --read-only --tmpfs /tmp crb-sandbox-python:ci "
+            "python -m pytest --version",
+            # the Python builder image answers with the test tool its tool check starts
+            "docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-python:ci "
             "python -m pytest --version",
         )
     ),

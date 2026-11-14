@@ -168,13 +168,21 @@ from crb.builders.container import (
     SessionFactory,
     UnconfirmedKill,
     builder_deps_view,
+    builder_executor,
+    harness_link_mounts,
 )
 from crb.builders.openai_client import ModelCallError
-from crb.builders.toolcheck import runner_tool_missing
+from crb.builders.toolcheck import builder_tool_refusal, runner_tool_missing, tool_check_command
 from crb.core.checks import LABEL_CHECKS, CheckCommand, ResolvedChecks
 from crb.core.deps import DepsBinding, TaskDeps
 from crb.core.evidence import BuilderRef
-from crb.core.execution import Command, Executor, SandboxUnavailable
+from crb.core.execution import (
+    TREE_READONLY,
+    Command,
+    Executor,
+    LocalExecutor,
+    SandboxUnavailable,
+)
 from crb.core.finish_gate import (
     GateRun,
     OracleLeak,
@@ -333,6 +341,9 @@ def authored_red(
 
 #: ``shas -> {sha: sortable commit-date key}`` — the time-order rule's reader.
 CommitDatesFn = Callable[[Sequence[str]], Mapping[str, str]]
+#: ``(builder container settings or None, worktree) -> Executor`` — where the builder-side
+#: tool check runs: the builder's own environment (``build_fn_for(tool_check_executor=…)``).
+ToolCheckExecutorFn = Callable[[BuilderContainerSettings | None, Workspace], Executor]
 
 
 def git_commit_dates(repo: Any, shas: Sequence[str]) -> dict[str, str]:
@@ -798,7 +809,27 @@ def sighted_test_command(
     (:func:`session_env_overrides`), is :class:`SandboxUnavailable`: the run stops, and
     nothing is recorded against the builder.
     """
-    view = builder_deps_view(deps)[1] if deps is not None else {}
+    cmd = handed_test_command(runner, executor, root, target_tests, authored=authored, deps=deps)
+    return render_handed_command(cmd, deps) if cmd is not None else ""
+
+
+def handed_test_command(
+    runner: BaseRunner,
+    executor: Executor,
+    root: Path,
+    target_tests: Sequence[str],
+    *,
+    authored: str | None = None,
+    deps: DepsBinding | None,
+) -> Command | None:
+    """The test command a builder is handed, as a :class:`Command`: the runner's command for
+    ``target_tests`` under ``deps`` with the services' environment and the sealed session's
+    view of the set (:func:`builder_deps_view`: its env last, its ``/deps`` mounts as the
+    mounts) — what :func:`render_handed_command` writes into the brief, and what the
+    builder-side tool check (src/crb/builders/toolcheck.py) is derived from, so the two can
+    never drift apart (P-820). ``None`` when the runner cannot build it (best effort, as
+    the brief always was)."""
+    mounts, view = builder_deps_view(deps) if deps is not None else (None, {})
     try:
         timeout = int(runner.opts.get("timeout", runner.default_timeout))
         with runner.deps_bound(deps) if deps is not None else contextlib.nullcontext():
@@ -808,13 +839,24 @@ def sighted_test_command(
             runner.ensure_services(executor, root, authored=authored)
             env.update(runner.service_env())
     except Exception:
-        return ""
+        return None
     # The runner's environment (PYTHONPATH, GOFLAGS, NODE_PATH …) is part of the command:
     # without it a builder sees ImportErrors and reaches for `pip install`, which the
     # no-network rule then refuses — measured on pallets/click (5/5 attempts errored).
     # The session's dependency env is last: inside the container it is the one that holds.
     env.update(view)
-    env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in sorted(env.items()))
+    if mounts is None:
+        return replace(cmd, env=env)
+    return replace(cmd, env=env, ro_mounts=tuple(mounts))
+
+
+def render_handed_command(cmd: Command, deps: DepsBinding | None) -> str:
+    """``cmd`` (:func:`handed_test_command`) as the brief shows it: its env as a
+    ``KEY=value`` prefix, then its argv. A prefix that would override the sealed
+    session's own dependency env (:func:`session_env_overrides`) is
+    :class:`SandboxUnavailable`."""
+    view = builder_deps_view(deps)[1] if deps is not None else {}
+    env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in sorted(cmd.env.items()))
     argv = " ".join(shlex.quote(a) for a in cmd.argv)
     rendered = f"{env_prefix} {argv}".strip()
     clash = session_env_overrides(rendered, view)
@@ -949,6 +991,7 @@ def build_fn_for(
     learning: LearningSnapshot | None = None,
     s1: S1Arm | None = None,
     commit_dates: CommitDatesFn | None = None,
+    tool_check_executor: ToolCheckExecutorFn | None = None,
 ) -> BuildFn:
     """The ``build_fn`` for :func:`crb.core.run.run` over ``ladder``.
 
@@ -1023,9 +1066,50 @@ def build_fn_for(
     commit_dates:
         ``shas -> {sha: ISO commit date}`` for the time-order rule; ``None`` reads them
         from the task's repository (harness-side, never shown to the builder).
+    tool_check_executor:
+        ``(container settings or None, worktree) -> Executor`` — where the builder-side
+        tool check runs (src/crb/builders/toolcheck.py): the builder's own environment.
+        ``None`` (the default): the builder image (:func:`builder_executor`, the
+        worktree read-only, the harness links mounted) for a sealed builder, the run's
+        executor for a host builder under a local run, else the host. Tests inject fakes.
     """
     index = rung_index(ladder)
     dates_cache: dict[str, str] = {}
+
+    def default_check_executor(
+        settings: BuilderContainerSettings | None, ws: Workspace
+    ) -> Executor:
+        """The builder's own environment for the tool check (``tool_check_executor``)."""
+        cancel = getattr(executor, "cancel_fn", None)
+        if settings is not None:
+            return builder_executor(
+                settings, ro_mounts=harness_link_mounts(ws), cancel=cancel, tree=TREE_READONLY
+            )
+        if getattr(executor, "name", "") == "local":
+            return executor
+        return LocalExecutor(cancel=cancel)
+
+    check_executor_for = tool_check_executor or default_check_executor
+
+    def tool_check_refusal(
+        ws: Workspace, task: TaskSpec, handed: Command | None, sealed: bool
+    ) -> str:
+        """``""`` when the test command handed to the builder starts in the builder's own
+        environment (or the runner declares no check, or nothing is handed); else the
+        refusal, emitted as the documented ``builder.refused`` (its ``error`` names the check's
+        command, the environment it ran in and its outcome). Runs before any model call."""
+        if handed is None:
+            return ""
+        derived = tool_check_command(runner, handed)
+        if derived is None:
+            return ""
+        tool, check = derived
+        where = BUILDER_EXECUTOR_SEALED if sealed else "host"
+        probe = check_executor_for(container if sealed else None, ws)
+        _outcome, refusal = builder_tool_refusal(runner, probe, tool, check, where=where)
+        if refusal:
+            emit(on_event, BUILDER_EVENT_PREFIX + "refused", task=task.task_id, error=refusal)
+        return refusal
 
     def executor_of(rung_label: str) -> str:
         """Where ``rung_label``'s builder runs — ``docker`` (its sealed container) when the
@@ -1444,12 +1528,6 @@ def build_fn_for(
             emit(on_event, BUILDER_EVENT_PREFIX + "refused", task=task.task_id, error=missing)
             return _failed_attempt(rung_label, mode, missing)
         sealed = executor_of(rung_label) == BUILDER_EXECUTOR_SEALED
-        try:
-            builder = instantiate(rung)
-        except Exception as exc:
-            return _failed_attempt(
-                rung_label, mode, f"builder unavailable: {type(exc).__name__}: {exc}"
-            )
         # the set the sealed session mounts: the commands the brief shows and the finish
         # gate's checks run under it, as the builder's own calls inside the session do
         session_deps = session_set(task) if sealed else None
@@ -1466,9 +1544,22 @@ def build_fn_for(
             else ""
         )
         # the harness command without a scope discloses the environment, never the oracle
-        harness_command = sighted_test_command(
+        handed = handed_test_command(
             runner, executor, ws.root, (), authored=task.authored, deps=session_deps
         )
+        harness_command = render_handed_command(handed, session_deps) if handed is not None else ""
+        # the command handed to the builder must start where the builder runs, or the
+        # attempt is decided before the builder is made or any model is called (a builder
+        # image without pytest)
+        refused = tool_check_refusal(ws, task, handed, sealed)
+        if refused:
+            return _failed_attempt(rung_label, mode, refused)
+        try:
+            builder = instantiate(rung)
+        except Exception as exc:
+            return _failed_attempt(
+                rung_label, mode, f"builder unavailable: {type(exc).__name__}: {exc}"
+            )
         gate = _gate_setup(ws, task, mode, test_command or harness_command, session_deps)
         if isinstance(gate, str):
             return _failed_attempt(rung_label, mode, gate)
@@ -2014,16 +2105,19 @@ __all__ = [
     "LedgerLike",
     "MessageFn",
     "Preflight",
+    "ToolCheckExecutorFn",
     "as_run_ledger",
     "attempt_error",
     "attempt_notes",
     "build_fn_for",
     "container_settings_from_env",
     "discard_source_edits",
+    "handed_test_command",
     "ladder_from_spec",
     "ladder_labels",
     "note_unconfirmed_kills",
     "parse_rung_label",
+    "render_handed_command",
     "run_arm_for",
     "rung_from_object",
     "rung_index",

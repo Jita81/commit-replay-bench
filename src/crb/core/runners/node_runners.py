@@ -161,6 +161,11 @@ class _NodeBase(BaseRunner):
         """``node --version`` — the runtime the tests run under, part of the posture."""
         return (executor.tool("node", self.opts.get("node")), "--version")
 
+    def tool_check(self, argv: Sequence[str]) -> tuple[str, tuple[str, ...]] | None:
+        """``<tool> --version``: the handed command's first word (``node``, ``vitest``,
+        ``jest``, ``mocha``) starts; no test runs and nothing is fetched."""
+        return (Path(argv[0]).name, (argv[0], "--version")) if argv else None
+
     def setup_env(self, executor: Executor) -> dict[str, str]:
         """The setup commands' environment: ``runner_opts.env``, and — when
         ``runner_opts.node`` pins a node — that node's directory first on ``PATH``, so

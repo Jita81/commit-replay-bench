@@ -112,6 +112,7 @@ from fixtures.readings import (
     rows_for,
     sealed_row,
 )
+from fixtures.tool_check import passing_check
 
 # --- the look rule --------------------------------------------------------------
 
@@ -878,6 +879,7 @@ def test_an_s1_authoring_miss_under_docker_reads_as_a_miss_not_pending(
         config=pyrepo.config,
         container=BuilderContainerSettings(image="crb-builder:test", user="10001:10001"),
         session_factory=_NoDaemon,
+        tool_check_executor=passing_check,  # no daemon: the builder image is not probed
         s1=S1Arm(author=_author_fails, author_model=AUTHOR),
     )
     ws = pyrepo.trial(tmp_path / "t", overlay_tests=False)
