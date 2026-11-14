@@ -23,10 +23,11 @@ Works with:   src/crb/cli/commands/__init__.py (``CliError``, the exit codes),
               src/crb/cli/commands/service.py (``serve`` / ``worker`` / ``migrate`` /
               ``doctor``), src/crb/cli/commands/users.py (the break-glass account verbs),
               src/crb/cli/commands/library.py (what the library's miners would propose),
+              src/crb/cli/commands/ctxset.py (context sets, through the API),
               src/crb/core/execution.py (``SandboxUnavailable`` → exit 2),
               src/crb/core/deps.py (``ProvisionRefused`` → exit 2 with its fix)
 Tested by:    tests/test_cli.py, tests/test_cli_doctor.py, tests/test_cli_tasks.py,
-              tests/test_cli_users.py
+              tests/test_cli_users.py, tests/test_cli_ctxset.py
 Touch when:   never for a new repository; adding a verb means a ``register`` in a new
               commands module and one line here; a new core exception class that should
               exit 2 with a clean message needs a clause in the ladder.
@@ -43,6 +44,7 @@ from crb.cli.commands import (
     EXIT_ERROR,
     CliError,
     config,
+    ctxset,
     deps,
     grade,
     learn,
@@ -88,6 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
     reading.register(sub)
     learn.register(sub)
     library.register(sub)
+    ctxset.register(sub)
     tasks.register(sub)
     config.register(sub)
     deps.register(sub)

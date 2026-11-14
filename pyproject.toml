@@ -176,6 +176,14 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
+# ADR-0050: a builder receives plain ContextEntry values from the worker; it never reads a
+# context-set record or the paired reader, so no brief can choose its own set or see a result.
+name = "context sets never reach a builder"
+type = "forbidden"
+source_modules = ["crb.builders"]
+forbidden_modules = ["crb.core.ctxset", "crb.core.ctx_compare"]
+
+[[tool.importlinter.contracts]]
 name = "layers depend downward only"
 type = "layers"
 # Parenthesised layers are optional: packages land phase by phase (cli/server/factory/store).

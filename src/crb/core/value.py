@@ -54,6 +54,13 @@ What is measured, and the rule for each
   scoped to one). The cells and prospective routing are keyed by arm, so they read every arm
   side by side; the learning curve reads every arm on purpose — a lever the loop switches on
   is exactly the before/after it measures, and it counts bug classes, not clean verdicts.
+* **No measurement-only arm** (ADR-0050 item 9) — a context-set arm
+  (``A0+library@ctx.<source>.<hex>``) is a paired measurement, read by
+  ``crb.core.ctx_compare`` alone: :func:`value_report` drops its rows once, at entry, before
+  every cut and before a review is placed, so no headline rate, precision, process loss,
+  curve, cell, repository roll-up or north-star figure reads them (ctx-run spend is
+  measurement spend, outside the north-star denominator); :func:`north_star` and
+  :func:`prospective_routing` repeat the filter. A control run's plain ``A0`` rows stay.
 * **One posture class** (ADR-0019 §8: posture is a filter, never a blend) — a pound spent
   grading in a sealed container and a pound spent on the host buy two measurements, so EVERY
   figure, the curve, cells and the every-repository review fallback included, reads ONE
@@ -114,7 +121,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from crb.core.checks import ARM_OFF, ARMS
-from crb.core.context_arm import parse_arm
+from crb.core.context_arm import measurement_only, parse_arm
 from crb.core.flow import Spend, spend_of_rows
 from crb.core.ledger import (
     FAILURE_BUDGET,
@@ -774,6 +781,7 @@ def north_star(
     unplaced: int = 0,
     pooled_unplaced: int = 0,
 ) -> NorthStar:
+    rows = without_measurement_only(rows)
     blind = [r for r in rows if r.mode == "blind"]
     return NorthStar(
         n_attempts=len(blind),
@@ -1062,7 +1070,7 @@ def prospective_routing(
     decisions: dict[str, int] = dict.fromkeys(ROUTES, 0)
     delivered: list[ValueRow] = []
     scored = 0
-    for r in _ordered(rows):
+    for r in _ordered(without_measurement_only(rows)):
         key = (
             r.repo,
             r.mode,
@@ -1110,6 +1118,13 @@ def prospective_routing(
 
 
 # --- the report -------------------------------------------------------------------------
+
+
+def without_measurement_only(rows: Iterable[ValueRow]) -> list[ValueRow]:
+    """``rows`` less every row of a measurement-only arm (a context set, ADR-0050 item 9):
+    those rows are read by the paired comparison only, never by a value figure. A control
+    run's plain ``A0`` rows are honest rows and stay."""
+    return [r for r in rows if not measurement_only(r.context_arm)]
 
 
 def select_rows(
@@ -1314,7 +1329,9 @@ def value_report(
         raise ValueError("usd_per_gbp must be positive")
     if checks not in ARMS:
         raise ValueError(f"unknown checks arm {checks!r}; expected one of {ARMS}")
-    all_rows = list(rows)
+    # a context-set arm is a measurement, never a value figure (ADR-0050 item 9): dropped once,
+    # here, before the posture and scope cuts and before any review is placed
+    all_rows = without_measurement_only(rows)
     given = all_rows
     if posture == POSTURE_ALL:
         present = {r.posture_class for r in select_rows(all_rows, repo=repo, apparatus=apparatus)}
@@ -1432,4 +1449,5 @@ __all__ = [
     "value_report",
     "value_row_from_grade",
     "verdicts_from_reviews",
+    "without_measurement_only",
 ]

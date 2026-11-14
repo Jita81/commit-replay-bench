@@ -17,7 +17,8 @@ How:          ``pyrepo`` with a recording builder: a blind replay through
               snapshot), a factory ``build_item`` through the test_factory_build harness, the
               factory loop rig for the ``+L`` rule, and ``compose`` / ``novel_tokens`` directly.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0026-the-context-standard.md
+ADRs:         docs/adr/0026-the-context-standard.md, docs/adr/0050-context-set-arms.md
+              (the arm-derived admission of a context-set entry)
 Works with:   src/crb/builders/brief.py (under test), src/crb/builders/adapter.py (the replay
               brief), src/crb/factory/build.py (the factory brief), src/crb/core/playbook.py
               (the time-order rule), src/crb/factory/loop.py (the +L rule)
@@ -37,11 +38,14 @@ from crb.builders import adapter
 from crb.builders.base import STOP_DONE, Budget, BuildBrief, BuildOutcome, EscalationLadder, Rung
 from crb.builders.brief import (
     LABEL_CONTEXT_ARM,
+    LABEL_CTX_CHARS,
+    LABEL_CTX_DELIVERED,
     LABEL_CTX_REFUSED,
     LABEL_CTX_TICKET,
     ContextEntry,
     S1Arm,
     Ticket,
+    admit_at_parent,
     compose,
     novel_tokens,
 )
@@ -518,3 +522,89 @@ def test_a_bare_fact_never_reaches_a_retrospective_brief() -> None:
         facts=("The package is calc.",),
     )
     assert forward.brief.spec_facts == ("The package is calc.",)
+
+
+# --- context-set arms (ADR-0050 item 4) ----------------------------------------------------
+
+_ORACLE_ARM = "A0+library@ctx.oracle.0123456789ab"
+_MECH_ARM = "A0+library@ctx.mech.0123456789ab"
+_PARENT = "a" * 40
+_TICKET = Ticket("feat: add subtract", "feat: add subtract")
+
+
+def _ctx_compose(arm: str, library: tuple[ContextEntry, ...], **kw: Any) -> Any:
+    return compose(
+        arm, _TICKET, repo="pyrepo", language="python", mode="blind", library=library, **kw
+    )
+
+
+def test_a_hindsight_entry_is_admitted_without_a_pool_date_and_counted() -> None:
+    """A ``ctx.oracle`` entry is never stamped mechanical, so the time rule could never admit
+    it; the hindsight arm skips that rule only. No ``pool_began`` is passed."""
+    entry = ContextEntry("e-1", "The calc package exposes pure functions.", "1", "")
+    composed = _ctx_compose(_ORACLE_ARM, (entry,))
+    assert composed.brief.spec_facts == (entry.text,)
+    assert [e.entry_id for e in composed.library] == ["e-1"]
+    assert composed.labels[LABEL_CTX_REFUSED] == "0"
+    assert composed.labels[LABEL_CTX_DELIVERED] == "1"
+    assert composed.labels[LABEL_CTX_CHARS] == str(len(entry.text))
+
+
+def test_the_leak_guard_still_drops_a_hindsight_entry_naming_a_gold_novel_token() -> None:
+    leak = ContextEntry("e-1", "Add subtract_negative beside add.", "1", "")
+    kept = ContextEntry("e-2", "Keep functions pure.", "1", "")
+    composed = _ctx_compose(_ORACLE_ARM, (leak, kept), novel=frozenset({"subtract_negative"}))
+    assert composed.refused == (leak.text,)
+    assert composed.brief.spec_facts == (kept.text,)
+    assert composed.labels[LABEL_CTX_REFUSED] == "1"
+    assert composed.labels[LABEL_CTX_DELIVERED] == "1"
+    assert composed.labels[LABEL_CTX_CHARS] == str(len(kept.text))
+
+
+def test_a_context_set_arm_still_refuses_a_bare_fact() -> None:
+    composed = _ctx_compose(_ORACLE_ARM, (), facts=("The package is calc.",))
+    assert composed.brief.spec_facts == ()
+    assert composed.refused == ("The package is calc.",)
+    assert composed.labels[LABEL_CTX_DELIVERED] == "0"
+    assert composed.labels[LABEL_CTX_CHARS] == "0"
+
+
+def test_a_mechanical_entry_is_admitted_only_at_the_tasks_parent_commit() -> None:
+    right = ContextEntry("e-1", "Helpers live in calc.py.", "1", "", True, _PARENT)
+    wrong_rev = ContextEntry("e-2", "Tests live in tests.", "1", "", True, "b" * 40)
+    not_mech = ContextEntry("e-3", "Prefer small helpers.", "1", "", False, _PARENT)
+    composed = _ctx_compose(_MECH_ARM, (right, wrong_rev, not_mech), parent_rev=_PARENT)
+    assert composed.brief.spec_facts == (right.text,)
+    assert composed.labels[LABEL_CTX_REFUSED] == "2"
+    assert composed.labels[LABEL_CTX_DELIVERED] == "1"
+    assert composed.labels[LABEL_CTX_CHARS] == str(len(right.text))
+    assert admit_at_parent((right, wrong_rev, not_mech), _PARENT) == ([right], ["e-2", "e-3"])
+    assert admit_at_parent((right,), "") == ([], ["e-1"])
+
+
+def test_a_mechanical_arm_without_the_parent_commit_is_refused() -> None:
+    entry = ContextEntry("e-1", "Helpers live in calc.py.", "1", "", True, _PARENT)
+    with pytest.raises(ValueError, match="parent_rev"):
+        _ctx_compose(_MECH_ARM, (entry,))
+
+
+def test_a_library_name_outside_the_context_set_grammar_keeps_todays_admission() -> None:
+    """``A0+library@v1`` and an invalid ``ctx.`` name are not context-set arms: the time
+    rule still decides, and no ctx label is written."""
+    entry = ContextEntry("e-1", "Helpers live in calc.py.", "1", "", False)
+    for arm in ("A0+library@v1", "A0+library@ctx.oracle.0123"):
+        composed = _ctx_compose(arm, (entry,), retrospective=True)
+        assert composed.brief.spec_facts == ()
+        assert composed.labels[LABEL_CTX_REFUSED] == "1"
+        assert LABEL_CTX_DELIVERED not in composed.labels
+        assert LABEL_CTX_CHARS not in composed.labels
+
+
+def test_a_hindsight_entry_restating_the_fix_in_parent_identifiers_is_delivered() -> None:
+    """The guard's documented limit (ADR-0050 Consequences): a hindsight entry that names
+    only identifiers the parent tree already holds passes ``refuse_novel`` — which is why
+    the oracle arm is a measurement-only ceiling, never a routing input."""
+    entry = ContextEntry("e-1", "Return a - b from a new helper next to add in calc.py.", "1", "")
+    composed = _ctx_compose(_ORACLE_ARM, (entry,), novel=frozenset({"subtract"}))
+    assert composed.brief.spec_facts == (entry.text,)
+    assert composed.labels[LABEL_CTX_DELIVERED] == "1"

@@ -26,12 +26,14 @@ How:          ``BaseModel`` classes with ``extra="forbid"`` on requests, validat
               refuse identity/credential-shaped builder kwargs and malformed ladders; the
               route modules import from here, never the reverse.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
+              docs/adr/0050-context-set-arms.md
 Works with:   docs/API.md (the human-readable contract), ui/src/api/types.ts (the mirror),
               src/crb/server/routes/runs.py (RunCreateRequest → Run), src/crb/server/routes/repos.py
               (repo config), src/crb/server/schemas_capability.py and
               src/crb/server/schemas_signoff.py (the map and sign-off shapes)
-Tested by:    tests/test_server_routes_runs.py, tests/test_server_routes_repos.py, tests/test_server_app.py
+Tested by:    tests/test_server_routes_runs.py, tests/test_server_routes_repos.py,
+              tests/test_server_app.py, tests/test_server_runs_ctx.py
 Touch when:   never for a new repository; any API field changes — update docs/API.md and
               ui/src/api/types.ts in the same change.
 
@@ -59,6 +61,7 @@ from pydantic import (
 from crb.builders.base import Budget
 from crb.core.capability import TIERS
 from crb.core.checks import RepoChecks
+from crb.core.context_arm import CTX_NAME_RE
 from crb.core.git import CloneUrlError, validate_clone_url
 from crb.core.grade import MODES
 from crb.core.ledger import CELL_FIELDS
@@ -824,6 +827,26 @@ class RunCreateRequest(BaseModel):
     #: ``reading_id`` and the campaign holds a reserved.v1 reading on the repository (P-792).
     #: Stored as ``params.campaign_id`` only when set.
     campaign_id: str | None = Field(default=None, pattern=r"^cmp_[0-9a-f]{24}$")
+    #: ADR-0050, measurement only: the stored context set (``ctx.<source>.<12 hex>``) this
+    #: ``blind`` run replays — exactly the set's tasks, on ``A0`` with the loop off
+    #: (``learning: "off"`` named), no ``arm``, ``task_ids`` or ``limit``. Refused 422
+    #: ``ctxset_posture`` unless the deployment is sealed (sandbox and builder on
+    #: ``docker``), 404 ``ctxset_unknown`` unless the set is stored, and 422 with the set's
+    #: own reason (``ctxset_repo``, ``ctxset_coverage``…) unless it covers gold-clean tasks of
+    #: the repository; nothing is queued on any refusal. Never counted by a reading (422
+    #: ``reading_run_fields`` under a reserved.v1 one). Stored as ``params.context_set``.
+    context_set: str | None = Field(default=None, max_length=64)
+    #: With ``context_set`` only: ``entries`` (the default) delivers each task's entry, the
+    #: arm ``A0+library@<context_set>``; ``control`` is the paired plain ``A0`` run over the
+    #: same tasks, its rows stamped ``ctx_source=control``. Stored as ``params.context_role``.
+    context_role: Literal["entries", "control"] | None = None
+
+    @field_validator("context_set")
+    @classmethod
+    def _context_set_name(cls, v: str | None) -> str | None:
+        if v is not None and not CTX_NAME_RE.match(v):
+            raise ValueError(f"context_set must match {CTX_NAME_RE.pattern}")
+        return v
 
     @field_validator("kind")
     @classmethod
@@ -963,7 +986,27 @@ class RunCreateRequest(BaseModel):
                 f"campaign_id applies to build runs only ({sorted(BUILD_KINDS)}): a "
                 f"{self.kind!r} run spends nothing a campaign holds"
             )
+        self._context_set_consistency()
         return self
+
+    def _context_set_consistency(self) -> None:
+        """ADR-0050: a context-set run (either role) is a blind ``A0`` run with the loop off
+        over exactly the set's tasks; ``context_role`` names nothing without the set."""
+        if self.context_set is None:
+            if self.context_role is not None:
+                raise ValueError("context_role applies only with context_set")
+            return
+        if self.kind != "blind":
+            # a replay runs sighted (the worker's KIND_REPLAY): a context set is read blind
+            raise ValueError(f"context_set applies to blind runs only, not {self.kind!r}")
+        if self.arm is not None:
+            raise ValueError("context_set runs the A0 arm: no arm (S1)")
+        if self.learning != "off":
+            raise ValueError("context_set needs learning 'off' named: the loop never runs on it")
+        if self.task_ids or self.limit is not None:
+            raise ValueError("context_set replays exactly the set's tasks: no task_ids or limit")
+        if self.context_role is None:
+            self.context_role = "entries"
 
     @property
     def object_rungs_only(self) -> bool:

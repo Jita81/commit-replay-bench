@@ -120,7 +120,7 @@ from pathlib import Path
 from typing import Any
 
 from crb.core.capability import CapabilityCell, CapabilityMap
-from crb.core.context_arm import BASE_S1, BASE_S2, REPLAY_MODE, parse_arm
+from crb.core.context_arm import BASE_S1, BASE_S2, REPLAY_MODE, measurement_only, parse_arm
 from crb.core.ledger import (
     CELL_FIELDS,
     FAILURE_PROTOCOL,
@@ -2354,6 +2354,9 @@ def remeasure_plan(
             for r in group:
                 groups.setdefault((mode_name, key, r.context_arm), []).append(r)
     for (mode_name, key, arm), group in sorted(groups.items()):
+        if measurement_only(arm):
+            continue  # a context-set arm (ADR-0050 item 9): no reading accepts it, so never
+            # invite registering one; its rows are read paired at GET /ctxsets/compare
         cell = CellKey(**dict(zip(CELL_FIELDS, key, strict=True)))
         repos = sorted({r.repo for r in group})
         if any((repo, cell.label) in speaking for repo in repos):

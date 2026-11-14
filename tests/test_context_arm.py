@@ -29,12 +29,24 @@ from typing import Any
 import pytest
 
 from crb.core.context_arm import (
+    CTX_NAME_RE,
     LABEL_CONTEXT_ARM,
+    LABEL_CTX_CEILING,
+    LABEL_CTX_CHARS,
+    LABEL_CTX_DELIVERED,
+    LABEL_CTX_GAP,
+    LABEL_CTX_GAP_RULE,
+    LABEL_CTX_SET,
+    LABEL_CTX_SOURCE,
+    PROVENANCE_LABELS,
     TEST_AUTHORED,
     TEST_PERSON,
     ContextArmsPooled,
     context_arm_for,
+    ctx_set_name,
+    hindsight_arm,
     is_arm,
+    measurement_only,
     parse_arm,
     rows_for_context_arm,
 )
@@ -232,3 +244,84 @@ def test_the_loop_on_and_off_are_two_arms_of_one_cell() -> None:
     assert {r.context_arm for r in off} == {"S3"} and {r.context_arm for r in on} == {"S3+L"}
     with pytest.raises(ContextArmsPooled):
         cell_stats([*off, *on])
+
+
+# --- the context-set arms (ADR-0050) -------------------------------------------------
+
+HEX = "0123456789ab"
+CTX_ARMS = [
+    f"A0+library@ctx.oracle.{HEX}",
+    f"A0+library@ctx.oracle-placebo.{HEX}",
+    f"A0+library@ctx.mech.{HEX}",
+    f"A0+library@ctx.mech-placebo.{HEX}",
+]
+PRE_EXISTING_ARMS = [
+    "A0",
+    "A0+L",
+    "S1@claude-sonnet-5",
+    "S1@claude-sonnet-5+facts@gpt-oss-120b",
+    "S1@claude-sonnet-5+library@v3",
+    "S1@claude-sonnet-5+facts@x+library@v1+L",
+    "S2",
+    "S3",
+    "S3+L",
+    "A0+library@v1",
+    "A0+library@ctx",
+    "A0+library@ctx.other.0123456789ab",
+    "A0+library@ctx.oracle.0123456789AB",
+    "A0+library@ctx.oracle.0123456789a",
+]
+
+
+@pytest.mark.parametrize("arm", CTX_ARMS)
+def test_every_context_set_arm_parses_under_the_unchanged_grammar(arm: str) -> None:
+    assert is_arm(arm) and parse_arm(arm).id == arm
+    name = ctx_set_name(arm)
+    assert name == arm.removeprefix("A0+library@") and CTX_NAME_RE.match(name)
+    assert measurement_only(arm)
+
+
+def test_hindsight_is_the_oracle_set_and_its_placebo_never_a_mechanical_one() -> None:
+    assert hindsight_arm(f"A0+library@ctx.oracle.{HEX}")
+    assert hindsight_arm(f"A0+library@ctx.oracle-placebo.{HEX}")
+    assert not hindsight_arm(f"A0+library@ctx.mech.{HEX}")
+    assert not hindsight_arm(f"A0+library@ctx.mech-placebo.{HEX}")
+
+
+@pytest.mark.parametrize("arm", [*PRE_EXISTING_ARMS, "", "not an arm"])
+def test_no_pre_existing_arm_is_a_context_set_arm(arm: str) -> None:
+    assert ctx_set_name(arm) == ""
+    assert not measurement_only(arm) and not hindsight_arm(arm)
+
+
+def test_the_context_set_stamps_are_provenance_never_the_arm() -> None:
+    for label in (LABEL_CTX_SET, LABEL_CTX_SOURCE, LABEL_CTX_GAP, LABEL_CTX_GAP_RULE):
+        assert label in PROVENANCE_LABELS
+    for label in (LABEL_CTX_DELIVERED, LABEL_CTX_CHARS, LABEL_CTX_CEILING, "ctx_drafter"):
+        assert label in PROVENANCE_LABELS
+    assert LABEL_CONTEXT_ARM not in PROVENANCE_LABELS
+
+
+def _ctx_labels(arm: str, source: str) -> dict[str, str]:
+    return {
+        LABEL_CONTEXT_ARM: arm,
+        LABEL_CTX_SET: HEX + "f" * 52,
+        LABEL_CTX_SOURCE: source,
+        LABEL_CTX_GAP: "0",
+        LABEL_CTX_GAP_RULE: "anchor.v1",
+        LABEL_CTX_DELIVERED: "1",
+        LABEL_CTX_CHARS: "40",
+        LABEL_CTX_CEILING: "1",
+    }
+
+
+def test_a_treatment_and_its_placebo_never_pool_in_one_cell() -> None:
+    oracle, placebo = CTX_ARMS[0], CTX_ARMS[1]
+    treated = [_row(f"t{i}", mode="blind", labels=_ctx_labels(oracle, "oracle")) for i in range(2)]
+    sham = [
+        _row(f"p{i}", mode="blind", labels=_ctx_labels(placebo, "oracle-placebo")) for i in range(2)
+    ]
+    assert {r.context_arm for r in treated} == {oracle}
+    with pytest.raises(ContextArmsPooled):
+        cell_stats([*treated, *sham])
+    assert cell_stats(rows_for_context_arm([*treated, *sham], placebo)).n == 2

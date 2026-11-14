@@ -88,7 +88,7 @@ from crb.core.capability import (
     trusted_autonomy_coverage,
 )
 from crb.core.checks import ARMS
-from crb.core.context_arm import arms_present, is_arm, mode_admits
+from crb.core.context_arm import arms_present, is_arm, measurement_only, mode_admits
 from crb.core.economics import Economics, fold_economics
 from crb.core.ledger import (
     CELL_FIELDS,
@@ -200,10 +200,16 @@ def _pooled(what: str, adr: str, values: Iterable[str]) -> ApiError:
     )
 
 
+#: The refusal code for ``?arm=`` naming a context-set arm (ADR-0050 item 9).
+REFUSAL_MEASUREMENT_ONLY_ARM = "measurement_only_arm"
+
+
 def rows_for_arm_param(rows: Iterable[GradeRow], arm: str) -> list[GradeRow]:
     """ADR-0026 item 1: one context arm per reading. ``all`` → 422; an arm outside the
     grammar → 422. A row from before 2.4 carries no arm and is kept (it is read only at its
-    own apparatus, as history, where mode still splits it)."""
+    own apparatus, as history, where mode still splits it). A measurement-only arm (a
+    context set, ADR-0050 item 9) → 422 ``measurement_only_arm``: it is never mapped or
+    routed, only compared at ``GET /ctxsets/compare``."""
     rs = list(rows)
     if arm == "all":
         raise _pooled("context_arm", "ADR-0026 item 1", (r.context_arm for r in rs))
@@ -211,6 +217,14 @@ def rows_for_arm_param(rows: Iterable[GradeRow], arm: str) -> list[GradeRow]:
         return rs  # resolved per cell by :func:`rows_on_standard_arms`
     if not is_arm(arm):
         raise ApiError(422, "validation_error", f"arm {arm!r} is outside the context-arm grammar")
+    if measurement_only(arm):
+        raise ApiError(
+            422,
+            REFUSAL_MEASUREMENT_ONLY_ARM,
+            f"arm {arm!r} is a measurement-only context-set arm (ADR-0050): it never "
+            "certifies, licenses or routes; read it paired at GET /ctxsets/compare",
+            detail={"arm": arm, "compare": "/ctxsets/compare"},
+        )
     return [r for r in rs if r.context_arm == arm or (not r.context_arm and not r.taxonomy)]
 
 

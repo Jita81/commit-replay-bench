@@ -57,7 +57,9 @@ How:          FastAPI handlers over ``JobQueue`` (queue writes) and read-only SQ
               ``append_system_event`` allocates a trace's next ``seq`` under the events
               write lock (``lock_event_writes``) inside the caller's transaction.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md, docs/adr/0006-zero-raw-retention-and-evidence-packs.md
+ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
+              docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
+              docs/adr/0050-context-set-arms.md
 Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut, RunCounts, RunFactoryOut —
               mirrored by ui/src/api/types.ts), src/crb/store/jobs.py (enqueue; cancel with
               the operator as actor), src/crb/store/events.py (``lock_event_writes`` — the
@@ -79,7 +81,8 @@ Tested by:    tests/test_server_routes_runs.py, tests/test_server_app.py,
               tests/test_p792_reserved_refusals.py (the reserved.v1 submit refusals),
               tests/test_p792_reserved_rows.py and tests/test_p792_reserved.py (C5's
               ``timeout`` and C3's ``builder_config``, refused at submit),
-              tests/test_p792_pool.py (``pool_drift``)
+              tests/test_p792_pool.py (``pool_drift``),
+              tests/test_server_runs_ctx.py (ADR-0050)
 Touch when:   never for a new repository; a run parameter is added (schema field →
               ``params`` here → the worker reads it → docs/API.md → the UI type); a field
               is added to ``RunOut`` (the UI type first); a run kind is added (decide in
@@ -93,11 +96,13 @@ import asyncio
 import importlib
 import json
 import logging
+import re
 import time
 import types
 import uuid
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query, Request, status
@@ -124,6 +129,19 @@ from crb.core.campaign import (
     arm_in_flight,
     planned_commits,
 )
+from crb.core.context_arm import CTX_NAME_RE
+from crb.core.ctxset import REASON_DIGEST as CTXSET_REASON_DIGEST
+from crb.core.ctxset import REASON_PLACEBO_UNMATCHED as CTXSET_REASON_PLACEBO_UNMATCHED
+from crb.core.ctxset import REASON_POSTURE as CTXSET_REASON_POSTURE
+from crb.core.ctxset import REASON_SCHEMA as CTXSET_REASON_SCHEMA
+from crb.core.ctxset import (
+    ROLE_ENTRIES,
+    CtxSet,
+    CtxSetRefused,
+    verify_coverage,
+    verify_placebo,
+)
+from crb.core.ctxset import parse as parse_ctxset
 from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
 from crb.core.lint import LINT_DISABLED_BY_CONFIG
@@ -137,6 +155,7 @@ from crb.core.reading import (
     lint_refusal,
     reading_run_refusal,
 )
+from crb.core.spec import TaskSpec
 from crb.core.taxonomy import GLOBAL_CLASS_SET, is_class_set_version
 from crb.factory.author import author_from_label
 from crb.observability.events import StepEvent, StepStatus
@@ -769,6 +788,10 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["reading_id"] = body.reading_id
     if body.campaign_id is not None:
         params["campaign_id"] = body.campaign_id
+    if body.context_set is not None:
+        # ADR-0050: without these the worker would replay the pool as plain A0
+        params["context_set"] = body.context_set
+        params["context_role"] = body.context_role or ROLE_ENTRIES
     if body.arm is not None:
         # set before the refusals: the credential check names the S1 test author's builder
         params["arm"] = body.arm
@@ -1174,6 +1197,114 @@ def reading_run_fields_refusal(reading: Reading, run: Run) -> None:
     )
 
 
+#: Where a deployment keeps its stored context sets: ``<home>/ctxsets/<digest>.json``.
+CTXSET_DIR = "ctxsets"
+#: 404 at submit: no stored context set carries the name a run gives (ADR-0050).
+CTXSET_UNKNOWN_CODE = "ctxset_unknown"
+_CTXSET_FILE_RE = re.compile(r"^[0-9a-f]{64}\.json$")
+
+
+def stored_ctxset(home: Path | str, name: str) -> CtxSet | None:
+    """The stored context set ``name`` names (``<home>/ctxsets/<digest>.json``), parsed and
+    digest-checked by :func:`~crb.core.ctxset.parse`, or ``None`` when none is stored. One
+    reader for submit and claim, so both check the same bytes. Refuses
+    (:class:`~crb.core.ctxset.CtxSetRefused`) a name outside the grammar, a stored file whose
+    body is not the digest its file name says, and two stored sets answering one name. A
+    placebo is re-verified against the treatment it names (ADR-0050 item 7, at store time and
+    again whenever a run loads it): ``ctxset_placebo_unmatched`` when that treatment is not
+    stored, else :func:`~crb.core.ctxset.verify_placebo`'s own refusal."""
+    if not CTX_NAME_RE.match(name):
+        raise CtxSetRefused(CTXSET_REASON_SCHEMA, f"{name!r} is not a context-set name")
+    root = Path(home) / CTXSET_DIR
+    if not root.is_dir():
+        return None
+    found: list[CtxSet] = []
+    for path in sorted(root.glob(f"{name.rsplit('.', 1)[1]}*.json")):
+        if not _CTXSET_FILE_RE.match(path.name):
+            continue
+        parsed = parse_ctxset(path.read_text(encoding="utf-8"))
+        if parsed.digest != path.stem:
+            raise CtxSetRefused(
+                CTXSET_REASON_DIGEST, f"{path.name} holds a set whose digest is {parsed.digest}"
+            )
+        if parsed.name == name:
+            found.append(parsed)
+    if len(found) > 1:
+        raise CtxSetRefused(CTXSET_REASON_DIGEST, f"{len(found)} stored sets answer {name}")
+    if not found:
+        return None
+    ctxset = found[0]
+    if ctxset.placebo:
+        verify_placebo(_stored_treatment(root, ctxset), ctxset)
+    return ctxset
+
+
+def _stored_treatment(root: Path, placebo: CtxSet) -> CtxSet:
+    """The stored set a placebo's ``matched_to`` names, digest-checked; refuses
+    ``ctxset_placebo_unmatched`` when it is not stored."""
+    path = root / f"{placebo.matched_to}.json"
+    if not path.is_file():
+        raise CtxSetRefused(
+            CTXSET_REASON_PLACEBO_UNMATCHED,
+            f"the placebo's treatment {placebo.matched_to[:12]} is not stored",
+        )
+    treatment = parse_ctxset(path.read_text(encoding="utf-8"))
+    if treatment.digest != path.stem:
+        raise CtxSetRefused(
+            CTXSET_REASON_DIGEST, f"{path.name} holds a set whose digest is {treatment.digest}"
+        )
+    return treatment
+
+
+def repo_task_specs(db: Session, repo: str) -> list[TaskSpec]:
+    """Every registered task of ``repo`` as its spec (what ``verify_coverage`` reads)."""
+    rows = db.execute(select(Task).where(Task.repo == repo)).scalars().all()
+    return [TaskSpec.from_dict(r.spec_json) for r in rows]
+
+
+def ctxset_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
+    """ADR-0050 at submit, for a run naming ``context_set`` (either role; nothing else is
+    checked): 422 ``ctxset_posture`` unless the deployment is sealed (sandbox and builder on
+    ``docker``: a hindsight brief can restate the answer, so it is never built on the host);
+    404 ``ctxset_unknown`` unless the set is stored; 422 with the set's own reason
+    (``ctxset_digest``, ``ctxset_repo``, ``ctxset_coverage``…) unless the stored body is the
+    named digest and covers gold-clean tasks of the run's repository, one change each, and,
+    for a placebo, unless its treatment is stored and it still matches it
+    (``ctxset_placebo_unmatched`` / ``ctxset_placebo_overlap``, via :func:`stored_ctxset`).
+    Nothing is queued on any refusal; the worker re-checks all of it at claim."""
+    name = body.context_set
+    if name is None:
+        return
+    posture = settings.posture()
+    if not posture["sealed"]:
+        raise ApiError(
+            422,
+            CTXSET_REASON_POSTURE,
+            f"a context-set run ({name}) needs a sealed deployment (sandbox and builder "
+            f"executors docker; this one is {posture['sandbox_executor']!r} and "
+            f"{posture['builder_executor']!r}) — nothing was queued",
+            detail={"context_set": name, "sealed": False},
+        )
+    try:
+        ctxset = stored_ctxset(settings.home, name)
+        if ctxset is None:
+            raise ApiError(
+                404,
+                CTXSET_UNKNOWN_CODE,
+                f"no stored context set is {name} (store it with POST /ctxsets) — nothing "
+                "was queued",
+                detail={"context_set": name},
+            )
+        verify_coverage(ctxset, repo_task_specs(db, body.repo), repo=body.repo)
+    except CtxSetRefused as e:
+        raise ApiError(
+            422,
+            e.reason,
+            f"context set {name}: {e.detail} — nothing was queued",
+            detail={"context_set": name, "reason": e.reason},
+        ) from e
+
+
 def campaign_refusal(db: Session, body: RunCreateRequest) -> None:
     """G-957 — what a run filed under a campaign must name, and the campaign itself. 422
     ``campaign_cap_required``: no ``max_cost_usd``, so nothing could be held for it; 422
@@ -1357,6 +1488,10 @@ def submit_refusals(
       registration: a pool task relabelled out of the cell, or a pinned qualification record
       missing or not qualified (P-797; :func:`reading_pool_drift_refusal`; the worker
       re-checks at claim);
+    * 422 ``ctxset_posture`` / 404 ``ctxset_unknown`` / 422 ``ctxset_<reason>`` — a run
+      naming ``context_set`` on an unsealed deployment, naming a set not stored, or whose
+      stored set fails its digest or does not cover gold-clean tasks of the repository
+      (ADR-0050; :func:`ctxset_refusal`; the worker re-checks at claim);
     * 422 ``builder_login_invalid`` — a builder this run would call (the same list the
       presence check reads, an ``S1`` test author included) has a login whose last
       verification failed; one that is not fresh is verified once first — LAST, after every
@@ -1395,6 +1530,8 @@ def submit_refusals(
         reading_lint_refusal(db, reading)
         reading_run_fields_refusal(reading, run)
         reading_pool_drift_refusal(db, reading)
+    # after the reading gate: a reading counts no context-set run, and says so by field name
+    ctxset_refusal(db, settings, body)
     if not login:
         return
     # last: the only refusal that can cost a verify turn (P-462)
