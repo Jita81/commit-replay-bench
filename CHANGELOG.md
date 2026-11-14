@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The Go controls' compile probe is the belt run's own command.** The negative controls
+  compile-check a Go cheat with `go test -run '^$'` before grading it. The probe copied the
+  runner's command field by field, so it lacked the exec `/tmp` a test binary starts from and
+  the sealed module cache. In the sandbox either loss read as "does not compile": a cheat
+  that builds was recorded `not_constructible`. The probe now replaces only the arguments of
+  the belt run's command, the RED check runs with the set the parent tree selects, and a tree
+  outside the closure, or a probe that did not finish, is a harness error. No verdict rule,
+  control or apparatus version changes (P-820)
+  ([#147](https://github.com/Jita81/commit-replay-bench/pull/147)).
+
 - **A read script proves it can see its event keys before it counts.** `scripts/read_preflight.py`
   refuses an expectation of a key the emitter lifts out of the payload, checks every fetched event,
   stops an unwaived zero count over a non-empty population, and exits 6. Its AST rule follows

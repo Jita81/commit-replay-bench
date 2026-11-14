@@ -23,9 +23,22 @@ What it does: Pins the pure transforms (function and func-var discovery, zero va
               ``go`` on PATH, that ``gorepo`` is 6/7 constructible (``env_poison`` honestly not —
               was 4/7 before the port) and ``gorepo_funcvar`` 7/7 with no violation, the stub
               going red on an assertion not a build failure, and the report stamping
-              ``controls_v2``.
+              ``controls_v2``; and, with no toolchain, that the compile probe is the belt
+              run's command with only its arguments replaced (the exec ``/tmp``, the
+              sealed module cache the edited tree selects), that the sets handed to a
+              control's edit reach the probe that edit calls, that a tree outside the
+              closure is never read as "does not compile", that a failing probe returns
+              the toolchain's tail, that on the host the probe carries the declared
+              environment the belt command carries, that a probe which did not finish
+              raises and is never read as "does not compile", that with no sets given
+              the runner's own binding is kept, and that an empty scope probes every
+              package (P-820).
 How:          Inline Go source for the unit half; ``qualify`` + ``controls_for_task`` on the two
-              fixtures for the matrix half (module-scoped fixtures).
+              fixtures for the matrix half (module-scoped fixtures). The probe cases
+              (P-820) use the real ``GoRunner`` with a recording executor (docker-named,
+              and host-named for the declared environment), sealed bindings in a
+              registered store under ``tmp_path`` and stub closure selectors: no
+              toolchain.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0010-polyglot-negative-controls.md
 Works with:   src/crb/core/oracle/controls_go.py (under test), src/crb/core/oracle/controls.py
@@ -40,11 +53,24 @@ Touch when:   a Go construct the scanner misses is found in a client repository 
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
-from crb.core.execution import LocalExecutor
+from crb.core.deps import (
+    ROLE_GOLD,
+    ROLE_PARENT,
+    SCHEME_GO,
+    BundleMount,
+    ClosureViolation,
+    DepsBinding,
+    TaskDeps,
+    register_store_root,
+)
+from crb.core.execution import Command, ExecResult, LocalExecutor
 from crb.core.git import GitRepo
 from crb.core.mine import qualify
 from crb.core.oracle import controls as nc
@@ -333,6 +359,265 @@ def test_scope_dirs_forms():
     assert g.scope_dirs(("./util/...",), dirs, module=m) == {"util", "util/sub"}
     assert g.scope_dirs(("example.com/m/doc", "./"), dirs, module=m) == {"", "doc"}
     assert g.scope_dirs(("./...",), dirs, module=m) == dirs
+
+
+# =============================================================================
+# Unit: the compile probe runs as the belt run does (P-820; no toolchain)
+# =============================================================================
+
+KEY_GOLD = "dep_" + "a" * 64
+KEY_PARENT = "dep_" + "b" * 64
+
+
+class _Recorder:
+    """A docker-named executor that records each command and answers with one result."""
+
+    name = "docker"
+
+    def __init__(self, result: ExecResult | None = None) -> None:
+        self.result = result or ExecResult(0, "", "")
+        self.commands: list[Command] = []
+
+    def run(self, cmd: Command) -> ExecResult:
+        self.commands.append(cmd)
+        return self.result
+
+    def tool(self, name: str, host_override: str | None = None) -> str:
+        return name
+
+    def describe(self) -> dict[str, Any]:
+        return {"executor": "recorder"}
+
+
+class _Host(_Recorder):
+    """A host-named recorder: the one kind of executor whose commands the runner
+    declares."""
+
+    name = "local"
+
+    def __init__(self, result: ExecResult | None = None) -> None:
+        super().__init__(result)
+        self.base_env = LocalExecutor().base_env
+
+
+class _Selects:
+    """A closure selector that answers one role for every tree, and records the trees."""
+
+    def __init__(self, role: str) -> None:
+        self.role = role
+        self.roots: list[Path] = []
+
+    def select(self, root: Path) -> str:
+        self.roots.append(Path(root))
+        return self.role
+
+
+class _Outside:
+    """A closure selector that refuses every tree."""
+
+    def select(self, root: Path) -> str:
+        raise ClosureViolation(["example.com/elsewhere@v1.0.0"])
+
+
+def _sealed(tmp_path: Path, key: str, role: str = ROLE_GOLD) -> DepsBinding:
+    """A sealed Go module cache inside a registered store, bound as the provider binds one."""
+    host = register_store_root(tmp_path / "store") / "go" / key / "gomod"
+    host.mkdir(parents=True, exist_ok=True)
+    return DepsBinding(
+        role=role,
+        lang="go",
+        scheme=SCHEME_GO,
+        key=key,
+        digest="sha256:" + key[-64:],
+        mounts=(BundleMount(host, "/deps/gomod", key),),
+        env={"GOMODCACHE": "/deps/gomod", "GOPROXY": "off", "GOSUMDB": "off"},
+        local_env={"GOMODCACHE": str(host), "GOPROXY": "off"},
+    )
+
+
+def _tree(tmp_path: Path) -> Any:
+    """All the probe reads of a workspace: its root."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    return SimpleNamespace(root=root)
+
+
+def _probe(ws: Any, executor: _Recorder, runner: Any, deps: TaskDeps | None) -> str:
+    return nc._go_compile_error(
+        ws, ("./calc",), runner=runner, executor=executor, timeout=77, deps=deps
+    )
+
+
+@pytest.mark.parametrize("sealed", [True, False], ids=["sealed-set", "no-set"])
+def test_compile_probe_is_the_belt_command_with_only_its_arguments_replaced(
+    tmp_path: Path, sealed: bool
+) -> None:
+    """The probe is the command a belt run sends, with ``argv`` alone replaced. Whatever the
+    belt run needs to start a test binary in the sandbox (the exec ``/tmp``, the sealed module
+    cache and its offline environment) the probe therefore has too: a field the probe drops is
+    a build that cannot finish, read as "the cheat does not compile" (P-820)."""
+    ws = _tree(tmp_path)
+    binding = _sealed(tmp_path, KEY_GOLD) if sealed else None
+    runner = get_runner(gorepo.config())
+    executor = _Recorder()
+    runner.run_for(executor, ws.root, ("./calc",), timeout=77, authored=None, deps=binding)
+    (belt,) = executor.commands
+    deps = TaskDeps.uniform(binding) if binding is not None else None
+
+    assert _probe(ws, executor, runner, deps) == ""
+    _, probe = executor.commands
+    assert probe.argv == (belt.argv[0], "test", "-count=1", "-run", "^$", "./calc")
+    assert probe == dataclasses.replace(belt, argv=probe.argv)  # every other field is the belt's
+    assert probe.exec_tmp is True  # the test binary is built under /tmp and started from there
+    assert runner.deps is None  # the binding is released after the probe
+    if binding is not None:
+        assert binding.mounts[0] in probe.ro_mounts
+        assert probe.env["GOMODCACHE"] == "/deps/gomod" and probe.env["GOPROXY"] == "off"
+    else:
+        assert probe.ro_mounts == () and probe.env["GOMODCACHE"] == "/tmp/gomod"
+
+
+@pytest.mark.parametrize("role", [ROLE_PARENT, ROLE_GOLD])
+def test_compile_probe_takes_the_set_the_edited_tree_selects(tmp_path: Path, role: str) -> None:
+    """A stub edits the parent tree, a hard-coded answer the gold's: the probe mounts the set
+    the selector names for the tree it compiles, and only that one."""
+    ws = _tree(tmp_path)
+    parent = _sealed(tmp_path, KEY_PARENT, ROLE_PARENT)
+    gold = _sealed(tmp_path, KEY_GOLD)
+    selector = _Selects(role)
+    deps = TaskDeps("sealed", "go", parent, gold, gold, selector=selector)
+    executor = _Recorder()
+
+    assert _probe(ws, executor, get_runner(gorepo.config()), deps) == ""
+    (probe,) = executor.commands
+    chosen, other = (parent, gold) if role == ROLE_PARENT else (gold, parent)
+    assert probe.ro_mounts == chosen.mounts and other.mounts[0] not in probe.ro_mounts
+    assert selector.roots == [ws.root]
+
+
+def test_a_tree_outside_the_closure_is_never_read_as_does_not_compile(tmp_path: Path) -> None:
+    """A tree whose manifests select outside the task's sealed set stops the probe before any
+    command runs, and the error is not one of the "cannot be built" kinds: the caller records
+    a harness error (a violation), never ``not_constructible``."""
+    b = _sealed(tmp_path, KEY_GOLD)
+    deps = TaskDeps("sealed", "go", b, b, b, selector=_Outside())
+    executor = _Recorder()
+    runner = get_runner(gorepo.config())
+    with pytest.raises(ClosureViolation, match=r"example\.com/elsewhere"):
+        _probe(_tree(tmp_path), executor, runner, deps)
+    assert executor.commands == [] and runner.deps is None
+    assert not issubclass(ClosureViolation, nc.NOT_CONSTRUCTIBLE_ERRORS)
+
+
+def test_the_sets_handed_to_a_control_edit_reach_its_probe(tmp_path: Path) -> None:
+    """The stub on a Go task, through ``_apply_control`` and ``_apply_go`` to the real
+    probe: the one command the edit sends mounts the set the stubbed tree selects. A link
+    in that chain that drops ``deps`` sends a probe with no module cache."""
+    root = tmp_path / "tree"
+    (root / "calc").mkdir(parents=True)
+    (root / "calc" / "calc.go").write_text(PARENT, encoding="utf-8")
+    ws = SimpleNamespace(
+        root=root,
+        sha="feat",
+        repo=SimpleNamespace(show_file=lambda sha, p: GOLD),
+        read=lambda p: (root / p).read_text(encoding="utf-8"),
+        exists=lambda p: (root / p).exists(),
+    )
+    task = SimpleNamespace(
+        src_files=("calc/calc.go",),
+        test_files=("calc/calc_test.go",),
+        target_tests=("./calc",),
+    )
+    parent = _sealed(tmp_path, KEY_PARENT, ROLE_PARENT)
+    gold = _sealed(tmp_path, KEY_GOLD)
+    deps = TaskDeps("sealed", "go", parent, gold, gold, selector=_Selects(ROLE_PARENT))
+    config = gorepo.config()
+    executor = _Recorder()
+
+    note = nc._apply_control(
+        nc.STUB,
+        ws,
+        task,
+        config,
+        runner=get_runner(config),
+        executor=executor,
+        timeout=77,
+        deps=deps,
+    )
+    assert "compiled" in note
+    (probe,) = executor.commands
+    assert probe.argv[1:] == ("test", "-count=1", "-run", "^$", "./calc")
+    assert probe.ro_mounts == parent.mounts and probe.exec_tmp is True
+    assert (root / "calc" / "calc.go").read_text(encoding="utf-8") != PARENT  # stubbed
+
+
+def test_a_failing_probe_returns_the_toolchain_tail(tmp_path: Path) -> None:
+    executor = _Recorder(ExecResult(1, "", "calc/calc.go:3:9: undefined: Missing\n"))
+    err = _probe(_tree(tmp_path), executor, get_runner(gorepo.config()), None)
+    assert "undefined: Missing" in err
+
+
+def test_compile_probe_carries_the_declared_environment_on_the_host(tmp_path: Path) -> None:
+    """On the host executor a belt command runs in the runner's declared environment and
+    inherits nothing else from the worker. The probe is declared as that command is: an
+    undeclared probe would compile with whatever the worker's own environment offers."""
+    ws = _tree(tmp_path)
+    runner = get_runner(gorepo.config())
+    executor = _Host()
+    runner.run_for(executor, ws.root, ("./calc",), timeout=77, authored=None)
+    (belt,) = executor.commands
+    assert belt.declared_env is True  # the precondition: on the host a belt run is declared
+
+    assert _probe(ws, executor, runner, None) == ""
+    _, probe = executor.commands
+    assert probe.declared_env is True
+    assert probe == dataclasses.replace(belt, argv=probe.argv)
+
+
+@pytest.mark.parametrize(
+    ("result", "why"),
+    [
+        (ExecResult(124, "", "", timed_out=True), "timed out"),
+        (ExecResult(130, "", "", cancelled=True), "cancelled"),
+        (ExecResult(1, "", "", env_error="the tree could not be copied"), "could not be copied"),
+    ],
+    ids=["timed-out", "cancelled", "environment"],
+)
+def test_a_probe_that_did_not_finish_is_never_read_as_does_not_compile(
+    tmp_path: Path, result: ExecResult, why: str
+) -> None:
+    """A probe that timed out, was cancelled or never started (the sandbox could not set its
+    tree up) says nothing about whether the cheat builds. It raises, and the error is neither
+    one of the "cannot be built" kinds nor the one that stops the run: the caller records a
+    harness error on that control's row."""
+    with pytest.raises(RuntimeError, match=why) as stopped:
+        _probe(_tree(tmp_path), _Recorder(result), get_runner(gorepo.config()), None)
+    assert type(stopped.value) is RuntimeError  # not SandboxUnavailable, which ends the run
+    assert not isinstance(stopped.value, nc.NOT_CONSTRUCTIBLE_ERRORS)
+
+
+def test_with_no_sets_given_the_probe_keeps_the_binding_the_runner_has(tmp_path: Path) -> None:
+    """A caller that hands no sets keeps the set the runner is bound to at that moment: the
+    probe mounts it, and it is still bound for the caller's next command."""
+    b = _sealed(tmp_path, KEY_GOLD)
+    runner = get_runner(gorepo.config())
+    executor = _Recorder()
+    with runner.deps_bound(b):
+        assert _probe(_tree(tmp_path), executor, runner, None) == ""
+        assert runner.deps is b
+    (probe,) = executor.commands
+    assert probe.ro_mounts == b.mounts and probe.env["GOMODCACHE"] == "/deps/gomod"
+
+
+def test_an_empty_scope_probes_every_package(tmp_path: Path) -> None:
+    """With no package named the probe compiles the whole module, as the belt command does."""
+    executor = _Recorder()
+    err = nc._go_compile_error(
+        _tree(tmp_path), (), runner=get_runner(gorepo.config()), executor=executor, timeout=77
+    )
+    assert err == ""
+    (probe,) = executor.commands
+    assert probe.argv[1:] == ("test", "-count=1", "-run", "^$", "./...")
 
 
 # =============================================================================
