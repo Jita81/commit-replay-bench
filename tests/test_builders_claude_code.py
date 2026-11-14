@@ -320,9 +320,7 @@ def test_argv_is_headless_restricted_and_uses_skill_model_ids(tmp_path: Path) ->
     assert "Bash(claude:*)" in deny.split(",") and "Bash(/usr/local/bin/claude:*)" in deny
     sysprompt = argv[argv.index("--append-system-prompt") + 1]
     assert (
-        "NEVER modify" in sysprompt
-        and "DISQUALIFYING" in sysprompt
-        and "25 tool calls" in sysprompt
+        "NEVER modify" in sysprompt and "DISQUALIFIED" in sysprompt and "25 tool calls" in sysprompt
     )
     schema = json.loads(argv[argv.index("--json-schema") + 1])
     assert schema["required"] == ["done", "summary"]
@@ -1199,7 +1197,34 @@ def test_archaeology_and_network_in_transcript_are_violations(tmp_path: Path) ->
     net = [e for e in out.errors if e.startswith("network:")]
     assert len(arch) == 2 and len(net) == 1 and out.violated
     assert out.extra["refused"] and "git log" in out.extra["refused"][0]
-    assert out.done  # the claim stands as a claim; the orchestrator DQs on `violated`
+    # the claim stands as a claim; `violated` is not a disqualification: the adapter maps it
+    # to a `protocol violation:` error, discards the source edits and the row fails (kind
+    # `protocol`) — only tampering disqualifies
+    assert out.done
+    ws.remove()
+
+
+def test_a_refused_command_still_counts_open_policy_decision(tmp_path: Path) -> None:
+    """Behaviour (d), pinned while it is an OPEN POLICY DECISION: a Bash command the CLI's
+    deny rule refused (so it never ran) is still recorded as a violation when the guard
+    refuses it too, and the rules text says so. Changing this is a policy change, not a fix:
+    this test fails until the rules text and this pin change together."""
+    from crb.builders.base import DEFAULT_RULES
+
+    lines = [
+        ev_init(),
+        ev_assistant(tool_use("Bash", command="git stash list")),
+        ev_user(),
+        ev_result(
+            structured={"done": True, "summary": "ok"},
+            denials=[{"tool_name": "Bash", "tool_input": {"command": "git stash list"}}],
+        ),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines, side_effect=_fix_calc))
+    assert out.extra["refused"] and "git stash" in out.extra["refused"][0]
+    assert out.violated
+    assert [e for e in out.errors if e.startswith("archaeology: 'git stash'")]
+    assert "even when the tool refuses to run it" in DEFAULT_RULES
     ws.remove()
 
 

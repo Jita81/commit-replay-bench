@@ -198,7 +198,7 @@ def test_the_brief_renders_the_lines_after_the_harness_line(h: Harness) -> None:
     text = brief.task_text()
     harness = text.index("The test environment is provisioned")
     notes = text.index("Operating notes for this repository (a checklist):")
-    rules = text.index("RULES (violations disqualify the run):")
+    rules = text.index("RULES:\n- NEVER modify")
     assert harness < notes < rules
     assert f"  - {line['text']}" in text
     assert brief.to_dict()["playbook"] == [line["text"]]

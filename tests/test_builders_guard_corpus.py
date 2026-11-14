@@ -65,7 +65,7 @@ import pytest
 
 from crb.builders import base
 from crb.builders.adapter import build_fn_for, ladder_from_spec
-from crb.builders.base import Budget, GitArchaeologyGuard
+from crb.builders.base import STASH_FREE_IDIOM, Budget, GitArchaeologyGuard
 from crb.core.execution import LocalExecutor
 from crb.core.ledger import JsonlLedger
 from crb.core.run import RunSpec, run_task
@@ -238,12 +238,19 @@ def test_git_stash_refused_in_every_form_and_says_why(guard: GitArchaeologyGuard
     ):
         reason = guard.check_shell(cmd)
         assert reason.startswith("archaeology: 'git stash'"), (cmd, reason)
-        assert "shared" in reason and "git checkout -- <paths>" in reason
+        assert "shared" in reason and f"`{STASH_FREE_IDIOM}`" in reason
     idiom = (
+        "git diff HEAD -- lib/request.js > /tmp/mine.patch && git apply -R /tmp/mine.patch && "
+        "npm test 2>&1 | tail -5; git apply /tmp/mine.patch"
+    )
+    assert guard.check_shell(idiom) == ""
+    # the earlier checkout idiom is still ALLOWED by this guard (no accept/refuse change);
+    # it is no longer advised because claude_code's deny rules refuse `git checkout`
+    old_idiom = (
         "git diff > /tmp/mine.patch && git checkout -- lib/request.js && npm test 2>&1 | tail -5; "
         "git apply /tmp/mine.patch"
     )
-    assert guard.check_shell(idiom) == ""
+    assert guard.check_shell(old_idiom) == ""
 
 
 def test_npx_policy_local_bin_verified_against_cwd(
@@ -326,10 +333,11 @@ def test_npx_standard_is_honest_with_the_worktree_cwd_and_fail_closed_without(
     blind = GitArchaeologyGuard()
     reason = blind.check_shell("npx standard lib/request.js 2>&1")
     assert reason.startswith("network:") and "cannot be verified" in reason
-    # the stash refusal's message names the diff/checkout idiom (the decider asked for the
+    # the stash refusal's message names the diff/apply -R idiom (the decider asked for the
     # message to be asserted, not only the prefix, so it cannot regress)
     reason = guard.check_shell("git stash && node --test 2>&1 | tail -10; git stash pop")
-    assert "git diff > /tmp/mine.patch" in reason and "git apply /tmp/mine.patch" in reason
+    assert "git diff HEAD -- <paths> > /tmp/mine.patch" in reason
+    assert "git apply -R /tmp/mine.patch" in reason and "git apply /tmp/mine.patch" in reason
     assert "shared with every other worktree" in reason
 
 

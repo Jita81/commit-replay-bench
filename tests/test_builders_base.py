@@ -86,7 +86,7 @@ def test_brief_task_text_has_rules_and_message() -> None:
     b = base.BuildBrief("subj", "subj\n\nlong body", "r", "python", spec_facts=("adds a flag",))
     text = b.task_text(worktree="/wt")
     assert "/wt" in text and "long body" in text and "adds a flag" in text
-    assert "DISQUALIFYING" in text  # the census rules are always attached
+    assert "DISQUALIFIED" in text  # the census rules are always attached
     assert b.repo_config().language is Language.PYTHON  # fallback config derives from language
 
 

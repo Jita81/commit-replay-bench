@@ -97,8 +97,14 @@ from crb.core.ledger import (
     is_v2_apparatus,
 )
 from crb.core.mine import change_identity
+from crb.core.patches import (
+    DISCARDED_FILES_NOTE_KEY,
+    DISCARDED_NOTE_KEY,
+    PatchStore,
+    keep_discarded,
+    keep_patch,
+)
 from crb.core.patches import NOTE_KEY as PATCH_NOTE_KEY
-from crb.core.patches import PatchStore, keep_patch
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.spend import EscalationGate
@@ -121,6 +127,12 @@ class BuildAttempt:
     #: attempt-level provenance merged into the pack's ``notes`` (an unconfirmed container
     #: kill: ``{kill_confirmed: False, container}``); never a verdict
     notes: Mapping[str, Any] = field(default_factory=dict)
+    #: the unified diff of the builder's source edits the adapter DISCARDED because the
+    #: attempt errored (``""`` when nothing was dropped). Raw text, never put in ``notes``:
+    #: the run keeps it through the patch store as ``notes.discarded_patch``. Never a verdict.
+    discarded_patch: str = ""
+    #: the paths that diff covers (tracked files restored, new files deleted)
+    discarded_files: tuple[str, ...] = ()
 
 
 #: ``build_fn(workspace, task, mode, rung) -> BuildAttempt``. The whole contract between
@@ -473,6 +485,15 @@ def run_task(
                 if spec.patch_store is not None
                 else None
             )
+            # the builder's edits the adapter discarded (an errored attempt) stay in the
+            # record: kept beside the graded patch, never graded, never a verdict
+            discarded: dict[str, Any] = {}
+            if attempt.discarded_files:
+                discarded[DISCARDED_FILES_NOTE_KEY] = list(attempt.discarded_files)
+                if attempt.discarded_patch and spec.patch_store is not None:
+                    discarded[DISCARDED_NOTE_KEY] = keep_discarded(
+                        attempt.discarded_patch, spec.patch_store
+                    )
             # decide the climb before the row: the rule and the bar go on the row it stops
             decision = None
             if (
@@ -498,6 +519,7 @@ def run_task(
                     ),
                     **dict(attempt.notes),
                     **({PATCH_NOTE_KEY: kept} if kept is not None else {}),
+                    **discarded,
                     # the row's own link to the worktree it graded: a reclaimed run writes
                     # two rows under one trial, so no event key names one attempt (PR #53).
                     # Last, so a builder's notes cannot point the row at another worktree.

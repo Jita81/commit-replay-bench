@@ -110,7 +110,8 @@ Works with:   src/crb/builders/base.py (brief, budget, outcome and the two guard
 Tested by:    tests/test_builders_claude_code.py, tests/test_builders_container.py,
               tests/test_execution_post_kill.py, tests/test_post_kill_wait_ratchet.py,
               tests/test_p792_reserved.py (the stamp names the argv overrides),
-              tests/test_nested_model_call.py (the deny rules and credential names)
+              tests/test_nested_model_call.py (the deny rules and credential names),
+              tests/test_builders_rules_consistency.py (the rules name what is enforced)
 Touch when:   never for a new repository (``auth``, ``model`` and ``bare`` are per-run or
               per-worker settings — docs/OPERATOR.md); a new CLI flag or a changed stream
               event shape is a change to ``argv``/``StreamStats.feed`` with a canned-stream
@@ -144,6 +145,7 @@ from typing import Any, Protocol
 from crb.builders.base import (
     CREDENTIAL_REFUSED_STATUSES,
     NESTED_MODEL_CALL,
+    STASH_FREE_IDIOM,
     STOP_DONE,
     STOP_MAX_COST,
     STOP_MAX_TURNS,
@@ -363,23 +365,45 @@ def default_auth() -> str:
     return os.environ.get(AUTH_ENV, "").strip() or AUTH_API_KEY
 
 
+def _refused_git() -> str:
+    """The git subcommands :data:`DENY_RULES` refuses, in rule order, for the rules text."""
+    subs = [
+        r[len("Bash(git ") : -len(":*)")]
+        for r in DENY_RULES
+        if r.startswith("Bash(git ") and r.endswith(":*)")
+    ]
+    return ", ".join(subs)
+
+
 def system_rules(budget: Budget) -> str:
-    """The census ``wf_wave.js`` rules, appended to Claude Code's default prompt."""
+    """The census ``wf_wave.js`` rules, appended to Claude Code's default prompt.
+
+    Each sentence is true of enforcement (tests/test_builders_rules_consistency.py): the
+    refused git set is read from :data:`DENY_RULES`, and the one test-without-my-edits line
+    (:data:`~crb.builders.base.STASH_FREE_IDIOM`) passes the guard and no deny rule. The shared
+    outcomes (tamper disqualifies; a history, network or unparseable command discards every
+    source edit) are in the task's ``DEFAULT_RULES``."""
     return (
         "You are completing a real code change in the git worktree you were started in.\n"
-        "RULES (violations disqualify the run):\n"
-        "- NEVER modify, delete, or add any test files. Source files only.\n"
+        "RULES:\n"
+        "- NEVER modify, delete, or add any test files. Source files only. Changing a test file "
+        "is tampering: the run is DISQUALIFIED.\n"
         "- Work only inside this worktree.\n"
         "- Do not use git to peek at other commits (no git log/show/reflog/stash/bisect, no diff "
         "or checkout of another revision).\n"
         "- NEVER consult external sources for this change: no fetching the upstream repository, no "
-        "package-registry downloads, no web lookups of the project's history or PRs. Solving by "
-        "finding the real commit's diff anywhere is a DISQUALIFYING protocol violation. Solve from "
+        "package-registry downloads, no web lookups of the project's history or PRs. Solve from "
         "the local code and the failing tests only.\n"
         "- The test environment is ALREADY PROVISIONED: NEVER install or upgrade packages (no "
         "pip/uv/npm/yarn/pnpm install, go get, cargo add, mvn dependency:*). If the tests cannot "
         "import the package, run them EXACTLY with the test command in the task — it sets the "
         "interpreter and PYTHONPATH/NODE_PATH for this worktree.\n"
+        f"- This tool refuses these git commands: {_refused_git()}. A history, network or "
+        "unparseable command counts as a violation even when the tool refuses it; then ALL your "
+        "source edits are discarded and the run fails.\n"
+        "- To run the tests without your edits, run this one line from the worktree root (never "
+        "git -C; new untracked files are not in the patch): "
+        f"`{STASH_FREE_IDIOM}`\n"
         f"Budget: roughly {budget.max_tool_calls} tool calls. If green early, stop early.\n"
         "Finish by reporting done=true only if the target test command exits 0."
     )
@@ -790,9 +814,16 @@ class StreamStats:
 
     def _inspect_tool_use(self, name: str, inp: Any, summary: dict[str, Any] | None) -> None:
         """Run the guards over a tool call as the CLI reports it: every string in the input
-        through the nested-model-call tripwire, Bash commands through the shell guard
-        (recorded as a violation even when the CLI's deny rule refused them), file-writing
-        tools through the path guard; paths translated from the container alias first."""
+        through the nested-model-call tripwire, Bash commands through the shell guard,
+        file-writing tools through the path guard; paths translated from the container alias
+        first.
+
+        A command the guard refuses is recorded as a violation even when the CLI's deny rule
+        already refused to run it. That is deliberate: the attempt is the evidence, and the
+        rules text tells the builder a refused command still counts. Whether a refused-but-
+        never-run command should count is an open policy decision; until it is made this
+        behaviour is pinned by tests/test_builders_claude_code.py
+        (``test_a_refused_command_still_counts_open_policy_decision``)."""
         if not isinstance(inp, dict):
             return
         nested, excerpt = nested_model_call_input(inp)

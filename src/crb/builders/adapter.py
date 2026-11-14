@@ -192,6 +192,7 @@ from crb.core.ledger import (
     AUTHORING_HARNESS_ERROR,
     BUILDER_EXECUTOR_SEALED,
     LABEL_BUILDER_EXECUTOR,
+    LABEL_DISCARDED_FILES,
     GradeRow,
     JsonlLedger,
 )
@@ -654,21 +655,53 @@ def discard_source_edits(ws: Workspace, config: RepoConfig, protected: Sequence[
     wrote under the test layout — are left alone: belt 1 / belt 0 must see them.
     Returns the paths discarded.
     """
+    discarded, restore = _discard_plan(ws, config, protected)
+    for rel in discarded:
+        if rel not in restore:
+            (ws.root / rel).unlink(missing_ok=True)
+    if restore:
+        ws.restore_from_parent(restore)
+    return discarded
+
+
+def _discard_plan(
+    ws: Workspace, config: RepoConfig, protected: Sequence[str]
+) -> tuple[list[str], list[str]]:
+    """What :func:`discard_source_edits` drops: ``(dropped, restore)`` — every touched
+    non-test file in touched order, and the tracked ones among them (restored to the parent;
+    the rest are new and deleted). Test files (the sighted overlay, anything under the test
+    layout) and ``protected`` are never in it."""
     keep = set(protected)
     tracked = set(ws.repo.diff_names("HEAD", cwd=ws.root))
-    discarded: list[str] = []
+    dropped: list[str] = []
     restore: list[str] = []
     for rel in ws.touched_files():
         if rel in keep or config.is_test(rel):
             continue
+        dropped.append(rel)
         if rel in tracked:
             restore.append(rel)
-        else:
-            (ws.root / rel).unlink(missing_ok=True)
-        discarded.append(rel)
-    if restore:
-        ws.restore_from_parent(restore)
-    return discarded
+    return dropped, restore
+
+
+def discarded_edits_diff(ws: Workspace, config: RepoConfig, protected: Sequence[str]) -> str:
+    """The unified diff of exactly the files :func:`discard_source_edits` is about to drop:
+    ``git diff <parent> -- <restored paths>`` plus each new regular file against
+    ``/dev/null`` (as :meth:`Workspace.patch_text` does). Never the test overlay, so in
+    sighted mode it is the builder's own edits only. Read before the discard; it changes
+    nothing on disk."""
+    dropped, restore = _discard_plan(ws, config, protected)
+    text = ws.repo.diff_paths_against(ws.parent, restore, cwd=ws.root) if restore else ""
+    for rel in dropped:
+        if rel in restore:
+            continue
+        p = ws.root / rel
+        if not p.is_file() or p.is_symlink():
+            continue
+        r = ws.repo.run("diff", "--no-index", "--", "/dev/null", rel, cwd=ws.root)
+        if r.stdout:  # --no-index exits 1 when the files differ (always, against /dev/null)
+            text += ("" if text.endswith("\n") or not text else "\n") + r.stdout
+    return text
 
 
 def _failed_attempt(rung_label: str, mode: str, error: str) -> BuildAttempt:
@@ -1295,17 +1328,44 @@ def build_fn_for(
             return task.subject
 
     def discard(ws: Workspace, task: TaskSpec, attempt: BuildAttempt) -> BuildAttempt:
-        """An errored attempt leaves no admissible patch (see module docstring)."""
+        """An errored attempt leaves no admissible patch (see module docstring). What is
+        dropped stays visible: the dropped diff and paths ride on the attempt (the run keeps
+        the diff as ``notes.discarded_patch``) and the row carries ``discarded_files`` —
+        for every cause of the error, never a verdict or failure-kind change."""
         if not attempt.error:
             return attempt
         try:
+            patch = discarded_edits_diff(ws, config, task.test_files)
+        except Exception as exc:  # the record is best-effort; it never blocks the discard
+            emit(
+                on_event,
+                BUILDER_EVENT_PREFIX + "discard.error",
+                task=task.task_id,
+                error=f"capturing the discarded diff: {exc}",
+            )
+            patch = ""
+        try:
             dropped = discard_source_edits(ws, config, task.test_files)
         except Exception as exc:  # cannot even clean up: record it, grade whatever is there
-            emit(on_event, BUILDER_EVENT_PREFIX + "discard.error", error=str(exc))
+            emit(
+                on_event, BUILDER_EVENT_PREFIX + "discard.error", task=task.task_id, error=str(exc)
+            )
             return attempt
-        if dropped:
-            emit(on_event, BUILDER_EVENT_PREFIX + "discard", files=dropped, error=attempt.error)
-        return attempt
+        if not dropped:
+            return attempt
+        emit(
+            on_event,
+            BUILDER_EVENT_PREFIX + "discard",
+            task=task.task_id,
+            files=dropped,
+            error=attempt.error,
+        )
+        return replace(
+            attempt,
+            discarded_patch=patch,
+            discarded_files=tuple(dropped),
+            labels={**attempt.labels, LABEL_DISCARDED_FILES: str(len(dropped))},
+        )
 
     def sealed_build(
         ws: Workspace,

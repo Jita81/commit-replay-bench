@@ -81,6 +81,11 @@ PATCH_STORE_MAX_BYTES = 1024 * 1024
 PATCHES_DIRNAME = "patches"
 #: The evidence pack ``notes`` key that carries :meth:`KeptPatch.to_note`.
 NOTE_KEY = "patch"
+#: The pack ``notes`` key for the builder's edits the adapter DISCARDED because the attempt
+#: errored (:func:`keep_discarded`); ``notes.patch`` stays the post-discard tree that was graded.
+DISCARDED_NOTE_KEY = "discarded_patch"
+#: The pack ``notes`` key listing the paths that discarded diff covers.
+DISCARDED_FILES_NOTE_KEY = "discarded_files"
 
 _HEX = frozenset("0123456789abcdef")
 
@@ -217,6 +222,16 @@ def keep_patch(ws: Workspace, store: PatchStore, *, diff_sha256: str = "") -> di
         return {"error": redact(f"{type(exc).__name__}: {exc}")[:300]}
 
 
+def keep_discarded(text: str, store: PatchStore) -> dict[str, Any]:
+    """Keep the diff of the builder's edits the adapter DISCARDED (an errored attempt) in
+    ``store``; return the pack note (:data:`DISCARDED_NOTE_KEY`). Never raises, like
+    :func:`keep_patch`: the record is evidence, never a verdict."""
+    try:
+        return store.put(text).to_note()
+    except Exception as exc:  # the grade must not depend on the store
+        return {"error": redact(f"{type(exc).__name__}: {exc}")[:300]}
+
+
 def kept_patch_note(pack: Mapping[str, Any] | None) -> dict[str, Any]:
     """The pack's ``notes.patch`` (``{}`` when the pack kept none)."""
     if not pack:
@@ -227,12 +242,15 @@ def kept_patch_note(pack: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 __all__ = [
+    "DISCARDED_FILES_NOTE_KEY",
+    "DISCARDED_NOTE_KEY",
     "NOTE_KEY",
     "PATCHES_DIRNAME",
     "PATCH_STORE_MAX_BYTES",
     "KeptPatch",
     "PatchStore",
     "is_sha256",
+    "keep_discarded",
     "keep_patch",
     "kept_patch_note",
     "prepare",

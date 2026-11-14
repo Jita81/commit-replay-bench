@@ -39,6 +39,7 @@ Touch when:   never for a new repository; adding a builder (its outcome shapes m
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -769,13 +770,14 @@ def test_error_attempt_row_is_never_clean(
     fn = adapter.build_fn_for(
         ladder, budget=Budget(), on_event=lambda a, p: events.append((a, dict(p))), **harness
     )
-    summary = run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
+    task = pyrepo.feat_task()
+    summary = run(spec, pyrepo.repo, [task], fn)
     (row,) = ledger.rows()
     assert row.tests_unmodified is True and row.target_green is False
     assert row.clean is False and row.error.startswith("protocol violation")
     assert summary.clean == 0 and summary.errors == 1
     discard = [p for a, p in events if a == "builder.discard"]
-    assert discard == [{"files": [pr.SRC], "error": row.error}]
+    assert discard == [{"task": task.task_id, "files": [pr.SRC], "error": row.error}]
 
 
 def test_discard_source_edits_keeps_tests_and_removes_new_files(
@@ -829,6 +831,167 @@ def test_model_error_after_a_correct_patch_is_error_not_clean(
         assert ws.read(pr.SRC) == pr.SRC_INITIAL  # the patch is gone before grading
     finally:
         ws.remove()
+
+
+NEW_MODULE = "src/calc/extra.py"
+
+
+class _EditsThenErrs(FakeBuilder):
+    """Edits a tracked source file, adds a new one and touches the overlaid test, then
+    reports the error its ``behaviour`` names (a guard violation or a model error)."""
+
+    def build(
+        self, workspace: Workspace, brief: BuildBrief, budget: Budget, **kw: Any
+    ) -> BuildOutcome:
+        pr.apply_gold(workspace)
+        pr.write_files(workspace, [(NEW_MODULE, "EXTRA = 1\n")])
+        violation = self.behaviour == "archaeology"
+        return BuildOutcome(
+            builder="fake",
+            model=self.model,
+            provider="p",
+            mode=brief.mode,
+            done=violation,
+            stop_reason=STOP_DONE if violation else STOP_MODEL_ERROR,
+            errors=(
+                ("archaeology: 'git show' is not allowed",)
+                if violation
+                else ("model_error: 502 upstream",)
+            ),
+        )
+
+
+@pytest.mark.parametrize("behaviour", ["archaeology", "model_error"])
+def test_discard_keeps_the_dropped_diff_on_the_attempt_for_every_cause(
+    pyrepo: pr.PyRepo,
+    tmp_path: Path,
+    harness: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    behaviour: str,
+) -> None:
+    """A discard is visible in the record: before the builder's source edits are dropped,
+    the adapter captures the diff of exactly those files (the tracked edit's hunk AND the
+    new file, never the sighted overlay) onto the attempt, labels the count, and names the
+    task on the ``builder.discard`` event — for a protocol violation and a model error alike.
+    The files are still reverted on disk."""
+    monkeypatch.setitem(builders_pkg._REGISTRY, "fake", _EditsThenErrs)
+    events: list[tuple[str, dict[str, Any]]] = []
+    fn = adapter.build_fn_for(
+        _ladder(behaviour),
+        budget=Budget(),
+        on_event=lambda a, p: events.append((a, dict(p))),
+        **harness,
+    )
+    task = pyrepo.feat_task()
+    ws = pyrepo.trial(tmp_path / "t")
+    try:
+        ws.overlay_tests(task.test_files)  # sighted: the oracle is in the tree
+        attempt = fn(ws, task, "sighted", "fake:m0")
+        assert attempt.error.startswith(
+            "protocol violation:" if behaviour == "archaeology" else "model_error:"
+        )
+        # reverted on disk; the overlaid test is untouched
+        assert ws.read(pr.SRC) == pr.SRC_INITIAL and not ws.exists(NEW_MODULE)
+        assert ws.touched_files() == sorted(task.test_files)
+    finally:
+        ws.remove()
+    assert sorted(attempt.discarded_files) == sorted([pr.SRC, NEW_MODULE])
+    assert attempt.labels["discarded_files"] == "2"
+    patch = attempt.discarded_patch
+    gold_line = next(
+        line for line in pr.SRC_FEAT.splitlines() if line and line not in pr.SRC_INITIAL
+    )
+    assert f"+{gold_line}" in patch  # the tracked edit's hunk
+    assert f"b/{NEW_MODULE}" in patch and "+EXTRA = 1" in patch  # the new file
+    assert not any(t in patch for t in task.test_files)  # never the overlay
+    (discard,) = [p for a, p in events if a == "builder.discard"]
+    assert discard["task"] == task.task_id and discard["task"]
+    assert sorted(discard["files"]) == sorted([pr.SRC, NEW_MODULE])
+
+
+def test_a_discard_is_kept_in_the_pack_and_changes_no_verdict(
+    pyrepo: pr.PyRepo,
+    tmp_path: Path,
+    harness: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run level: the row reads exactly as before (not clean, not disqualified, failure kind
+    ``protocol``); the pack keeps the discarded diff (``notes.discarded_patch``, with the
+    builder's edit) beside ``notes.patch``, which is still the post-discard tree that was
+    graded; the label is on the row and the ledger and the pack still verify."""
+    from crb.core.evidence import verify_pack
+    from crb.core.ledger import FAILURE_PROTOCOL, LABEL_FAILURE_KIND, verify_chain
+    from crb.core.patches import PatchStore, kept_patch_note
+
+    monkeypatch.setitem(builders_pkg._REGISTRY, "fake", _EditsThenErrs)
+    ledger = JsonlLedger(tmp_path / "ledger.jsonl")
+    store = PatchStore.under(tmp_path / "evidence")
+    spec = RunSpec(
+        run_id="run-discard",
+        config=pyrepo.config,
+        runner=harness["runner"],
+        executor=harness["executor"],
+        scratch=tmp_path / "scratch",
+        ledger=ledger,
+        evidence_dir=tmp_path / "evidence",
+        patch_store=store,
+        ladder=("fake:m0",),
+        context_for=witnessed_context_for(
+            pyrepo.repo,
+            pyrepo.config,
+            runner=harness["runner"],
+            executor=harness["executor"],
+            scratch=tmp_path / "scratch",
+        ),
+    )
+    fn = adapter.build_fn_for(_ladder("archaeology"), budget=Budget(), **harness)
+    run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
+    (row,) = ledger.rows()
+    assert not row.clean and not row.disqualified
+    assert row.labels[LABEL_FAILURE_KIND] == FAILURE_PROTOCOL
+    assert row.labels["discarded_files"] == "2"
+    assert verify_chain(ledger.rows()) == 1
+    pack = json.loads(
+        (tmp_path / "evidence" / f"{row.evidence_pack_hash}.json").read_text(encoding="utf-8")
+    )
+    assert verify_pack(pack)
+    notes = pack["notes"]
+    assert sorted(notes["discarded_files"]) == sorted([pr.SRC, NEW_MODULE])
+    dropped = store.get(notes["discarded_patch"]["stored_sha256"])
+    assert dropped is not None and b"+EXTRA = 1" in dropped and pr.SRC.encode() in dropped
+    kept = store.get(kept_patch_note(pack)["stored_sha256"])
+    assert kept is not None
+    # the graded patch is the post-discard tree: only the (unchanged) overlay, no builder edit
+    assert b"EXTRA" not in kept and pr.SRC.encode() not in kept
+
+
+def _row(pyrepo: pr.PyRepo, labels: Mapping[str, str] | None = None) -> GradeRow:
+    task = pyrepo.feat_task()
+    belts = Belts(True, False, True, False, None)
+    result = posture_result(task.task_id, pr.REPO_NAME, "sighted", False, belts)
+    stamped = {"builder_executor": "host", **(labels or {})}
+    return grade_row_from_result(result, task, pack_hash="h" * 64, labels=stamped)
+
+
+def test_a_row_with_the_discard_label_chains_with_rows_without_it(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """Ledger compatibility: ``discarded_files`` is an ordinary hashed label — a row that
+    carries it and rows that do not (every row written before it existed) verify in one
+    chain, and reading the ledger back does not drop or alter it."""
+    from crb.core.ledger import verify_chain
+
+    path = tmp_path / "ledger.jsonl"
+    ledger = JsonlLedger(path)
+    ledger.append(_row(pyrepo))  # a row as every row before the label was written
+    before = path.read_bytes()
+    ledger.append(_row(pyrepo, labels={"discarded_files": "3"}))
+    ledger.append(_row(pyrepo))
+    assert path.read_bytes().startswith(before)  # the earlier row is untouched
+    assert ledger.verify() == 3  # the ledger's own verify path (``crb ledger verify``)
+    rows = list(ledger.rows())
+    assert verify_chain(rows) == 3
+    assert [r.labels.get("discarded_files") for r in rows] == [None, "3", None]
 
 
 def test_build_attempt_shape() -> None:
