@@ -20,10 +20,14 @@ Touch when:   never for a new repository; a value reader is added or the measure
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from crb.core import ctxset
 from crb.core.context_arm import measurement_only
 from crb.core.value import (
+    ReviewVerdict,
     ValueRow,
+    north_star,
     prospective_routing,
     value_report,
     value_row_from_grade,
@@ -68,3 +72,21 @@ def test_prospective_routing_ignores_ctx_rows() -> None:
     control = _rows(CONTROL, ctxset.ROLE_CONTROL)
     treat = _rows(TREAT, ctxset.ROLE_ENTRIES)
     assert prospective_routing([*control, *treat]) == prospective_routing(control)
+
+
+def test_north_star_drops_verdicts_joined_to_ctx_rows() -> None:
+    """A direct caller's verdicts on context-set patches never reach the precision basis:
+    five mergeable reviews of treatment rows would otherwise make it a review basis."""
+    control = _rows(CONTROL, ctxset.ROLE_CONTROL)
+    treat = [
+        replace(r, row_hash=f"{i:064x}") for i, r in enumerate(_rows(TREAT, ctxset.ROLE_ENTRIES))
+    ]
+    reviews = [
+        ReviewVerdict(r.row_hash, r.repo, r.task_id, grade_clean=True, mergeable=True)
+        for r in treat
+    ]
+    unjoined = ReviewVerdict("", control[0].repo, control[0].task_id, True, mergeable=False)
+    plain = north_star(control, [unjoined], usd_per_gbp=1.25)
+    mixed = north_star([*control, *treat], [unjoined, *reviews], usd_per_gbp=1.25, pooled=reviews)
+    assert mixed == plain
+    assert mixed.precision.review.n == 1  # the unjoined verdict is kept

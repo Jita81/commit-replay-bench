@@ -283,7 +283,7 @@ from crb.core.capability import PROJECTION_CLASS_SIZE, CapabilityMap
 from crb.core.checks import ARM_OFF, RepoChecks
 from crb.core.checks import resolve as resolve_checks
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
-from crb.core.context_arm import BASE_S1, BASE_S2, REPLAY_MODE, parse_arm
+from crb.core.context_arm import BASE_S1, BASE_S2, REPLAY_MODE, measurement_only, parse_arm
 from crb.core.ctxset import REASON_DIGEST as REASON_CTX_DIGEST
 from crb.core.ctxset import REASON_MODE as REASON_CTX_MODE
 from crb.core.ctxset import REASON_POSTURE as REASON_CTX_POSTURE
@@ -3108,9 +3108,14 @@ class Worker:
         repository's ``spend`` block under the prevention loop's overlay (the team's keys
         win); ``None`` reads the configuration as stored. Only rows of the run's own
         ``checks`` arm are read: a calibrated cap or an escalation yield never pools rows
-        graded with the format step or belt 6 set otherwise (ADR-0024)."""
+        graded with the format step or belt 6 set otherwise (ADR-0024). Context-set rows
+        are measurement-only and never feed a yield or a cap (ADR-0050)."""
         try:
-            rows = rows_for_checks(self.ledger.rows(), checks_arm)
+            rows = [
+                r
+                for r in rows_for_checks(self.ledger.rows(), checks_arm)
+                if not measurement_only(r.context_arm)
+            ]
         except Exception as exc:  # the rules are advisory spend, never a reason to fail a run
             rows = []
             ctx.emit(

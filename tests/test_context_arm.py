@@ -267,9 +267,17 @@ PRE_EXISTING_ARMS = [
     "S3+L",
     "A0+library@v1",
     "A0+library@ctx",
+    "A0+library@ctxfoo",
+]
+#: Malformed names inside the reserved ``ctx.`` namespace: outside the grammar, so none can
+#: parse as an ordinary, certifying library arm (ADR-0050 item 2).
+MALFORMED_CTX_ARMS = [
     "A0+library@ctx.other.0123456789ab",
     "A0+library@ctx.oracle.0123456789AB",
     "A0+library@ctx.oracle.0123456789a",
+    "A0+library@ctx.oracle.invalid",
+    "S1@claude-sonnet-5+library@ctx.oracle.invalid",
+    f"A0+library@ctx.mech.{HEX}0",
 ]
 
 
@@ -286,6 +294,16 @@ def test_hindsight_is_the_oracle_set_and_its_placebo_never_a_mechanical_one() ->
     assert hindsight_arm(f"A0+library@ctx.oracle-placebo.{HEX}")
     assert not hindsight_arm(f"A0+library@ctx.mech.{HEX}")
     assert not hindsight_arm(f"A0+library@ctx.mech-placebo.{HEX}")
+
+
+@pytest.mark.parametrize("arm", MALFORMED_CTX_ARMS)
+def test_a_malformed_name_in_the_reserved_ctx_namespace_is_outside_the_grammar(
+    arm: str,
+) -> None:
+    assert not is_arm(arm)
+    with pytest.raises(ValueError):
+        parse_arm(arm)
+    assert ctx_set_name(arm) == "" and not measurement_only(arm)
 
 
 @pytest.mark.parametrize("arm", [*PRE_EXISTING_ARMS, "", "not an arm"])

@@ -31,12 +31,12 @@ from crb.cli.main import main
 from crb.core import ctxset, learn
 from crb.core.capability import PROJECTION_CELL, ReadingBook
 from crb.core.context_arm import measurement_only
-from crb.core.ledger import JsonlLedger
+from crb.core.ledger import GradeRow, JsonlLedger
 from crb.core.reading import ReadingRefused
 from crb.server.deps import ApiError
 from crb.server.routes.capability import REFUSAL_MEASUREMENT_ONLY_ARM, rows_for_arm_param
 from fixtures.ctx_rows import TASKS, ctx_set, side
-from fixtures.readings import commits, register_reading
+from fixtures.readings import AUTHOR, CELL, commits, register_reading, sealed_row
 
 ORACLE = ctx_set(ctxset.SOURCE_ORACLE)
 CONTROL = dict.fromkeys(TASKS, False) | {TASKS[0]: True}
@@ -49,6 +49,9 @@ def test_standard_rows_drop_ctx_rows_and_keep_control() -> None:
     kept = ReadingBook().standard_rows([*control, *treat], PROJECTION_CELL)
     assert kept and not any(measurement_only(r.context_arm) for r in kept)
     assert sorted(r.task_id for r in kept) == sorted(r.task_id for r in control)
+    # a cell holding the treatment alone has no standard: under the old reader it fell back
+    # to the first arm it held, the context-set arm itself
+    assert ReadingBook().standard_rows(treat, PROJECTION_CELL) == []
 
 
 def test_arm_param_refuses_a_ctx_arm() -> None:
@@ -88,3 +91,28 @@ def test_remeasure_plan_lists_no_ctx_cell() -> None:
     arms = [c.to_dict()["arm"] for c in plan.cells]
     assert arms == ["A0"]  # the control's honest cell is still planned
     assert learn.remeasure_plan(side(ORACLE, TREAT), readings=()).cells == ()
+
+
+def test_remeasure_plan_never_prices_a_top_up_from_ctx_rows() -> None:
+    """A pending reading's top-up is priced and timed from the cell's honest rows only: a
+    context-set row of the same cell and mode (blind) never moves the estimate."""
+    reading = register_reading(commits(40), hierarchy=(f"S1@{AUTHOR}",))
+    pool = list(reading.pool)
+    priced = [sealed_row(x, arm="A0", cost_usd=0.4, latency_s=30.0) for x in commits(3, "p")]
+    ctx_rows = side(ORACLE, TREAT, cost_usd=99.0, latency_s=900.0)
+    assert {r.cell.label for r in ctx_rows} == {"|".join(CELL.values())}
+
+    def plan(rows: list[GradeRow]) -> learn.RemeasureCell:
+        (c,) = learn.remeasure_plan(
+            rows,
+            readings=ReadingBook.evaluate([reading], rows).outcomes,
+            task_labels=dict.fromkeys(pool, (CELL["capability_class"], CELL["size"])),
+            gold_clean_tasks=pool,
+            s1_author_model=AUTHOR,
+        ).cells
+        return c
+
+    honest, mixed = plan(priced), plan([*priced, *ctx_rows])
+    assert mixed.cost_usd_mean == pytest.approx(0.4) == honest.cost_usd_mean
+    assert mixed.latency_s_mean == pytest.approx(30.0) == honest.latency_s_mean
+    assert mixed.est_cost_usd == honest.est_cost_usd and mixed.n_stale == honest.n_stale

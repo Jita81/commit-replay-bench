@@ -147,10 +147,17 @@ TEST_AUTHORED = "authored"
 TEST_PERSON = "person"
 
 _NAME = r"[A-Za-z0-9][A-Za-z0-9._:/-]*"
+#: A ``+library@`` NAME: any ordinary name outside the reserved ``ctx.`` namespace, or a
+#: well-formed context-set name (``CTX_NAME_RE``). A malformed ``ctx.`` name is outside the
+#: grammar, so it can never parse as an ordinary, certifying library arm (ADR-0050 item 2).
+_LIBRARY_NAME = (
+    rf"(?!{re.escape(CTX_PREFIX)}){_NAME}"
+    rf"|{CTX_NAME_RE.pattern.removeprefix('^').removesuffix('$')}"
+)
 _ARM_RE = re.compile(
     rf"^(?P<base>A0|S1@(?P<author>{_NAME})|S2|S3)"
     rf"(?:\+facts@(?P<facts>{_NAME}))?"
-    rf"(?:\+library@(?P<library>{_NAME}))?"
+    rf"(?:\+library@(?P<library>{_LIBRARY_NAME}))?"
     r"(?P<loop>\+L)?$"
 )
 

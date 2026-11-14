@@ -781,6 +781,11 @@ def north_star(
     unplaced: int = 0,
     pooled_unplaced: int = 0,
 ) -> NorthStar:
+    # a measurement-only row (ADR-0050 item 9) is dropped, and so is every verdict joined to
+    # one: a direct caller's review of a context-set patch never moves the precision basis
+    dropped = {r.row_hash for r in rows if r.row_hash and measurement_only(r.context_arm)}
+    verdicts = [v for v in verdicts if v.grade_row_hash not in dropped]
+    pooled = [v for v in pooled if v.grade_row_hash not in dropped]
     rows = without_measurement_only(rows)
     blind = [r for r in rows if r.mode == "blind"]
     return NorthStar(

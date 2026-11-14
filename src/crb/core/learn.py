@@ -2125,9 +2125,14 @@ def remeasure_plan(
 
     Cost is the cell's own mean over rows of that mode that recorded one × each request's
     commits × the rungs its run climbs (:attr:`RunRequest.rungs` — one, blind or sighted).
+    Rows of a measurement-only arm (a context set, ADR-0050 item 9) are dropped first: they
+    are never offered registration and never price or time a top-up.
     Pure; deterministic; queues nothing.
     """
-    rs = list(rows)
+    # a context-set arm (ADR-0050 item 9) is a measurement, never a cell's evidence: no reading
+    # accepts it, so it is never offered registration, and its rows never price or time a
+    # top-up (they are read paired at GET /ctxsets/compare). A control run's plain A0 stays.
+    rs = [r for r in rows if not measurement_only(r.context_arm)]
     cur = _version_key(current_apparatus)
     gold = frozenset(gold_clean_tasks) if gold_clean_tasks is not None else None
     first_look = min(rule_looks(policy.rule))
@@ -2354,9 +2359,6 @@ def remeasure_plan(
             for r in group:
                 groups.setdefault((mode_name, key, r.context_arm), []).append(r)
     for (mode_name, key, arm), group in sorted(groups.items()):
-        if measurement_only(arm):
-            continue  # a context-set arm (ADR-0050 item 9): no reading accepts it, so never
-            # invite registering one; its rows are read paired at GET /ctxsets/compare
         cell = CellKey(**dict(zip(CELL_FIELDS, key, strict=True)))
         repos = sorted({r.repo for r in group})
         if any((repo, cell.label) in speaking for repo in repos):
