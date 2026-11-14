@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -201,6 +202,28 @@ class TestStore:
         doc = ctx_doc(tasks=[env.info.task(8).task_id], repo=ALPHA)
         r = _put(env, doc)
         assert r.status_code == 422 and envelope(r)["code"] == ctxset.REASON_COVERAGE
+
+    def test_stored_set_is_owner_only_and_synced_before_the_event(
+        self, env: Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The body and its directory entry are flushed to disk before the store is
+        acknowledged (a retry flushes the directory again), and the file is never widened
+        past the owner."""
+        synced: list[bool] = []
+        real_fsync = os.fsync
+
+        def spy(fd: int) -> None:
+            synced.append(stat.S_ISDIR(os.fstat(fd).st_mode))
+            real_fsync(fd)
+
+        monkeypatch.setattr(os, "fsync", spy)
+        assert _put(env, _doc(env)).status_code == 201
+        assert synced[:2] == [False, True]  # the file first, then its directory
+        path = store_dir(env.settings) / f"{ctxset.parse(_doc(env)).digest}.json"
+        assert stat.S_IMODE(path.stat().st_mode) & 0o077 == 0
+        synced.clear()
+        assert _put(env, _doc(env)).json()["stored"] is False
+        assert synced == [True]
 
     def test_placebo_needs_its_treatment_stored(self, env: Env) -> None:
         treatment = ctxset.parse(_doc(env))

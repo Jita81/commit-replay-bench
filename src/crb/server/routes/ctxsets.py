@@ -182,6 +182,7 @@ def store_ctxset(
     published = not path.is_file() and _publish(path, text)
     if not published:
         _same_body(path, text, ctxset)  # stored before, or a concurrent request won
+        _sync_dir(path.parent)  # a retry acknowledges only a name that is on disk
     # every stored set carries exactly one event, checked and written under the events lock:
     # a retry of a store that published the file but never committed its event records it,
     # and a retry racing this request's own publish never leaves a second one
@@ -210,9 +211,11 @@ def _publish(path: Path, text: str) -> bool:
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
     tmp = Path(tmp_name)
     try:
+        # the file keeps the owner-only mode ``mkstemp`` gave it: the server is its one reader
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
-        os.chmod(tmp, 0o644)  # what a plain write leaves under the usual umask
+            fh.flush()
+            os.fsync(fh.fileno())  # the body is on disk before its name is published
         try:
             os.link(tmp, path)
         except FileExistsError:
@@ -220,6 +223,16 @@ def _publish(path: Path, text: str) -> bool:
         return True
     finally:
         tmp.unlink(missing_ok=True)
+        _sync_dir(path.parent)  # the name is on disk before the stored event is committed
+
+
+def _sync_dir(directory: Path) -> None:
+    """Flush ``directory``'s entries to disk, so a published name survives a machine failure."""
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def _stored_event_exists(db: DbDep, ctxset: CtxSet) -> bool:
