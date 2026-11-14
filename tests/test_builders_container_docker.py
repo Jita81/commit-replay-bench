@@ -19,7 +19,11 @@ use instead — CI passes the shipped python reference image), on
   the allowlisted host (a mock endpoint container), ``example.com`` is ``403``, and
   direct connections (bypassing the proxy) fail — the sidecar's log names both;
 * fail closed: a missing builder image and a sidecar that cannot start are
-  :class:`SandboxUnavailable`; cancel and the wall clock end in ``docker kill``.
+  :class:`SandboxUnavailable`; cancel and the wall clock end in ``docker kill``;
+* a builder image without the handed test command's tool (a slim python with no pytest) is
+  refused before any builder call — ``runner tool missing: pytest``, an instrument row, the
+  scripted ``claude`` never started — while the image with pytest proceeds (the end-to-end
+  case above passes the same check in the container).
 
 Skipped — with the probe's reason — when no daemon answers ``docker info`` or the
 image cannot be built. Checkouts live under ``tests/.cache/sandbox`` (bind-mountable
@@ -38,7 +42,8 @@ What it does: Pins that a scripted builder (a shell script mounted read-only as 
               sidecar (``example.com`` is 403, direct connections fail, the sidecar logs both), a
               TLS handshake with the real endpoint costs no tokens; and that a missing image or
               a sidecar that cannot start is ``SandboxUnavailable`` while cancel and the wall
-              clock end in ``docker kill``.
+              clock end in ``docker kill``; and that a builder image lacking pytest is refused
+              by the tool check before any builder call.
 How:          ``crb-test-py:local`` built once per session (or the image
               ``CRB_TEST_SANDBOX_IMAGE`` names); checkouts under the tests cache
               (bind-mountable on colima / Docker Desktop); a mock endpoint container on its own
@@ -82,6 +87,7 @@ from crb.builders.container import (
     ContainerSession,
     SealedCheckout,
 )
+from crb.builders.toolcheck import RUNNER_TOOL_MISSING
 from crb.core.execution import DockerExecutor, DockerSettings, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.ledger import JsonlLedger, verify_chain
@@ -106,6 +112,9 @@ pytestmark = [pytest.mark.docker, pytest.mark.slow]
 IMAGE = langs.sandbox_test_image()
 #: An image without python3 — a sidecar started from it cannot come up.
 NO_PYTHON_IMAGE = "alpine:latest"
+#: The test image's own base with nothing added: python, no pytest — a builder image that
+#: cannot run the handed ``python -m pytest …``.
+NO_PYTEST_IMAGE = "crb-test-nopytest:local"
 
 FAKE_CLAUDE = textwrap.dedent(
     """\
@@ -311,6 +320,8 @@ def test_scripted_builder_in_container_grades_clean(
     assert row.builder == "claude_code" and row.model == "claude-sonnet-5"
     actions = [a for a, _ in events]
     assert "builder.sealed" in actions and "builder.copy_back" in actions
+    # the image with pytest passes the tool check in the builder's container: nothing refused
+    assert "builder.refused" not in actions
     sealed_ev = next(p for a, p in events if a == "builder.sealed")
     assert sealed_ev["image"] == IMAGE and sealed_ev["network"] == "proxy"
     copy = next(p for a, p in events if a == "builder.copy_back")
@@ -322,6 +333,64 @@ def test_scripted_builder_in_container_grades_clean(
     for prefix in ("crb-build-", "crb-proxy-"):
         # --rm removal runs in the daemon after the session exits: a bounded wait (P-119)
         assert docker_wait.gone(f"{prefix}{task.short_id}"), f"{prefix} container leaked"
+
+
+def test_a_builder_image_without_pytest_is_refused_before_any_builder_call(
+    built: tuple[GitRepo, str],
+    task: TaskSpec,
+    config: RepoConfig,
+    runner: BaseRunner,
+    executor: DockerExecutor,
+    sandbox_root: Path,
+    fake_claude_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    langs.ensure_docker_image(NO_PYTEST_IMAGE, "FROM python:3.12-slim\n")
+    repo, _ = built
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key")
+    settings = _settings(image=NO_PYTEST_IMAGE, extra_ro_mounts={str(fake_claude_dir): "/opt/fake"})
+    ladder = EscalationLadder((Rung("claude_code", "claude-sonnet-5"),))
+    ledger = JsonlLedger(sandbox_root / "ledger-nopytest.jsonl")
+    spec = RunSpec(
+        run_id="run-sealed-nopytest",
+        config=config,
+        runner=runner,
+        executor=executor,
+        scratch=sandbox_root / "scratch-nopytest",
+        ledger=ledger,
+        evidence_dir=sandbox_root / "evidence-nopytest",
+        ladder=adapter.ladder_labels(ladder),
+        context_for=witnessed_context_for(
+            repo, config, runner=runner, executor=executor, scratch=sandbox_root / "scratch"
+        ),
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    fn = adapter.build_fn_for(
+        ladder,
+        budget=Budget(wall_clock_s=300),
+        runner=runner,
+        executor=executor,
+        config=config,
+        on_event=lambda a, p: events.append((a, dict(p))),
+        builder_overrides={"claude_binary": "/opt/fake/claude", "auth": "api_key"},
+        container=settings,
+    )
+    run(spec, repo, [task], fn, on_event=lambda a, p: events.append((a, dict(p))))
+    refused = next(p for a, p in events if a == "builder.refused")
+    assert refused["error"].startswith(RUNNER_TOOL_MISSING), refused
+    assert refused["error"].startswith(RUNNER_TOOL_MISSING + "pytest — "), refused
+    assert "builder's own environment (docker)" in refused["error"]
+    assert "-m pytest --version`" in refused["error"]
+    # recorded as an instrument row, never as the builder's failure
+    (row,) = ledger.rows()
+    assert not row.clean and row.error.startswith(RUNNER_TOOL_MISSING), row.error
+    assert row.failure_kind == "harness"
+    # no builder container started: the scripted claude never ran, nothing was copied back
+    actions = [a for a, _ in events]
+    assert "builder.sealed" not in actions and "builder.copy_back" not in actions, actions
+    done = next(p for a, p in events if a == "build.done")
+    assert done["turns"] == 0 and done["error"].startswith(RUNNER_TOOL_MISSING), done
+    assert docker_wait.gone(f"crb-build-{task.short_id}")
 
 
 def test_the_cell_seen_from_inside(

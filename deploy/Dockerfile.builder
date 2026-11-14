@@ -7,13 +7,25 @@
 # the product image (deploy/Dockerfile) and NOT the grader's sandbox image: the grader
 # keeps running the repository's tests in the operator's per-repository `sandbox_image`.
 #
-# Build from the REPOSITORY ROOT, on top of the toolchain image the repository needs:
+# Build from the REPOSITORY ROOT, on top of the sandbox image of the language the worker
+# serves — the builder runs the test command it is handed, so its image must carry the test
+# tool (deploy/README.md §9.1):
 #
-#     docker build -f deploy/Dockerfile.builder -t crb-builder:local .
+#     docker build -f deploy/Dockerfile.builder -t crb-builder-python:local \
+#         --build-arg BASE_IMAGE=<your python sandbox image> .
 #     docker build -f deploy/Dockerfile.builder -t crb-builder-go:local \
 #         --build-arg BASE_IMAGE=<your go sandbox image> .
+#     docker build -f deploy/Dockerfile.builder -t crb-builder-node:local \
+#         --build-arg BASE_IMAGE=<your node sandbox image> .
 #
-# then point the worker at it:  CRB_BUILDER__EXECUTOR=docker  CRB_BUILDER__IMAGE=crb-builder:local
+# then point the worker at it:  CRB_BUILDER__EXECUTOR=docker  CRB_BUILDER__IMAGE=crb-builder-python:local
+#
+# One image per worker: a worker serves one language. Before any model call the adapter
+# starts the handed test command's tool in this image (`python -m pytest --version`,
+# `go version`, `node --version`) and refuses the attempt (`runner tool missing: <tool>`, an
+# instrument row, nothing spent) when it does not start. The default BASE_IMAGE (python slim,
+# no pytest) is the base the variants share and the egress proxy's image; it fails that
+# check for a Python repository whose sealed dependency set does not carry pytest.
 #
 # The worker never pulls: the image must be present in the host daemon's store.
 #

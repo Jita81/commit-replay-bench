@@ -69,6 +69,7 @@ from crb.core.spec import Language, RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
 from crb.provision import node as pnode
 from crb.provision import python as ppy
+from fixtures.tool_check import passing_check
 from test_replay_s1_arm import (
     GO_AUTHORED,
     GO_AUTHORED_SRC,
@@ -172,6 +173,7 @@ def _attempts(
         deps_for=lambda t: deps,
         container=container,
         session_factory=_Session,  # type: ignore[arg-type]
+        tool_check_executor=passing_check,
         checks=checks,
     )
     out = []

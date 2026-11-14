@@ -72,6 +72,7 @@ from crb.core.spec import TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
 from fixtures.posture import posture_result, witnessed_context_for
+from fixtures.tool_check import passing_check
 
 # --- a scripted builder ---------------------------------------------------------------------
 
@@ -531,6 +532,7 @@ def test_rung_budget_override_and_builder_events(
     finally:
         ws.remove()
     assert attempt.builder.turns == 3 and attempt.builder.budget["max_turns"] == 3
+    # the tool check ran first, on the host here (no container), and passed: nothing refused
     assert seen == [("builder.build.attempt", {"attempt": 1})]
     # rung config (minus budget keys) reached the constructor; the instance is cached
     (inst,) = FakeBuilder.instances
@@ -1326,6 +1328,7 @@ def test_every_early_exit_of_build_stamps_the_executor(
         budget=Budget(),
         container=_CONTAINER,
         session_factory=_Session,
+        tool_check_executor=passing_check,
         checks=checks,
         s1=s1,
         **harness,
@@ -1362,6 +1365,7 @@ def test_a_calibrated_budget_profile_keeps_builder_executor_docker(
             budget=Budget(),
             container=_CONTAINER,
             session_factory=_Session,
+            tool_check_executor=passing_check,
             budget_for_task=calibrated,
             **harness,
         )
@@ -1392,6 +1396,7 @@ def test_an_s1_authoring_failure_under_docker_is_sealed(
             budget=Budget(),
             container=container,
             session_factory=_Session,
+            tool_check_executor=passing_check,
             s1=S1Arm(author=_author_raises, author_model="t1"),
             **harness,
         )

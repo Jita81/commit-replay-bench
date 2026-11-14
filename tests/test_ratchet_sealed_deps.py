@@ -17,8 +17,9 @@ What it does: Flags a runner method that renders or runs the test command (``run
               ``command``, ``probe_environment``, ``run_for``, ``gate_run``,
               ``run_belt_for`` on a ``runner`` / ``self.runner`` receiver) and the gate and
               brief functions (``command_baseline``, ``_run_command``, ``verify``,
-              ``sighted_test_command``) unless the call passes ``deps=`` (anything but the
-              literal ``None``) or sits inside a ``with`` whose item calls ``deps_bound``. A
+              ``sighted_test_command``, ``handed_test_command``) unless the call passes
+              ``deps=`` (anything but the literal ``None``) or sits inside a ``with`` whose
+              item calls ``deps_bound``. A
               finding passes only when :data:`ALLOWED` names it with its reason; an allowance
               nothing matches any more fails too. Proves the scan bites: planted unbound
               shapes are flagged, their bound twins are not, and stripping the binding from
@@ -33,7 +34,7 @@ How:          ``ast`` over the files on disk, keyed by (path, enclosing function
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md
 Works with:   src/crb/builders/adapter.py (the scanned call sites: ``author_s1``,
-              ``sighted_test_command``, the finish gate's baseline), src/crb/core/finish_gate.py
+              ``handed_test_command``, the finish gate's baseline), src/crb/core/finish_gate.py
               (``command_baseline`` / ``verify`` / ``_run_command`` — the gate's commands),
               src/crb/core/runners/base.py (``deps_bound`` and the ``deps=`` the runner
               methods take — what counts as bound), src/crb/builders/openai_agent.py (an
@@ -62,7 +63,13 @@ SCANNED = ("src/crb/builders", "src/crb/core/finish_gate.py")
 #: The runner methods that render or run the task's test command (``BaseRunner``).
 RUNNER_METHODS = ("run", "command", "probe_environment", "run_for", "gate_run", "run_belt_for")
 #: The gate and brief functions that render or run a command under a binding they are given.
-GATE_FUNCTIONS = ("command_baseline", "_run_command", "verify", "sighted_test_command")
+GATE_FUNCTIONS = (
+    "command_baseline",
+    "_run_command",
+    "verify",
+    "sighted_test_command",
+    "handed_test_command",
+)
 #: The context manager that binds a runner for the calls inside it.
 BINDS = "deps_bound"
 
@@ -83,7 +90,9 @@ ALLOWED: dict[tuple[str, str, str], str] = {
 
 #: Call sites that must be found bound — the scan is blind if one goes missing.
 KNOWN_BOUND = (
-    ("src/crb/builders/adapter.py", "sighted_test_command", "runner.command"),
+    ("src/crb/builders/adapter.py", "handed_test_command", "runner.command"),
+    ("src/crb/builders/adapter.py", "sighted_test_command", "handed_test_command"),
+    ("src/crb/builders/adapter.py", "build_fn_for.attempt_of", "handed_test_command"),
     ("src/crb/core/finish_gate.py", "command_baseline", "_run_command"),
     ("src/crb/core/finish_gate.py", "verify", "_run_command"),
 )
@@ -251,6 +260,7 @@ UNBOUND = {
     "_run_command": "def f(c, ex, root):\n    return _run_command(c, ex, root)\n",
     "verify": "def f(p, c, ex, r):\n    return verify(p, c, ex, r, [])\n",
     "sighted_test_command": "def f(rn, ex, r):\n    return sighted_test_command(rn, ex, r, ())\n",
+    "handed_test_command": "def f(rn, ex, r):\n    return handed_test_command(rn, ex, r, ())\n",
     "after the with": (
         "def f(runner, d, r):\n    with runner.deps_bound(d):\n        pass\n"
         "    return runner.command(r, ())\n"

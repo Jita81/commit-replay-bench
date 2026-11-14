@@ -237,6 +237,11 @@ class PytestRunner(BaseRunner):
         )
         return (executor.tool("python", host_default), "-V")
 
+    def tool_check(self, argv: Sequence[str]) -> tuple[str, tuple[str, ...]] | None:
+        """``<python> -m pytest --version``: the interpreter the handed command names can
+        import pytest (a builder image without it cannot run a single test)."""
+        return ("pytest", (argv[0], "-m", "pytest", "--version")) if argv else None
+
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:

@@ -306,16 +306,24 @@ sealed-container mode ([ADR-0012](../docs/adr/0012-builder-in-a-sealed-container
 
 ### 9.1 Build the builder image
 
-From the repository root, on top of the toolchain the repository under test needs (the
-default base is the same `python:3.12` image the product uses; pass your Go / Node / JVM
-sandbox image as `BASE_IMAGE` — it must be glibc-based and, if it has no `apt-get`,
-already contain `git` and `ca-certificates`):
+From the repository root, on top of the sandbox image of the language the worker serves
+(pass it as `BASE_IMAGE` — it must be glibc-based and, if it has no `apt-get`, already contain
+`git` and `ca-certificates`). The builder runs the test command it is handed, so the image
+must carry that command's tool; one recipe per language:
 
 ```bash
-docker build -f deploy/Dockerfile.builder -t crb-builder:local .
+docker build -f deploy/Dockerfile.builder -t crb-builder-python:local --build-arg BASE_IMAGE=<python sandbox image> .
 docker build -f deploy/Dockerfile.builder -t crb-builder-go:local --build-arg BASE_IMAGE=<go sandbox image> .
-docker run --rm crb-builder:local              # prints the pinned CLI version, as uid 65534
+docker build -f deploy/Dockerfile.builder -t crb-builder-node:local --build-arg BASE_IMAGE=<node sandbox image> .
+docker run --rm crb-builder-python:local                           # prints the pinned CLI version, as uid 65534
+docker run --rm crb-builder-python:local python -m pytest --version  # the test tool is there
 ```
+
+The default base (`python:3.12` slim, no `pytest`) builds `crb-builder:local`, the base the
+variants share and a valid proxy image; it is not a Python builder. A Python repository
+whose sealed dependency set carries no `pytest` (a `uv.lock` with `pytest` only in a dev
+group and no `deps_groups`) is handed `python -m pytest …` with nothing but the image to
+provide it.
 
 The image contains the Claude Code CLI as the npm package's **native binary** (pinned by
 `CLAUDE_CODE_VERSION`, the version the adapter's argv is verified against) — no Node
@@ -324,20 +332,30 @@ runtime is added. Like sandbox images, it must be present in the host daemon's s
 
 The shipped sandbox images end as uid 65534, so the builder stage switches to root for its
 `apt-get` and `chmod` and drops back to `65534:65534` at the end. CI's `sandbox-images` job
-builds the Go variant above on the Go sandbox image it has just built, and runs it as uid
-65534 to print the pinned CLI version (P-791).
+builds every variant above on the sandbox image it has just built, and runs each as uid
+65534 with no network to print the pinned CLI version and start its test tool (P-791;
+`tests/test_dockerfile_builder.py` fails when a variant declared here is not built and
+smoke-tested there).
 
 ### 9.2 Configure the worker
 
 ```
 CRB_BUILDER__EXECUTOR=docker
-CRB_BUILDER__IMAGE=crb-builder:local              # required
+CRB_BUILDER__IMAGE=crb-builder-python:local       # required; the variant of the worker's language
 CRB_BUILDER__PROXY_IMAGE=                          # sidecar image; default = IMAGE (needs python3 only)
 CRB_BUILDER__ALLOW_HOSTS=api.anthropic.com         # host[:port], comma-separated; port defaults to 443
 CRB_BUILDER__EGRESS_NETWORK=bridge                 # the docker network the SIDECAR reaches the endpoint from
 CRB_BUILDER__MEMORY=4g  CRB_BUILDER__CPUS=2  CRB_BUILDER__PIDS_LIMIT=1024  CRB_BUILDER__TMP_SIZE=1g
 CRB_BUILDER__USER=                                 # uid:gid; default = the worker's own; root refused
 ```
+
+One image per worker: a worker serves one language, so a deployment that replays Python
+and Go repositories runs a worker per language, each with its own `CRB_BUILDER__IMAGE`.
+Before any model call the adapter starts the handed test command's tool in that image —
+with the session's dependency mounts and environment, no network, under a short wall clock —
+and refuses the attempt with `runner tool missing: <tool>` (an instrument row, nothing
+spent; its `builder.refused` event names the command and its outcome) when it does not
+start: an image that lacks the test tool is refused, never paid for.
 
 Add these to `deploy/.env` next to the sandbox settings; the worker needs the daemon
 socket exactly as in §3. `/settings` (admin) shows the posture under `builder`. In
@@ -397,6 +415,7 @@ the sealed checkout are gone.
 | Symptom | Cause / fix |
 |---|---|
 | run stops with `sandbox unavailable: docker image 'crb-builder:local' is not present` | Build or `docker load` the image on the worker's daemon (§9.1). |
+| every attempt is refused with `runner tool missing: pytest — … does not start in the builder's own environment (docker)` | `CRB_BUILDER__IMAGE` lacks the test tool: build the variant of the worker's language (§9.1) and point the worker at it. |
 | `sandbox unavailable: egress proxy unhealthy (no READY line)` | `PROXY_IMAGE` has no `python3`, or the sidecar cannot bind 3128 as the configured uid. `docker logs` of a `crb-proxy-*` container from a `retain` run shows why. |
 | the builder reports `model_error: … 403` / cannot reach the endpoint | The endpoint's host is not on `CRB_BUILDER__ALLOW_HOSTS` (the sidecar's log line says `deny host:port`), or the sidecar's `EGRESS_NETWORK` has no route to it (§6 host firewall). |
 | `refusing to run the builder container as root` | The worker runs as uid 0; set `CRB_BUILDER__USER` to a non-root `uid:gid` that can write `$CRB_HOME`. |
