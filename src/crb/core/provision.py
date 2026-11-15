@@ -498,6 +498,9 @@ def parse_requirements(
 
 
 def _py_declares(reader: _Reader) -> bool:
+    """True when the project declares runtime dependencies: a setup.py or setup.cfg, or a
+    non-empty ``project.dependencies``. Extras under ``project.optional-dependencies`` are
+    not runtime dependencies, so they alone never ask for a lock (P-829)."""
     if any(reader.blob(f) is not None for f in ("setup.py", "setup.cfg")):
         return True
     raw = reader.blob("pyproject.toml")
@@ -510,7 +513,7 @@ def _py_declares(reader: _Reader) -> bool:
     project = data.get("project")
     if not isinstance(project, dict):
         return False
-    return bool(project.get("dependencies")) or bool(project.get("optional-dependencies"))
+    return bool(project.get("dependencies"))
 
 
 def _declared_locks(config: RepoConfig) -> list[str | tuple[str, ...]] | None:

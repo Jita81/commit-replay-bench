@@ -257,6 +257,23 @@ def test_pip_includes_hashes_and_alternative_locks(tmp_path: Path) -> None:
     )
 
 
+def test_optional_dependencies_alone_are_not_runtime_dependencies(tmp_path: Path) -> None:
+    """Only ``project.dependencies`` (or a setup.py / setup.cfg) means the project declares
+    runtime dependencies. Extras under ``[project.optional-dependencies]`` were once read
+    the same way, so a project with no runtime dependencies and no lock was refused
+    ``PROVISION_NO_LOCK`` with a message that was not true (P-829)."""
+    extras = "[project]\nname='x'\n[project.optional-dependencies]\ndev=['build']\n"
+    repo, (sha,) = _repo(tmp_path / "a", {"pyproject.toml": extras})
+    assert pv.LockInputs.from_git(repo, sha, _cfg("pytest")).recipe == pv.RECIPE_NONE
+    runtime = "[project]\nname='x'\ndependencies=['left']\n"
+    repo, (sha,) = _repo(
+        tmp_path / "b",
+        {"pyproject.toml": runtime + "[project.optional-dependencies]\ndev=['build']\n"},
+    )
+    err = _refused("PROVISION_NO_LOCK", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
+    assert "declares dependencies" in err.message
+
+
 @pytest.mark.parametrize(
     "tail",
     [
