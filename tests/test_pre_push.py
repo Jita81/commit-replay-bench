@@ -820,3 +820,9 @@ def test_the_hook_stops_a_push_when_the_checkout_changes_while_the_gates_run(
     monkeypatch.setattr(sys, "stdin", io.StringIO(_PUSH_LINE))
     assert pre_push.main(["--hook", "--base", "HEAD"]) == 3
     assert "HEAD is no longer the pushed commit" in capsys.readouterr().err
+
+
+def test_the_adr_shape_test_is_a_ratchet() -> None:
+    """A decision record's shape is read by one test over the whole of docs/adr, and no source
+    file maps to it, so ``--fast`` must always run it (docs/PREVENTION.md P-828)."""
+    assert "tests/test_adr_shape.py" in pre_push.RATCHET_TESTS
