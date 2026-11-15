@@ -13,7 +13,7 @@ How:          The pyrepo ``feat: add subtract`` commit (tests/fixtures/pyrepo.py
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0052-stated-requirement-arms.md
 Works with:   src/crb/cli/commands/ctxset.py (under test), src/crb/builders/brief.py
-              (``req_guard``), tests/test_cli_ctxset.py
+              (``req_guard``), tests/test_cli_ctxset.py (the v1 CLI tests)
 Tested by:    tests/test_cli_ctxset_lint.py
 Touch when:   never for a new repository; the lint verb or the stated output lines change.
 """

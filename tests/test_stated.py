@@ -14,8 +14,9 @@ What it does: Pins that an entry's text is rendered by code from its items, neve
 How:          Hand-built JSON sets over fake task ids; no repository, no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0052-stated-requirement-arms.md, docs/adr/0050-context-set-arms.md
-Works with:   src/crb/core/stated.py, src/crb/core/ctxset.py, src/crb/core/context_arm.py
-              (the modules under test), tests/test_ctxset.py (the v1 fixtures pinned here)
+Works with:   src/crb/core/stated.py (items and renderers), src/crb/core/ctxset.py (the v2
+              parser), src/crb/core/context_arm.py (the kind table), tests/test_ctxset.py (the
+              v1 fixtures pinned here)
 Tested by:    this file
 Touch when:   never for a new repository; a kind, provenance value, structure, renderer,
               limit or the v2 schema changes (an ADR amending ADR-0052 first).
