@@ -89,6 +89,41 @@ def test_a_structure_contrast_links_by_items_digest_head_to_head() -> None:
     assert (pair.b, pair.c) == (4, 0)
 
 
+def test_two_structures_same_items_share_one_control() -> None:
+    """ADR-0052 item 5: a control run (plain A0) of the prose set is the control of the
+    checklist treatment over the same items digest, repo and tasks (not head to head)."""
+    pair = _pair(side(PROSE, CONTROL, role=ctxset.ROLE_CONTROL), side(CHECKLIST, TREAT), CHECKLIST)
+    assert pair.control_arm == "A0" and pair.control_set == PROSE.digest
+    assert pair.stated and not pair.head_to_head
+    assert (pair.b, pair.c) == (4, 0)
+    # the same control serves the prose treatment too
+    assert _pair(side(PROSE, CONTROL, role=ctxset.ROLE_CONTROL), side(PROSE, TREAT)).c == 0
+    # a control run of other items, or of a non-stated set, is still refused
+    for other in (OTHER, ORACLE):
+        with pytest.raises(cc.CtxPairRefused) as exc:
+            _pair(side(other, CONTROL, role=ctxset.ROLE_CONTROL), side(CHECKLIST, TREAT), CHECKLIST)
+        assert exc.value.reason == cc.REASON_ITEMS_MISMATCH
+
+
+def test_render_prints_both_provenance_strata() -> None:
+    """ADR-0052 item 6 (review note 8): the text reading carries the tests_only split."""
+    pair = _pair(side(PROSE, CONTROL, role=ctxset.ROLE_CONTROL), side(PROSE, TREAT))
+    lines = cc.render(pair).splitlines()
+    strata = [ln for ln in lines if ln.startswith("stratum ")]
+    assert strata == [
+        "stratum tests_only  n 0",
+        f"stratum no_tests_only  n {len(T)}  b=4 c=0  control k/n 0/{len(T)}  "
+        f"treatment k/n 4/{len(T)}",
+    ]
+    oracle = cc.ctx_pair(
+        side(ORACLE, CONTROL, role=ctxset.ROLE_CONTROL),
+        side(ORACLE, TREAT),
+        task_ids=ORACLE.task_ids,
+        sets=SETS,
+    )
+    assert "stratum " not in cc.render(oracle)
+
+
 def test_the_placebo_links_through_its_matched_treatment() -> None:
     pair = _pair(side(PROSE, CONTROL), side(PLACEBO, TREAT), PLACEBO)
     assert pair.stated and not pair.head_to_head

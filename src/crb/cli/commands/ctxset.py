@@ -164,6 +164,10 @@ def compare_lines(d: dict[str, Any]) -> list[str]:
         lines.append(f"PENDING {len(d['pending'])} task(s): no claim until complete")
     if d.get("dose_imbalance"):
         lines.append("dose_imbalance: the two sides delivered different doses (read ITT)")
+    if d.get("stated"):
+        from crb.core.ctx_compare import prov_strata_lines
+
+        lines.extend(prov_strata_lines(d.get("prov_strata") or []))
     cost = d.get("cost") or {}
     paired = cost.get("paired_cost_usd_diff") or {}
     if paired.get("n"):

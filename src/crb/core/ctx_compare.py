@@ -550,8 +550,10 @@ def _provenance(rows: Sequence[GradeRow]) -> dict[str, int]:
 def _link_stated(
     tset: CtxSet, c_digests: set[str], linked: set[str], sets: Mapping[str, CtxSet]
 ) -> bool:
-    """Extend ``linked`` with each control set that states the treatment's items (a structure
-    contrast); ``True`` when one did. Refuses a stated treatment against any other set."""
+    """Extend ``linked`` with each control set that states the treatment's items (another
+    structure over the same items digest, repo and tasks); ``True`` when one did. Refuses a
+    stated treatment against any other set. The caller reads ``True`` as head to head only
+    when the control is an entries run; a control run of that set is a shared control."""
     head = False
     for d in sorted(c_digests - linked):
         other = sets.get(d)
@@ -608,8 +610,12 @@ def ctx_pair(
     c_arm = _one_arm(control, "control") if control else BASE_A0
     c_digests = {r.labels.get(LABEL_CTX_SET, "") for r in control}
     head_to_head = False
-    if tset.stated and len(c_digests) == 1 and ctx_set_name(c_arm):
-        head_to_head = _link_stated(tset, c_digests, linked, sets)
+    if tset.stated and len(c_digests) == 1:
+        # a control run (plain A0) or an entries run of any stated set over the same items
+        # links: two structures over one items digest share one control (ADR-0052 item 5);
+        # only an entries run against an entries run is the head-to-head contrast
+        linked_other = _link_stated(tset, c_digests, linked, sets)
+        head_to_head = linked_other and bool(ctx_set_name(c_arm))
     elif not tset.stated and ctx_set_name(c_arm) and stated_arm(c_arm):
         raise CtxPairRefused(
             REASON_ITEMS_MISMATCH, f"a stated control {c_arm!r} against a non-stated treatment"
@@ -702,11 +708,33 @@ def render(pair: CtxPair) -> str:
         lines.append(f"PENDING {len(pair.pending)} task(s): no claim until complete")
     if pair.dose_imbalance:
         lines.append("dose_imbalance: the two sides delivered different doses (read ITT)")
+    if pair.stated:
+        lines.extend(prov_strata_lines(d.get("prov_strata") or []))
     if pair.drift:
         lines.append(
             "drift: the two sides ran in disjoint windows (a model change is not excluded)"
         )
     return "\n".join(lines)
+
+
+def prov_strata_lines(strata: Sequence[Mapping[str, Any]]) -> list[str]:
+    """One text line per provenance stratum of a stated pair (``to_dict``'s ``prov_strata``):
+    the tasks whose entry holds a ``tests_only`` item, and the rest, each with its paired
+    counts and both sides' k/n (ADR-0052 item 6). Both strata are always printed, an empty
+    one as ``n 0``, so a pooled stated effect is never read without its split."""
+    by_flag = {bool(s.get("tests_only")): s for s in strata}
+    out: list[str] = []
+    for flag, label in ((True, "tests_only"), (False, "no_tests_only")):
+        s = by_flag.get(flag)
+        if s is None:
+            out.append(f"stratum {label}  n 0")
+            continue
+        ctl, trt = s["control"], s["treatment"]
+        out.append(
+            f"stratum {label}  n {trt['n']}  b={s['b']} c={s['c']}  "
+            f"control k/n {ctl['k']}/{ctl['n']}  treatment k/n {trt['k']}/{trt['n']}"
+        )
+    return out
 
 
 __all__ = [
@@ -732,5 +760,6 @@ __all__ = [
     "Stratum",
     "Window",
     "ctx_pair",
+    "prov_strata_lines",
     "render",
 ]
