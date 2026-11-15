@@ -47,9 +47,10 @@ library NAME keeps :func:`admit_retrospective` unchanged.
 **Stated-requirement arms** (ADR-0052, which amends ADR-0050 items 3 and 4 for the ``req``
 source ONLY). On a ``ctx.req*`` arm an entry that carries stated items is checked by
 :func:`req_guard` instead of :func:`refuse_novel`: it re-renders the text from the items, holds
-the fixed limits, and refuses a code block, an undeclared novel token, a misstated
-provenance, a held-out test's name or path, an eight-token span copied from the change, or a
-signature item carrying a body. Its declared novel tokens reach the brief — that is the
+the fixed limits, and refuses a code block, a disclosure that is not exactly one token, an
+undeclared novel token, a misstated provenance, a held-out test's name (a helper's or
+fixture's too) or path, an eight-token span copied from the change (filler words and item
+boundaries do not break it), or a signature item carrying a body. Its declared novel tokens reach the brief — that is the
 amendment. Every other line of the brief — any entry without items, every fact and every
 learned line — keeps :func:`refuse_novel` exactly as before, on a ``req`` arm too.
 
@@ -357,7 +358,8 @@ class GoldView:
     """What :func:`req_guard` reads of the gold change, harness-side (the builder never sees
     it): the novel tokens, the source and test post-images, the lines the change added to
     each, the held-out test paths, and ``parent_has`` — whether the parent tree holds a
-    string (``git grep -F -i``; any failure answers ``False``, so a token stays answer-side)."""
+    token as a whole word, case-sensitively (``git grep -w -F``, the matcher
+    :func:`novel_tokens` uses; any failure answers ``False``, so a token stays answer-side)."""
 
     novel: frozenset[str]
     parent_has: Callable[[str], bool]
@@ -403,7 +405,7 @@ def gold_view(
 
     def parent_has(token: str) -> bool:
         try:
-            return repo.run("grep", "-q", "-F", "-i", "-e", token, parent, check=False).ok
+            return repo.run("grep", "-q", "-w", "-F", "-e", token, parent, check=False).ok
         except Exception:
             return False
 
@@ -428,6 +430,13 @@ _TEST_DEF_RE = re.compile(
     r"|(?:it|test|describe|context)(?:\.\w+)?\s*\(|t\.Run\s*\(|@Test\b|@DisplayName\b"
     r"|@pytest\.mark\.parametrize\b|@ParameterizedTest\b"
     r")"
+)
+#: Any definition line of a test file: the name it defines (a helper, a fixture, a constant)
+#: belongs to the held-out tests unless the source or the parent holds it too.
+_DEF_NAME_RE = re.compile(
+    r"^\s*(?:export\s+)?(?:default\s+)?(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?"
+    r"(?:def|function\*?|func|fn|class|const|let|var)\s+(?:\([^)]*\)\s*)?"
+    r"([A-Za-z_$][A-Za-z0-9_$]*)"
 )
 #: English words dropped from both sides before the copy rule compares spans.
 _SPAN_STOPWORDS: frozenset[str] = frozenset(
@@ -472,6 +481,9 @@ _SPAN_STOPWORDS: frozenset[str] = frozenset(
 _SPAN_TOKEN_RE = re.compile(r"[a-z_][a-z0-9_]*|\d+")
 _SIGNATURE_BODY = ("{", "}", ";", "=>")
 _SIGNATURE_RETURN_RE = re.compile(r"\breturn\b")
+#: What a signature header may carry after its closing parenthesis: one return annotation
+#: (``-> T``) and Python's closing ``:``. Anything after it is the item's remainder.
+_SIGNATURE_TAIL_RE = re.compile(r"(?:\s*->\s*[\w.\[\]|,]+)?\s*:?")
 
 
 def _norm(text: str) -> str:
@@ -486,6 +498,16 @@ def _grams(tokens: Sequence[str], n: int) -> set[tuple[str, ...]]:
     return {tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1)}
 
 
+def _copied_span(text: str, gold_lines: Sequence[str], n: int) -> bool:
+    """Whether ``text`` shares an ``n``-token run with ``gold_lines``, read on the gold's own
+    token vocabulary: every word of ``text`` the gold lines do not hold is dropped first, so
+    filler words inserted between copied tokens never break the run."""
+    gold_seq = _span_tokens("\n".join(gold_lines))
+    vocab = set(gold_seq)
+    seq = [t for t in _span_tokens(text) if t in vocab]
+    return bool(_grams(seq, n) & _grams(gold_seq, n))
+
+
 def _names_ci(text: str, token: str) -> bool:
     """Whether ``text`` names ``token`` case- and whitespace-insensitively: an identifier as
     a whole word, anything else as a substring."""
@@ -494,23 +516,67 @@ def _names_ci(text: str, token: str) -> bool:
     return _norm(token) in _norm(text)
 
 
+def _holds(text: str, token: str) -> bool:
+    """Whether ``text`` holds ``token`` as :func:`novel_tokens` reads the parent tree: as a
+    whole word, case-sensitively (``git grep -w -F``)."""
+    if token.isidentifier():
+        return token in set(_IDENT_RE.findall(text))
+    return re.search(r"(?<!\w)" + re.escape(token) + r"(?!\w)", text) is not None
+
+
 def _token_provenance(token: str, gold: GoldView) -> str:
     if gold.parent_has(token):
         return _stated.PROV_PRODUCT
-    if _norm(token) in _norm(gold.src_after):
+    if _holds(gold.src_after, token):
         return _stated.PROV_CHANGE_DETAIL
-    if _norm(token) in _norm(gold.test_after):
+    if _holds(gold.test_after, token):
         return _stated.PROV_TESTS_ONLY
     return _stated.PROV_NOWHERE
 
 
+def _change_tokens(gold: GoldView) -> set[str]:
+    """Every code token (:func:`_code_tokens`) of the change's source and test post-images."""
+    out: set[str] = set()
+    for text in (gold.src_after, gold.test_after):
+        idents, literals = _code_tokens(text)
+        out |= idents | literals
+    return out
+
+
 def _test_def_tokens(gold: GoldView) -> set[str]:
+    """The held-out tests' own names: every token of an added test-definition line, and the
+    name any definition line of a test post-image defines (a helper, fixture or constant)."""
     out: set[str] = set()
     for line in gold.test_added:
         if _TEST_DEF_RE.match(line):
             idents, literals = _code_tokens(line)
             out |= idents | literals
+    for line in gold.test_after.splitlines():
+        m = _DEF_NAME_RE.match(line)
+        if m and len(m.group(1)) >= NOVEL_MIN:
+            out.add(m.group(1))
     return out
+
+
+def _signature_split(statement: str) -> tuple[str, str]:
+    """``(header, remainder)`` of a signature item: the header runs through the parenthesis
+    closing the first ``(``, plus one return annotation and a closing ``:``; with no
+    balanced parenthesis there is no header. Only the header is exempt from the source-span
+    rule."""
+    start = statement.find("(")
+    if start < 0:
+        return "", statement
+    depth = 0
+    for i in range(start, len(statement)):
+        if statement[i] == "(":
+            depth += 1
+        elif statement[i] == ")":
+            depth -= 1
+            if depth == 0:
+                m = _SIGNATURE_TAIL_RE.match(statement, i + 1)
+                end = m.end() if m else i + 1
+                return statement[:end], statement[end:]
+    return "", statement
 
 
 #: Test-file stems too generic to say which held-out test a text means.
@@ -544,14 +610,18 @@ def req_guard(
 
     ``req_render``: ``text`` is not ``structure``'s rendering of ``items``. ``req_length``:
     a fixed limit is broken. ``req_code_block``: a fence or an indented line.
+    ``req_disclose``: a disclosed string is not exactly one token — a novel token, a code
+    token of the change's post-images, or a whole word the parent holds.
     ``req_undeclared_novel``: an item's statement names a novel token its ``discloses`` does
-    not declare. ``req_provenance``: an item's declared provenance is not the most
-    answer-side of its disclosed tokens'. ``req_test_name``: the text names a token of a
-    held-out test's definition line that neither the source post-image nor the parent holds.
-    ``req_test_path``: the text names a held-out test's path, file name or stem.
-    ``req_test_span``: a statement shares an eight-token span with the change's added test
-    lines (or, for a non-signature item, its added source lines). ``req_signature``: a
-    signature item carries a body."""
+    not declare exactly (a novel word inside a declared token's own text is covered by it). ``req_provenance``: an item's declared provenance is not the most
+    answer-side of its tokens' (each novel token its statement names, and each disclosed
+    token). ``req_test_name``: the text names a held-out test's own name (a token of an
+    added test-definition line, or a name a test file defines) that neither the source
+    post-image nor the parent holds. ``req_test_path``: the text names a held-out test's
+    path, file name or stem. ``req_test_span``: the entry's statements, read together in
+    order on the change's token vocabulary, share an eight-token run with the change's added
+    test lines (or, past a signature item's header, its added source lines).
+    ``req_signature``: a signature item carries a body."""
     if gold is None:
         return [_stated.REASON_NO_GOLD]
     reasons: set[str] = set()
@@ -569,15 +639,25 @@ def req_guard(
         or any(ln.startswith(("    ", "\t")) for ln in text.splitlines())
     ):
         reasons.add(_stated.REASON_CODE_BLOCK)
+    change = _change_tokens(gold)
     for item in items:
-        declared = [_norm(d) for d in item.discloses]
-        for tok in gold.novel:
-            if _names_ci(item.statement, tok) and not any(_norm(tok) in d for d in declared):
-                reasons.add(_stated.REASON_UNDECLARED_NOVEL)
+        valid = [d for d in item.discloses if d in gold.novel or d in change or gold.parent_has(d)]
+        if len(valid) != len(item.discloses):
+            reasons.add(_stated.REASON_DISCLOSE)
+        declared = {_norm(d) for d in valid}
+        # a declared token's own text is spent: a novel word inside it (``required`` in the
+        # literal ``name required``) is covered; one anywhere else must be declared itself
+        rest = _norm(item.statement)
+        for d in sorted(declared, key=len, reverse=True):
+            rest = rest.replace(d, " | ")
+        named = [tok for tok in gold.novel if _names_ci(rest, tok)]
+        if any(_norm(tok) not in declared for tok in named):
+            reasons.add(_stated.REASON_UNDECLARED_NOVEL)
         if item.discloses:
             actual = max(
-                (_token_provenance(d, gold) for d in item.discloses),
+                (_token_provenance(t, gold) for t in {*valid, *named}),
                 key=lambda p: _stated.PROV_RANK[p],
+                default=_stated.PROV_NOWHERE,
             )
             if actual != item.provenance:
                 reasons.add(_stated.REASON_PROVENANCE)
@@ -586,19 +666,20 @@ def req_guard(
             or _SIGNATURE_RETURN_RE.search(item.statement)
         ):
             reasons.add(_stated.REASON_SIGNATURE)
-    src_norm = _norm(gold.src_after)
     for tok in _test_def_tokens(gold):
-        if _names_ci(text, tok) and _norm(tok) not in src_norm and not gold.parent_has(tok):
+        if _names_ci(text, tok) and not _holds(gold.src_after, tok) and not gold.parent_has(tok):
             reasons.add(_stated.REASON_TEST_NAME)
     if _names_test_path(text, gold):
         reasons.add(_stated.REASON_TEST_PATH)
     n = _stated.SPAN_TOKENS
-    test_grams = _grams(_span_tokens("\n".join(gold.test_added)), n)
-    src_grams = _grams(_span_tokens("\n".join(gold.src_added)), n)
-    for item in items:
-        grams = _grams(_span_tokens(item.statement), n)
-        if grams & test_grams or (item.kind != _stated.KIND_SIGNATURE and grams & src_grams):
-            reasons.add(_stated.REASON_TEST_SPAN)
+    ordered = sorted(items, key=lambda i: i.item_id)
+    whole = " ".join(i.statement for i in ordered)
+    past_headers = " ".join(
+        _signature_split(i.statement)[1] if i.kind == _stated.KIND_SIGNATURE else i.statement
+        for i in ordered
+    )
+    if _copied_span(whole, gold.test_added, n) or _copied_span(past_headers, gold.src_added, n):
+        reasons.add(_stated.REASON_TEST_SPAN)
     return sorted(reasons)
 
 

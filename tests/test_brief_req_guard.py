@@ -70,7 +70,7 @@ TEST_AFTER = (
 def gold(**kw: Any) -> GoldView:
     base: dict[str, Any] = {
         "novel": frozenset({"name required", "test_validate_refuses_empty_name_quickly"}),
-        "parent_has": lambda tok: any(tok.lower() == p.lower() for p in PARENT_TREE),
+        "parent_has": lambda tok: tok in PARENT_TREE,
         "src_after": SRC_AFTER,
         "test_after": TEST_AFTER,
         "src_added": tuple(SRC_AFTER.splitlines()[1:]),
@@ -187,6 +187,100 @@ def test_an_eight_token_span_copied_from_the_change_is_refused() -> None:
         ("name required",),
     )
     assert stated.REASON_TEST_SPAN in guard(from_src)
+
+
+def test_a_whole_statement_disclose_declares_nothing() -> None:
+    """Review case B: one broad disclose must not cover the novel token inside it, nor set
+    the provenance below the novel token's own (``tests_only`` here)."""
+    only_tests = gold(src_after="def validate(name):\n    pass\n")
+    broad = StatedItem("i01", "error_text", ITEM.statement, "nowhere", (ITEM.statement,))
+    why = guard(broad, view=only_tests)
+    assert stated.REASON_DISCLOSE in why
+    assert stated.REASON_UNDECLARED_NOVEL in why
+    assert stated.REASON_PROVENANCE in why
+
+
+def test_a_superstring_disclose_does_not_declare_the_token_inside_it() -> None:
+    """Review case C: ``text `name required``` contains the novel token but is not it."""
+    only_tests = gold(src_after="def validate(name):\n    pass\n")
+    sup = StatedItem("i01", "error_text", ITEM.statement, "nowhere", ("text `name required",))
+    why = guard(sup, view=only_tests)
+    assert {stated.REASON_DISCLOSE, stated.REASON_UNDECLARED_NOVEL} <= set(why)
+    assert stated.REASON_PROVENANCE in why
+
+
+def test_provenance_ignores_a_hit_that_is_only_a_substring() -> None:
+    """A tests-only literal the source post-image holds only inside a longer word is still
+    tests_only: every side is read whole-word and case-sensitively, as ``novel_tokens``
+    reads the parent (the parent's own matcher is pinned on a real repository below)."""
+    only_tests = gold(src_after="def validate(name):\n    hint = 'name requiredness'\n")
+    tests_only = StatedItem("i01", "error_text", ITEM.statement, "tests_only", ("name required",))
+    assert guard(tests_only, view=only_tests) == []
+    product = StatedItem("i01", "error_text", ITEM.statement, "product", ("name required",))
+    assert stated.REASON_PROVENANCE in guard(product, view=only_tests)
+
+
+def test_filler_words_do_not_break_a_copied_span() -> None:
+    """Review case E: a non-stopword filler between copied test tokens."""
+    filler = StatedItem(
+        "i01",
+        "rule",
+        "Use pytest next raises next ValueError next match next name required next "
+        "validate next assert",
+        "change_detail",
+        ("name required",),
+    )
+    assert stated.REASON_TEST_SPAN in guard(filler)
+
+
+def test_a_copied_span_split_across_items_is_refused() -> None:
+    """Review case F: the run is read over the whole entry, items in order."""
+    first = StatedItem("i01", "rule", "Use pytest raises ValueError match", "nowhere")
+    second = StatedItem(
+        "i02", "rule", "name required then validate, assert", "change_detail", ("name required",)
+    )
+    assert stated.REASON_TEST_SPAN not in guard(first)
+    assert stated.REASON_TEST_SPAN in guard(first, second)
+    assert stated.REASON_TEST_SPAN in guard(first, second, structure="checklist")
+
+
+def test_a_test_helper_or_fixture_name_is_refused() -> None:
+    """Review case G: a name a test file defines, not only a test's own definition."""
+    test_after = (
+        "@pytest.fixture\n"
+        "def make_sample_widget_payload():\n"
+        "    return {'name': ''}\n"
+        "const DEFAULT_WIDGET_LIMIT = 10\n" + TEST_AFTER
+    )
+    view = gold(test_after=test_after, test_added=tuple(test_after.splitlines()))
+    for name in ("make_sample_widget_payload", "DEFAULT_WIDGET_LIMIT"):
+        item = StatedItem("i01", "rule", f"Build inputs with {name}", "nowhere")
+        assert stated.REASON_TEST_NAME in guard(item, view=view), name
+    # a helper the source also holds is the product's own name
+    shared = gold(test_after="def validate_all():\n    pass\n", src_after="validate_all = 1\n")
+    item = StatedItem("i01", "rule", "Keep validate_all", "nowhere")
+    assert stated.REASON_TEST_NAME not in guard(item, view=shared)
+
+
+def test_a_signature_header_does_not_exempt_a_copied_python_body() -> None:
+    """Review case H: only the header is exempt from the source-span rule."""
+    src = (
+        "def normalise(name):\n"
+        "    cleaned = name.strip().lower().replace(' ', '_')\n"
+        "    prefix = cleaned.split('_')[0]\n"
+        "    suffix = cleaned.split('_')[-1]\n"
+    )
+    view = gold(src_after=src, src_added=tuple(src.splitlines()), novel=frozenset())
+    body = StatedItem(
+        "i01",
+        "signature",
+        "normalise(name): cleaned = name.strip().lower().replace(' ', '_') "
+        "prefix = cleaned.split('_')[0]",
+        "nowhere",
+    )
+    assert stated.REASON_TEST_SPAN in guard(body, view=view)
+    header_only = StatedItem("i01", "signature", "normalise(name) -> str: keeps it", "nowhere")
+    assert guard(header_only, view=view) == []
 
 
 def test_a_signature_may_restate_source_tokens_but_never_a_body() -> None:
@@ -308,6 +402,8 @@ def test_gold_view_reads_added_lines_and_the_parent_tree(
     assert "name required" in view.novel
     assert any("name required" in ln for ln in view.src_added)
     assert any(ln.startswith("def test_validate") for ln in view.test_added)
-    assert view.parent_has("VALIDATE") and not view.parent_has("name required")
+    assert view.parent_has("validate") and not view.parent_has("name required")
+    # the matcher novel_tokens uses: whole word, case-sensitive (never a substring)
+    assert not view.parent_has("VALIDATE") and not view.parent_has("valid")
     assert view.test_paths == ("tests/test_calc.py",)
     assert req_guard(entry(ITEM).text, (ITEM,), "prose", view) == []

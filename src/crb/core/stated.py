@@ -121,6 +121,7 @@ HEADER = "Stated requirements for this change:"
 REASON_RENDER = "req_render"
 REASON_LENGTH = "req_length"
 REASON_CODE_BLOCK = "req_code_block"
+REASON_DISCLOSE = "req_disclose"
 REASON_UNDECLARED_NOVEL = "req_undeclared_novel"
 REASON_PROVENANCE = "req_provenance"
 REASON_TEST_NAME = "req_test_name"
@@ -132,6 +133,7 @@ REASONS: tuple[str, ...] = (
     REASON_RENDER,
     REASON_LENGTH,
     REASON_CODE_BLOCK,
+    REASON_DISCLOSE,
     REASON_UNDECLARED_NOVEL,
     REASON_PROVENANCE,
     REASON_TEST_NAME,
@@ -282,6 +284,7 @@ __all__ = [
     "PROV_TESTS_ONLY",
     "REASONS",
     "REASON_CODE_BLOCK",
+    "REASON_DISCLOSE",
     "REASON_LENGTH",
     "REASON_NO_GOLD",
     "REASON_PROVENANCE",
