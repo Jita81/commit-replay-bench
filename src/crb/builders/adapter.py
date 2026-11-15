@@ -1224,7 +1224,14 @@ def build_fn_for(
         tool, check = derived
         where = BUILDER_EXECUTOR_SEALED if sealed else "host"
         probe = check_executor_for(container if sealed else None, ws)
+        before = len(getattr(probe, "unconfirmed_kills", None) or ())
         _outcome, refusal = builder_tool_refusal(runner, probe, tool, check, where=where)
+        # a timed-out or cancelled check whose kill docker never confirmed: to the reaper
+        for kill in list(getattr(probe, "unconfirmed_kills", None) or ())[before:]:
+            _LOG.warning("task %s: tool check: %s", task.task_id, unconfirmed_kill_error(kill))
+            if on_kill_unconfirmed is not None:
+                with contextlib.suppress(Exception):  # never into the build
+                    on_kill_unconfirmed(task.task_id, kill)
         if refusal:
             emit(on_event, BUILDER_EVENT_PREFIX + "refused", task=task.task_id, error=refusal)
         return refusal

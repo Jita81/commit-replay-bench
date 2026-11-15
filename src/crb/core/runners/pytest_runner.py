@@ -56,6 +56,7 @@ Touch when:   a Python repository needs a different install recipe — prefer ``
 
 from __future__ import annotations
 
+import itertools
 import os
 import re
 import shlex
@@ -238,9 +239,18 @@ class PytestRunner(BaseRunner):
         return (executor.tool("python", host_default), "-V")
 
     def tool_check(self, argv: Sequence[str]) -> tuple[str, tuple[str, ...]] | None:
-        """``<python> -m pytest --version``: the interpreter the handed command names can
-        import pytest (a builder image without it cannot run a single test)."""
-        return ("pytest", (argv[0], "-m", "pytest", "--version")) if argv else None
+        """``<python> -m pytest <startup overrides> --version``: the interpreter the handed
+        command names can import pytest (a builder image without it cannot run a single
+        test). The command's ``-p`` / ``-o`` pairs are kept: they apply before pytest starts,
+        and without ``-o addopts=`` a project whose ``addopts`` names an absent plugin fails
+        the check (pytest 8 reads it even for ``--version``) though the command starts."""
+        if not argv:
+            return None
+        overrides: list[str] = []
+        for flag, value in itertools.pairwise(argv[1:]):
+            if flag in ("-p", "-o"):
+                overrides += [flag, value]
+        return ("pytest", (argv[0], "-m", "pytest", *overrides, "--version"))
 
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int

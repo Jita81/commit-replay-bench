@@ -59,7 +59,13 @@ from crb.builders.toolcheck import (
     builder_tool_refusal,
     tool_check_command,
 )
-from crb.core.execution import TREE_READONLY, Command, ExecResult, LocalExecutor
+from crb.core.execution import (
+    TREE_READONLY,
+    Command,
+    ExecResult,
+    LocalExecutor,
+    UnconfirmedKill,
+)
 from crb.core.git import GitRepo
 from crb.core.ledger import FAILURE_HARNESS, derive_failure_kind
 from crb.core.provision import RECIPE_NONE, LockInputs
@@ -222,7 +228,8 @@ def test_a_tool_check_that_does_not_pass_refuses_before_any_builder_or_model_cal
     (refused,) = [p for a, p in events if a == "builder.refused"]
     assert refused["error"] == attempt.error
     assert "builder's own environment (host)" in refused["error"]
-    assert "-m pytest --version` " + says in refused["error"]
+    shown = " ".join(("-m", "pytest", *_STARTUP_OVERRIDES, "--version"))
+    assert shown + "` " + says in refused["error"]
 
 
 def test_a_passing_tool_check_runs_before_the_model_and_lets_the_attempt_proceed(
@@ -281,13 +288,69 @@ def test_the_check_is_the_handed_command_with_only_its_argv_replaced(
     derived = tool_check_command(runner, handed)
     assert derived is not None
     tool, check = derived
-    assert tool == "pytest" and check.argv == (handed.argv[0], "-m", "pytest", "--version")
+    assert tool == "pytest" and check.argv == (
+        handed.argv[0],
+        "-m",
+        "pytest",
+        *_STARTUP_OVERRIDES,
+        "--version",
+    )
     for f in dataclasses.fields(Command):
         if f.name != "argv":
             assert getattr(check, f.name) == getattr(handed, f.name), f.name
     # the attempt ran exactly this check, with only its wall clock bounded on top
     (ran,) = order.probe.seen
     assert ran == dataclasses.replace(check, timeout=min(check.timeout, TOOL_CHECK_TIMEOUT_S))
+
+
+#: The startup overrides the runner's command passes before any test runs: a project's own
+#: ``addopts`` and two plugins are neutralised. The check must start pytest the same way.
+_STARTUP_OVERRIDES = ("-p", "no:cacheprovider", "-p", "no:randomly", "-o", "addopts=")
+
+
+def test_the_pytest_check_keeps_the_runners_startup_overrides(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    # A project whose addopts names an absent plugin (``-p xdist``) fails ``pytest --version``
+    # on pytest 8 although the runner's own command, with ``-o addopts=``, starts.
+    runner = PytestRunner(pyrepo.config)
+    cmd = runner.command(tmp_path, ("tests/test_a.py",), executor=LocalExecutor(), timeout=60)
+    derived = runner.tool_check(cmd.argv)
+    assert derived == ("pytest", (cmd.argv[0], "-m", "pytest", *_STARTUP_OVERRIDES, "--version"))
+
+
+def test_an_unconfirmed_kill_of_the_tool_check_reaches_the_reaper(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    kill = UnconfirmedKill(container="crb-tool-check-x", bound_s=5.0)
+
+    class _Unconfirmed(ScriptedExecutor):
+        """A docker executor whose kill of the timed-out check was never confirmed."""
+
+        def run(self, cmd: Command) -> ExecResult:
+            self.unconfirmed_kills = [kill]
+            return super().run(cmd)
+
+    probe = _Unconfirmed(ExecResult(124, "", "", timed_out=True))
+    handed: list[tuple[str, UnconfirmedKill]] = []
+    fn = adapter.build_fn_for(
+        EscalationLadder((Rung("counting", "m"),)),
+        budget=Budget(),
+        runner=PytestRunner(pyrepo.config),
+        executor=LocalExecutor(),
+        config=pyrepo.config,
+        tool_check_executor=lambda _s, _w: probe,
+        on_kill_unconfirmed=lambda task_id, k: handed.append((task_id, k)),
+    )
+    ws = pyrepo.trial(tmp_path / "k")
+    task = pyrepo.feat_task()
+    try:
+        attempt = fn(ws, task, "sighted", "counting:m")
+    finally:
+        ws.remove()
+    assert attempt.error.startswith(RUNNER_TOOL_MISSING + "pytest")
+    assert handed == [(task.task_id, kill)]
+    assert CountingBuilder.made == 0
 
 
 def test_a_runner_without_a_check_is_not_refused(pyrepo: pr.PyRepo) -> None:

@@ -380,7 +380,7 @@ def test_a_builder_image_without_pytest_is_refused_before_any_builder_call(
     assert refused["error"].startswith(RUNNER_TOOL_MISSING), refused
     assert refused["error"].startswith(RUNNER_TOOL_MISSING + "pytest — "), refused
     assert "builder's own environment (docker)" in refused["error"]
-    assert "-m pytest --version`" in refused["error"]
+    assert "-m pytest -p no:cacheprovider -p no:randomly -o addopts= --version`" in refused["error"]
     # recorded as an instrument row, never as the builder's failure
     (row,) = ledger.rows()
     assert not row.clean and row.error.startswith(RUNNER_TOOL_MISSING), row.error

@@ -325,6 +325,12 @@ whose sealed dependency set carries no `pytest` (a `uv.lock` with `pytest` only 
 group and no `deps_groups`) is handed `python -m pytest …` with nothing but the image to
 provide it.
 
+The Go and Node variants carry no `python3`, and the egress sidecar runs `python3` from
+`CRB_BUILDER__PROXY_IMAGE`, which defaults to the builder image. A Go or Node worker with an
+egress allowlist (`CRB_BUILDER__ALLOW_HOSTS`) must therefore set
+`CRB_BUILDER__PROXY_IMAGE=crb-builder:local` (or another image with `python3`), or the
+sidecar does not start and the run stops `sandbox unavailable`.
+
 The image contains the Claude Code CLI as the npm package's **native binary** (pinned by
 `CLAUDE_CODE_VERSION`, the version the adapter's argv is verified against) — no Node
 runtime is added. Like sandbox images, it must be present in the host daemon's store
