@@ -3538,6 +3538,9 @@ class Worker:
                     produced_at=e.produced_at,
                     mechanical=e.mechanical,
                     source_rev=e.source_rev,
+                    # a stated (v2) entry: the composer's req_guard re-renders and checks it
+                    items=e.items,
+                    structure=ctxset.structure if e.items else "",
                 )
         return _CtxPlan(
             ctxset=ctxset,
