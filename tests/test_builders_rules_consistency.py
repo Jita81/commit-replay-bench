@@ -202,7 +202,9 @@ def test_system_rules_name_exactly_the_git_set_the_deny_rules_refuse() -> None:
         for r in cc.DENY_RULES
         if r.startswith("Bash(git ") and r.endswith(":*)")
     ]
-    m = re.search(r"This tool refuses these git commands: ([^.]+)\.", cc.system_rules(Budget(), sighted=False))
+    m = re.search(
+        r"This tool refuses these git commands: ([^.]+)\.", cc.system_rules(Budget(), sighted=False)
+    )
     assert m is not None
     assert m.group(1).split(", ") == refused
     assert {"checkout", "restore", "reset", "stash"} <= set(refused)
