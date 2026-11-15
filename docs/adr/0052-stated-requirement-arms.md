@@ -60,7 +60,10 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
    - No other row carries any of these stamps: not a control row, not an oracle or mech row,
      not a plain row.
    - `ctx_turns` is the builder's turn count. It is an optional count on every context-set
-     run's row, control included, and on no other row. It is not in `PROVENANCE_LABELS` and is
+     run's row, control included, and on no other row. A row whose builder never ran carries
+     none, so it counts as missing rather than as zero.
+   - `ctx_req_refused`, when present, is a sorted, comma-separated set of the guard's reasons
+     below; any other value is refused at write and on read. It is not in `PROVENANCE_LABELS` and is
      not a pooling or blend key.
 3. **The guard for `req` entries (`crb.builders.brief.req_guard`).** It is a pure function of
    the entry, its items and a harness-side gold view (`gold_view`: the novel set, a lookup of
@@ -72,19 +75,30 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
    - `req_length`: more than 12 items, more than 240 characters in a statement, or more than
      1,600 characters in an entry.
    - `req_code_block`: a fence, or an indented line.
+   - `req_disclose`: an item discloses something that is not one exact token of the change:
+     not a novel token, not a code token of the source or test post-image, and not in the
+     parent. A whole statement or a phrase wrapped round a token therefore declares nothing.
    - `req_undeclared_novel`: a statement names a novel token that its item does not declare.
-     Matching is case- and whitespace-insensitive, which is stricter than `names_novel`.
-   - `req_provenance`: an item's declared provenance is not the most answer-side of its
-     disclosed tokens. The ranking is nowhere < product < change_detail < tests_only, and a
-     token in both the source and the tests counts as change_detail.
+     Matching is case- and whitespace-insensitive, which is stricter than `names_novel`. Only
+     the text of a declared token is masked out, so a declared token does not cover a novel
+     token outside it.
+   - `req_provenance`: an item's declared provenance is not the most answer-side of the tokens
+     it discloses or names. The ranking is nowhere < product < change_detail < tests_only, and
+     a token in both the source and the tests counts as change_detail. Every lookup, parent
+     included, is whole-word and case-sensitive, so a token that appears only inside a longer
+     word does not lower the provenance.
    - `req_test_name`: an identifier or literal on a held-out test's definition or title line
      (pytest, unittest, Go `Test*` and `t.Run`, Rust `#[test]` and `mod tests`, JS
      `it`/`test`/`describe`, JUnit `@Test` and `@DisplayName`, parametrize ids) that neither
-     the source post-image nor the parent holds.
+     the source post-image nor the parent holds. The names a test file defines (helpers,
+     fixtures, constants) count as test names too.
    - `req_test_path`: a held-out test's path, file name or specific stem.
-   - `req_test_span`: eight tokens in a row shared with the change's added test lines. For a
-     non-signature item, the change's added source lines count too. The spans are compared
-     after dropping prose stopwords, so filler words between code tokens do not break a run.
+   - `req_test_span`: eight tokens in a row shared with the change's added test lines, read
+     over the whole entry, so a run split across items is still found. The change's added
+     source lines count too, except a signature item's header: from its start through the
+     parenthesis that closes its parameter list and an optional return annotation. The entry's
+     tokens are compared only where they belong to the change's own vocabulary, so prose words
+     between copied code tokens do not break a run.
    - `req_signature`: a signature item that carries a body.
 
    The limits are fixed in `crb.core.stated`. Changing them needs a new ADR. A CLI lint
@@ -110,6 +124,8 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
    - A control run of stated set P links to a stated treatment C when both are stored, are
      stated, and have equal items digest, repo and task list. Otherwise the pair is refused as
      `ctx_pair_items_mismatch` (or `ctx_pair_unlinked` when P is not stored).
+   - Two structures over the same items digest share one control: a control run of either set
+     links to the other set's entries run.
    - A non-stated treatment against a stated control is refused.
    - An entries run of P against an entries run of C is the **head-to-head** structure
      contrast.
@@ -119,7 +135,8 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
    - A `req` comparison leads with its own banner, `STATED_BANNER`, in place of the ceiling
      banner. The next line holds the provenance counts.
    - Provenance strata, split by whether any item is `tests_only`, are always part of the
-     result.
+     result, and the text rendering prints both strata (`tests_only`, `no_tests_only`), an
+     empty one as `n 0`.
    - Every pair also carries a descriptive cost block: per side, the median and total of
      `cost_usd`, `tokens_in`, `tokens_out` and `ctx_turns` over first attempts, and the paired
      per-task cost difference (median, inclusive IQR) with its n.
