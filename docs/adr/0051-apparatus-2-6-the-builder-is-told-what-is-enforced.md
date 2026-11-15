@@ -84,7 +84,8 @@ and outside the model's n, as every `runner tool missing` row already does.
 
 **Easier.** A builder that follows its rules issues no refused command [hypothesis: the rules
 are derived from what the guard and the deny rules enforce, but no 2.6 run has measured it],
-and a builder whose test tool does not start is not paid for. A 2.6 row is separated from a
+and a builder whose declared test tool does not start is not paid for (a runner that declares
+no tool check is not checked). A 2.6 row is separated from a
 2.5 row on the apparatus axis. A reader that pools versions still combines them: a read with
 `apparatus=all`, and the flat cost and latency means under it (P-134, G-990). This change
 does not alter those readers.
