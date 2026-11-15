@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -105,6 +106,15 @@ MAX_ENTRY_CHARS = 1600
 SPAN_TOKENS = 8
 
 #: The one header both renderers open with.
+#: Who wrote a stated set's items: a person (an opaque id, never a name or address) or a
+#: pinned model with the sha256 of its prompt. Never ``ctx_drafter``'s mechanical meaning.
+REQ_DRAFTER_RE = re.compile(
+    r"^(human:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|model:[A-Za-z0-9][A-Za-z0-9._:/-]*@[0-9a-f]{64})$"
+)
+#: The ``ctx_prov`` stamp's shape (:func:`prov_label`).
+PROV_LABEL_RE = re.compile(
+    r"^product:\d+,change_detail:\d+,tests_only:\d+,nowhere:\d+;attested:\d+$"
+)
 HEADER = "Stated requirements for this change:"
 
 #: The reasons ``crb.builders.brief.req_guard`` withholds an entry for (ADR-0052 item 3).
@@ -265,6 +275,7 @@ __all__ = [
     "PROVENANCES",
     "PROV_ATTESTED",
     "PROV_CHANGE_DETAIL",
+    "PROV_LABEL_RE",
     "PROV_NOWHERE",
     "PROV_PRODUCT",
     "PROV_RANK",
@@ -280,6 +291,7 @@ __all__ = [
     "REASON_TEST_PATH",
     "REASON_TEST_SPAN",
     "REASON_UNDECLARED_NOVEL",
+    "REQ_DRAFTER_RE",
     "SAW_DIFF",
     "SAW_TESTS",
     "SAW_TICKET",

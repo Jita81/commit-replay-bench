@@ -180,11 +180,8 @@ _V2_TOP_OPTIONAL = ("matched_to",)
 _V2_ENTRY_REQUIRED = ("task_id", "entry_id", "version", "produced_at", "items")
 _ITEM_REQUIRED = ("item_id", "kind", "statement", "provenance", "discloses")
 _ITEM_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
-#: Who wrote a stated set's items: a person (an opaque id, never a name or address) or a
-#: pinned model with the sha256 of its prompt. Never ``ctx_drafter``'s mechanical meaning.
-_REQ_DRAFTER_RE = re.compile(
-    r"^(human:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|model:[A-Za-z0-9][A-Za-z0-9._:/-]*@[0-9a-f]{64})$"
-)
+#: who wrote a stated set's items (ADR-0052): ``stated.REQ_DRAFTER_RE``
+_REQ_DRAFTER_RE = _stated.REQ_DRAFTER_RE
 _SHA_RE = re.compile(r"^[0-9a-f]{7,64}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _DRAFTER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*@[0-9a-f]{64}$")
