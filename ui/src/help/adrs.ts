@@ -72,6 +72,7 @@ export const ADR_TITLES: ReadonlyArray<readonly [string, string]> = [
   ['0048', 'The host posture declares its test environment, and a package that names no failing test never subtracts'],
   ['0049', 'Apparatus 2.5 separates rows graded after the Wave 3 harness fixes'],
   ['0050', 'Context-set arms: a governed paired measurement of supplied context'],
+  ['0051', 'Apparatus 2.6: the builder is told what is enforced and can run its tests'],
 ]
 
 /** `ADR-0015` — the name a record carries in the /help/docs route. */

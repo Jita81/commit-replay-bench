@@ -752,6 +752,14 @@ class BaseRunner:
         base runner names none."""
         return ()
 
+    def tool_check(self, argv: Sequence[str]) -> tuple[str, tuple[str, ...]] | None:
+        """``(tool, argv)``: the command that proves the test tool which ``argv`` (the test
+        command a builder is handed) starts with can start, without running a test or
+        reaching a network — ``argv`` with its arguments replaced, its first word kept. The
+        adapter runs it in the builder's own environment before the builder is paid
+        (src/crb/builders/toolcheck.py). ``None``: this runner declares no check."""
+        return None
+
     def env_probe_command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command | None:

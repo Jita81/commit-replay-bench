@@ -494,6 +494,11 @@ LABEL_SOURCE_ROW_HASH = "source_row_hash"
 LABEL_API_STABLE = BELT_API_STABLE
 #: The belt-6 findings as one compact line (``kind:unit:symbol;…``, capped).
 LABEL_API_FINDINGS = "api_findings"
+#: How many of the builder's source files the adapter DISCARDED because the attempt errored
+#: (any cause: a protocol violation, a model error …) — written only when a file was dropped.
+#: The dropped diff itself is kept in the evidence pack (``notes.discarded_patch``), so a
+#: discard is visible in the record; it never changes a verdict or a failure kind.
+LABEL_DISCARDED_FILES = "discarded_files"
 
 
 class LedgerIntegrityError(RuntimeError):

@@ -133,6 +133,7 @@ RATCHET_TESTS: tuple[str, ...] = (
     "tests/test_check_commit_subject.py",
     "tests/test_event_key_contract.py",
     "tests/test_read_preflight.py",
+    "tests/test_adr_shape.py",
 )
 
 #: CI's ``-m`` for the hermetic suite: the sandbox images are built and tested in their own job.
@@ -365,11 +366,18 @@ UNCOVERED_STEPS: tuple[tuple[str, str, str], ...] = (
             'test -n "$want"',
             'test "$(docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-go:ci '
             'id -u)" = "65534"',
+            'test "$(docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-python:ci '
+            'id -u)" = "65534"',
+            'test "$(docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-node:ci '
+            'id -u)" = "65534"',
             'test "$(docker run --rm --network=none --read-only --tmpfs /tmp "$img" id -u)" '
             '= "65534"',
             # names python as a sandbox language, and runs pytest inside that image
             "for lang in python node go",
             "docker run --rm --network=none --read-only --tmpfs /tmp crb-sandbox-python:ci "
+            "python -m pytest --version",
+            # the Python builder image answers with the test tool its tool check starts
+            "docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-python:ci "
             "python -m pytest --version",
         )
     ),

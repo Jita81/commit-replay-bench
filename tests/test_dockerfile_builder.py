@@ -12,14 +12,20 @@ Navigation
 ----------
 What it is:   The check that the builder stage switches to root before it installs anything and
               still ends non-root, and that CI lints the builder Dockerfile and builds and runs
-              its Go variant on the Go sandbox image the same job just built.
+              every variant the deploy docs declare (Go, Python, Node) on the sandbox image of
+              its language the same job just built — the Python one starting
+              ``python -m pytest --version``, since the builder runs the test command it is
+              handed and the adapter refuses an image that lacks the tool.
 What it does: Reads ``deploy/Dockerfile.builder`` stage by stage: in the ``builder`` stage the
               first ``USER`` is root and comes before the first ``RUN``, and the last ``USER``
               is ``65534:65534``. Reads ``.github/workflows/ci.yml``'s ``sandbox-images`` job:
               a hadolint step on the builder Dockerfile at the pin the sandbox Dockerfiles use;
               after the Go sandbox build, a step that builds the builder on
               ``crb-sandbox-go:ci`` and runs it, asserting uid 65534 and the CLI version the
-              Dockerfile pins.
+              Dockerfile pins. The ratchet reads every ``crb-builder-<lang>:local`` tag in
+              ``deploy/README.md`` and the Dockerfile header and requires, per language, a CI
+              step that builds ``crb-builder-<lang>:ci`` on ``crb-sandbox-<lang>:ci`` and runs
+              it as uid 65534 with no network and that language's tool smoke.
 How:          ``stage_instructions(text, stage)`` → ``[(instruction, argument)]`` with line
               continuations joined; ``ci.yml`` is parsed with PyYAML (a dev dependency); no
               docker command runs here (the CI step is the build).
@@ -44,10 +50,19 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 BUILDER = ROOT / "deploy" / "Dockerfile.builder"
 GO_SANDBOX = ROOT / "deploy" / "sandbox" / "Dockerfile.go"
+README = ROOT / "deploy" / "README.md"
 CI = ROOT / ".github" / "workflows" / "ci.yml"
 
 _FROM = re.compile(r"^FROM\s+\S+(?:\s+AS\s+(\S+))?\s*$", re.IGNORECASE)
 _ROOT_USERS = {"root", "0", "0:0", "root:root"}
+_VARIANT = re.compile(r"crb-builder-([a-z0-9]+):local")
+_NO_NET = "docker run --rm --network=none --read-only --tmpfs /tmp"
+# the command each language's builder must start: the tool its runner's test command needs
+TOOL_SMOKE = {
+    "python": "python -m pytest --version",
+    "go": "go version",
+    "node": "node --version",
+}
 
 
 def instructions(text: str) -> list[tuple[str, str]]:
@@ -99,6 +114,42 @@ def _go_sandbox_build_index(steps: list[dict[str, Any]]) -> int:
         ):
             return i
     raise AssertionError("the sandbox-images job no longer builds crb-sandbox-go:ci")
+
+
+def _sandbox_build_index(steps: list[dict[str, Any]], lang: str) -> int:
+    for i, step in enumerate(steps):
+        with_ = step.get("with") or {}
+        if with_.get("tags") == f"crb-sandbox-{lang}:ci":
+            return i
+    raise AssertionError(f"the sandbox-images job no longer builds crb-sandbox-{lang}:ci")
+
+
+def _builder_step(steps: list[dict[str, Any]], lang: str) -> tuple[int, str]:
+    """The step that builds ``crb-builder-<lang>:ci``, as ``(index, run with spaces folded)``."""
+    for i, step in enumerate(steps):
+        run = " ".join(str(step.get("run", "")).split())
+        if "-f deploy/Dockerfile.builder" in run and f"-t crb-builder-{lang}:ci" in run:
+            return i, run
+    raise AssertionError(f"no sandbox-images step builds crb-builder-{lang}:ci")
+
+
+def declared_variants(*texts: str) -> set[str]:
+    """The languages of every ``crb-builder-<lang>:local`` the deploy docs tell an operator to
+    build."""
+    return {m.group(1) for text in texts for m in _VARIANT.finditer(text)}
+
+
+def assert_variant_built_and_smoked(steps: list[dict[str, Any]], lang: str) -> None:
+    assert lang in TOOL_SMOKE, f"no tool smoke is known for a {lang} builder; add it"
+    at, run = _builder_step(steps, lang)
+    assert at > _sandbox_build_index(steps, lang), f"{lang}: built before its sandbox image"
+    assert f"--build-arg BASE_IMAGE=crb-sandbox-{lang}:ci" in run
+    assert "--builder default" in run and "--load" in run
+    assert "set -euo pipefail" in run
+    image = f"crb-builder-{lang}:ci"
+    assert f'test "$({_NO_NET} {image} id -u)" = "65534"' in run
+    assert f'{_NO_NET} {image} | grep -F "$want"' in run
+    assert f"{_NO_NET} {image} {TOOL_SMOKE[lang]}" in run
 
 
 def test_builder_stage_switches_to_root_before_apt_and_ends_as_65534() -> None:
@@ -154,6 +205,36 @@ def test_sandbox_images_builds_and_smokes_the_go_builder_on_the_go_sandbox() -> 
     assert 'grep -F "$want"' in run
     pinned = re.search(r"^ARG CLAUDE_CODE_VERSION=(\S+)$", BUILDER.read_text("utf-8"), re.M)
     assert pinned and pinned.group(1)
+
+
+def test_sandbox_images_builds_the_python_builder_and_starts_pytest_in_it() -> None:
+    """The builder runs the handed ``python -m pytest …``; CI proves the Python variant has it."""
+    steps = _sandbox_steps()
+    assert_variant_built_and_smoked(steps, "python")
+    # the variant is a build argument, never the Dockerfile's default base
+    assert re.search(
+        r"^ARG BASE_IMAGE=python:3\.12\.11-slim-bookworm$", BUILDER.read_text("utf-8"), re.M
+    )
+
+
+def test_every_builder_variant_the_docs_declare_is_built_and_smoked_in_ci() -> None:
+    declared = declared_variants(README.read_text("utf-8"), BUILDER.read_text("utf-8"))
+    assert {"python", "go"} <= declared, declared
+    steps = _sandbox_steps()
+    for lang in sorted(declared):
+        assert_variant_built_and_smoked(steps, lang)
+
+
+def test_the_ratchet_reads_declared_variants_and_fails_an_unbuilt_one() -> None:
+    """The ratchet cannot pass vacuously: a declared variant CI does not build fails it."""
+    assert declared_variants("build crb-builder-ruby:local and crb-builder:local") == {"ruby"}
+    steps = _sandbox_steps()
+    for lang in ("ruby", "rust"):
+        try:
+            assert_variant_built_and_smoked(steps, lang)
+        except AssertionError:
+            continue
+        raise AssertionError(f"an unbuilt {lang} variant passed the ratchet")
 
 
 def test_the_instruction_reader_joins_continuations_and_finds_a_stage() -> None:

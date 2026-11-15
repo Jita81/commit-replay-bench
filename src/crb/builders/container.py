@@ -113,6 +113,7 @@ from crb.builders.sidecar import (
 )
 from crb.core.deps import ROLE_BUILDER, BundleMount, DepsBinding, TaskDeps
 from crb.core.execution import (
+    TREE_COPY,
     CancelFn,
     DockerExecutor,
     DockerSettings,
@@ -561,11 +562,9 @@ class SealedCheckout:
             src = self.source.root / safe
             dst = self.root / safe
             if recorded == HARNESS_SYMLINK:
-                if not src.is_symlink():
+                target = _harness_link_target(src)
+                if target is None:
                     continue
-                target = os.readlink(src)
-                if not os.path.isabs(target):
-                    target = os.path.normpath(os.path.join(os.path.dirname(src), target))
                 if dst.exists() or dst.is_symlink():
                     continue
                 dst.parent.mkdir(parents=True, exist_ok=True)
@@ -1010,20 +1009,7 @@ class ContainerSession:
         itself (trusted worker code) talks to the model; the model's commands do not.
         The executor is remembered so :meth:`unconfirmed_kills` reports a command
         container its kill could not confirm, exactly as it reports a build stream."""
-        ex = DockerExecutor(
-            DockerSettings(
-                image=self.settings.image,
-                memory=self.settings.memory,
-                cpus=self.settings.cpus,
-                pids_limit=self.settings.pids_limit,
-                user=self.settings.user,
-                tmp_size=self.settings.tmp_size,
-                extra_ro_mounts={**self.settings.extra_ro_mounts, **self.ro_mounts},
-                docker_binary=self.settings.docker_binary,
-            ),
-            cancel=self.cancel,
-            verify_daemon=False,
-        )
+        ex = builder_executor(self.settings, ro_mounts=self.ro_mounts, cancel=self.cancel)
         self.tools_executors.append(ex)
         return ex
 
@@ -1037,6 +1023,62 @@ class ContainerSession:
 
 
 SessionFactory = Callable[..., ContainerSession]
+
+
+def _harness_link_target(src: Path) -> str | None:
+    """The absolute target of the harness symlink ``src``, or ``None`` when ``src`` is not a
+    symlink — the one reading both the sealed checkout's replication and
+    :func:`harness_link_mounts` use, so the two cannot disagree on a target."""
+    if not src.is_symlink():
+        return None
+    target = os.readlink(src)
+    if not os.path.isabs(target):
+        target = os.path.normpath(os.path.join(os.path.dirname(src), target))
+    return target
+
+
+def harness_link_mounts(ws: Workspace) -> dict[str, str]:
+    """The absolute targets of the harness's symlinks in ``ws`` (a shared ``node_modules``)
+    mounted at their own path — what :attr:`ContainerSession.ro_mounts` mounts for the
+    sealed checkout's copies of the same links, read before any checkout exists."""
+    targets: set[str] = set()
+    for rel, recorded in ws.harness_files.items():
+        safe = _safe_rel(rel)
+        if not safe or recorded != HARNESS_SYMLINK:
+            continue
+        target = _harness_link_target(ws.root / safe)
+        if target is not None:
+            targets.add(target)
+    return {t: t for t in sorted(targets)}
+
+
+def builder_executor(
+    settings: BuilderContainerSettings,
+    *,
+    ro_mounts: Mapping[str, str] | None = None,
+    cancel: CancelFn | None = None,
+    tree: str = TREE_COPY,
+) -> DockerExecutor:
+    """A command executor in the BUILDER's image under its limits and user, with
+    ``--network=none``: the tool loop's (:meth:`ContainerSession.tools_executor`) and the
+    builder-side tool check's (src/crb/builders/toolcheck.py), so both run where the
+    builder runs, never in the grader's image. ``ro_mounts`` are added to the settings'
+    own; ``tree`` is how the command sees the worktree (``DockerSettings.tree``)."""
+    return DockerExecutor(
+        DockerSettings(
+            image=settings.image,
+            memory=settings.memory,
+            cpus=settings.cpus,
+            pids_limit=settings.pids_limit,
+            user=settings.user,
+            tmp_size=settings.tmp_size,
+            extra_ro_mounts={**settings.extra_ro_mounts, **(ro_mounts or {})},
+            docker_binary=settings.docker_binary,
+            tree=tree,
+        ),
+        cancel=cancel,
+        verify_daemon=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1088,9 +1130,11 @@ __all__ = [
     "SessionFactory",
     "UnconfirmedKill",
     "builder_deps_view",
+    "builder_executor",
     "builder_run_args",
     "client_env",
     "container_env",
+    "harness_link_mounts",
     "is_secret_env_name",
     "probe_builder_container",
 ]

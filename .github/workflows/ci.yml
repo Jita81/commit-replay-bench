@@ -1000,6 +1000,31 @@ jobs:
           docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-go:ci | grep -F "$want"
           docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-go:ci git --version
           docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-go:ci go version
+      - name: Build the Python builder (deploy/Dockerfile.builder on the Python sandbox image) and run its test tool as uid 65534
+        # deploy/README.md §9.1's Python builder. The default base carries no pytest, so a sealed
+        # builder handed `python -m pytest` on a repository with no sealed set (a uv.lock with
+        # pytest only in a dev group) could not run it; the adapter's tool check refuses such an
+        # image before any model call, and this proves the documented variant passes it.
+        run: |
+          set -euo pipefail
+          docker buildx build --builder default --load -f deploy/Dockerfile.builder \
+            --build-arg BASE_IMAGE=crb-sandbox-python:ci -t crb-builder-python:ci .
+          want="$(sed -n 's/^ARG CLAUDE_CODE_VERSION=//p' deploy/Dockerfile.builder)"
+          test -n "$want"
+          test "$(docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-python:ci id -u)" = "65534"
+          docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-python:ci | grep -F "$want"
+          docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-python:ci python -m pytest --version
+      - name: Build the Node builder (deploy/Dockerfile.builder on the Node sandbox image) and run its runtime as uid 65534
+        # deploy/README.md §9.1's Node builder: the runtime the node runners' tool check starts.
+        run: |
+          set -euo pipefail
+          docker buildx build --builder default --load -f deploy/Dockerfile.builder \
+            --build-arg BASE_IMAGE=crb-sandbox-node:ci -t crb-builder-node:ci .
+          want="$(sed -n 's/^ARG CLAUDE_CODE_VERSION=//p' deploy/Dockerfile.builder)"
+          test -n "$want"
+          test "$(docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-node:ci id -u)" = "65534"
+          docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-node:ci | grep -F "$want"
+          docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-node:ci node --version
       - name: Image facts — default user, size, the toolchain answers under read-only root + no network
         run: |
           set -euo pipefail

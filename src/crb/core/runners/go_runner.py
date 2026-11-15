@@ -88,6 +88,10 @@ class GoRunner(BaseRunner):
         """``go version`` — the exact toolchain (``go1.26.8``), part of the posture."""
         return (self._go(executor), "version")
 
+    def tool_check(self, argv: Sequence[str]) -> tuple[str, tuple[str, ...]] | None:
+        """``<go> version``: the handed command's go toolchain starts (offline)."""
+        return ("go", (argv[0], "version")) if argv else None
+
     def declared_tools(self, executor: Executor, root: Path | None = None) -> tuple[ToolSpec, ...]:
         """What a Go test may run by name on the host (ADR-0048): the ``go`` the command
         runs, ``gofmt``, ``git`` and the POSIX basics the sealed image carries — plus the C

@@ -50,6 +50,7 @@ from crb.server.reaper import ContainerReaper
 from crb.store.jobs import STATUS_CANCELLED
 from crb.store.models import WorkerRow
 from fixtures import pyrepo as pr
+from fixtures.tool_check import passing_check
 from test_worker import FakeBuilder, Harness, _seed_qualified
 
 
@@ -135,7 +136,9 @@ def sealed_unconfirmed(
     real = worker_mod.build_fn_for
 
     def with_double(*a: Any, **kw: Any) -> Any:
-        return real(*a, **{**kw, "session_factory": UnconfirmedSession})
+        # the session is doubled, so there is no builder image to run the tool check in
+        doubled = {"session_factory": UnconfirmedSession, "tool_check_executor": passing_check}
+        return real(*a, **{**kw, **doubled})
 
     monkeypatch.setattr(worker_mod, "build_fn_for", with_double)
 

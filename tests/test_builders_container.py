@@ -104,6 +104,7 @@ from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.workspace import HARNESS_SYMLINK, Workspace, sha256_bytes
 from fixtures import pyrepo as pr
 from fixtures.posture import witnessed_context_for
+from fixtures.tool_check import passing_check
 
 TESTS_DIR = Path(__file__).resolve().parent
 #: A named non-root uid:gid: the settings under test never depend on who runs the suite.
@@ -1380,6 +1381,7 @@ def test_adapter_sealed_path_grades_clean_on_the_real_worktree(
         on_event=lambda a, p: events.append((a, dict(p))),
         container=BuilderContainerSettings(image="crb-builder:test", user=NON_ROOT),
         session_factory=FakeSession,
+        tool_check_executor=passing_check,
     )
     summary = run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
     assert (summary.tasks, summary.clean, summary.rows) == (1, 1, 1)
@@ -1410,6 +1412,7 @@ def test_adapter_sealed_path_fails_closed(
         config=pyrepo.config,
         container=BuilderContainerSettings(image="crb-builder:test", user=NON_ROOT),
         session_factory=FakeSession,
+        tool_check_executor=passing_check,
     )
     summary = run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
     # the orchestrator stops the run (ADR-0005) — no attempt, no verdict of either kind
@@ -1439,6 +1442,7 @@ def test_adapter_unsealable_builder_keeps_the_real_worktree(
         config=pyrepo.config,
         container=BuilderContainerSettings(image="crb-builder:test", user=NON_ROOT),
         session_factory=FakeSession,
+        tool_check_executor=passing_check,
     )
     run(spec, pyrepo.repo, [pyrepo.feat_task()], fn)
     (seen,) = SealedFakeBuilder.seen

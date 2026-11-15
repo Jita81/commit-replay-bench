@@ -65,7 +65,8 @@ Works with:   src/crb/builders/adapter.py (turns a ``Builder`` into the core's `
               tests/fixtures/shell_corpus.txt (the honest-shell corpus the guard must pass)
 Tested by:    tests/test_builders_base.py, tests/test_builders_guard_corpus.py,
               tests/test_ledger_classification.py (``model_error_text``),
-              tests/test_nested_model_call.py (the nested-model-call tripwire)
+              tests/test_nested_model_call.py (the nested-model-call tripwire),
+              tests/test_builders_rules_consistency.py (the rules name what is enforced)
 Touch when:   never for a new repository; a guard false positive on honest shell is fixed
               here AND added as a corpus line (tests/fixtures/shell_corpus.txt) first; a new
               stop reason or outcome field changes ``BuilderRef`` in src/crb/core/evidence.py
@@ -110,14 +111,30 @@ def emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
 # Rules (the census wf_wave.js contract, adapted)
 # ---------------------------------------------------------------------------
 
-#: The protocol every builder is told. Violations are recorded and disqualify.
-DEFAULT_RULES = """RULES (violations disqualify the run):
-- NEVER modify, delete, or add any test files. Source files only.
+#: The protocol every builder is told. Each sentence is true of enforcement (held by
+#: tests/test_builders_rules_consistency.py): a changed test file is tampering and the grader
+#: disqualifies the run; a history, network or unchecked command is a protocol violation, the
+#: adapter discards every source edit and the row fails (failure kind ``protocol``). A
+#: builder-specific idiom (claude_code's ``system_rules``) is not shared here.
+DEFAULT_RULES = """RULES:
+- NEVER modify, delete, or add any test files. Source files only. Changing a test file is tampering: the run is DISQUALIFIED.
 - Work only inside the worktree you were given.
-- Do not use git to look at other commits or history to recover the real change: no git log, git show, git blame, git reflog, git bisect, git checkout/switch of another revision, no git diff against another revision. No git stash in any form: the stash stack is shared with other trials — to run the tests without your edits use `git diff > /tmp/mine.patch; git checkout -- <paths>` and `git apply /tmp/mine.patch` after.
-- NEVER consult external sources for this change: no fetching the upstream repository, no package-registry downloads, no web lookups of the project's history or PRs. Solving by finding the real commit's diff anywhere is a DISQUALIFYING protocol violation. Solve from the local code (and, when they are present, the failing tests) only.
+- Do not use git to look at other commits or history to recover the real change: no git log, git show, git blame, git reflog, git bisect, git checkout/switch of another revision, no git diff against another revision. No git stash in any form: the stash stack is shared with other trials.
+- NEVER consult external sources for this change: no fetching the upstream repository, no package-registry downloads, no web lookups of the project's history or PRs. Solve only from the local code and what this task gives you (the failing tests when it names them, and any specification, playbook or facts it lists).
 - The test environment is ALREADY PROVISIONED. NEVER install or upgrade packages (no pip/uv/npm/yarn/pnpm install, go get, cargo add, mvn dependency:*; npx only for binaries already in node_modules/.bin): if the tests cannot import the package, run them EXACTLY with the test command you were given — it sets the interpreter and PYTHONPATH/NODE_PATH for this worktree.
+- Every command is checked before it runs. A history, stash, network or install command is a violation even when the tool refuses to run it. A command that cannot be parsed is a violation too: an unterminated quote (also inside an sh -c or env -S string), an unbalanced $( ), backtick or parenthesis, a here-document without a tag, substitutions nested too deep, a command name computed from a variable or substitution, or eval. Write plain, fully quoted commands that name each program directly.
+- On any such violation ALL your source edits are discarded and the run fails.
 - Keep the change minimal and idiomatic to the codebase; do not break neighbouring behaviour."""
+
+
+#: The one line a shell builder is told for "run the tests without my edits" (the stash
+#: refusal and claude_code's rules). It passes :class:`GitArchaeologyGuard` and matches no
+#: claude_code deny rule; ``HEAD`` covers staged files and the sighted overlay; new untracked
+#: files are not in the patch.
+STASH_FREE_IDIOM = (
+    "git diff HEAD -- <paths> > /tmp/mine.patch && git apply -R /tmp/mine.patch && <tests>; "
+    "git apply /tmp/mine.patch"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1329,9 +1346,17 @@ def _unsentinel(token: str) -> str:
 
 
 def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
+    """:func:`_hoist_with_cause` without the cause (``None`` when unbalanced)."""
+    flat, inners, _ = _hoist_with_cause(command)
+    return flat, inners
+
+
+def _hoist_with_cause(command: str) -> tuple[str | None, list[str], str]:
     """Replace every ``$( … )``, backtick and ``( … )`` sub-shell with a numbered
     placeholder ``__SUBST_k__`` and return the inner commands for recursive
-    checking. ``None`` when unbalanced.
+    checking. ``None`` when unbalanced, with the cause (``unterminated quote``,
+    ``unmatched backtick`` or ``unbalanced substitution``) as the third item so the
+    refusal names it.
 
     Quoting is honoured the way ``sh`` does: inside single quotes nothing is special;
     inside double quotes only ``$( … )`` and backticks open a substitution, a bare
@@ -1376,7 +1401,7 @@ def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
         if ch == "`":
             j = command.find("`", i + 1)
             if j < 0:
-                return None, inners
+                return None, inners, "unmatched backtick"
             inners.append(command[i + 1 : j])
             out.append(f"__SUBST_{len(inners) - 1}__")
             i = j + 1
@@ -1386,7 +1411,7 @@ def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
             start = i + 2 if is_dollar else i + 1
             end = _matching_paren(command, start)
             if end < 0:
-                return None, inners
+                return None, inners, "unbalanced substitution"
             inners.append(command[start:end])
             kind = "SUBST" if is_dollar else "GROUP"  # a group is not a computed name
             out.append(f"__{kind}_{len(inners) - 1}__")
@@ -1395,8 +1420,8 @@ def _hoist_substitutions(command: str) -> tuple[str | None, list[str]]:
         out.append(ch)
         i += 1
     if quote:
-        return None, inners
-    return "".join(out), inners
+        return None, inners, "unterminated quote"
+    return "".join(out), inners, ""
 
 
 def _matching_paren(command: str, start: int) -> int:
@@ -2024,9 +2049,12 @@ class GitArchaeologyGuard:
     cross-trial contamination and destruction of another trial's work, not just
     "the agent's own loss", so no ``push``/``list``/``show``/``apply``/``pop``/
     ``drop`` subset is safe. The honest goal ("run the tests without my edits") has
-    a working-tree-only idiom that reaches no shared state and is allowed:
-    ``git diff > /tmp/mine.patch; git checkout -- <paths>; <tests>; git apply
-    /tmp/mine.patch`` (or copy the file). The refusal message says so.
+    a working-tree-only idiom that reaches no shared state, passes this guard and
+    matches no Claude Code deny rule (run from the worktree root, never ``git -C``;
+    ``HEAD`` so staged files and the sighted test overlay are handled; new untracked
+    files are not in the patch):
+    ``git diff HEAD -- <paths> > /tmp/mine.patch && git apply -R /tmp/mine.patch &&
+    <tests>; git apply /tmp/mine.patch``. The refusal message says so.
 
     **Policy: ``npx``.** Refused wholesale before (three honest koa builds).
     ``npx <name>`` never fetches when ``node_modules/.bin/<name>`` exists, so with a
@@ -2136,9 +2164,9 @@ class GitArchaeologyGuard:
             if found is None:
                 return "archaeology: could not parse the command safely (unbalanced substitution)"
             body_inners += found
-        flat, inners = _hoist_substitutions(rest)
+        flat, inners, cause = _hoist_with_cause(rest)
         if flat is None:
-            return "archaeology: could not parse the command safely (unbalanced substitution)"
+            return f"archaeology: could not parse the command safely ({cause})"
         for inner in body_inners:
             r = self.check_shell(inner, cwd=here, _depth=_depth + 1)
             if r:
@@ -2150,8 +2178,9 @@ class GitArchaeologyGuard:
         lex.whitespace_split = True
         try:
             tokens = list(lex)
-        except ValueError:
-            return "archaeology: could not parse the command safely"
+        except ValueError as exc:
+            cause = "trailing backslash" if "escaped" in str(exc) else "unterminated quote"
+            return f"archaeology: could not parse the command safely ({cause})"
 
         segments: list[list[str]] = [[]]
         piped: list[bool] = [False]
@@ -2371,9 +2400,9 @@ class GitArchaeologyGuard:
         if sub == "stash":
             return (
                 "archaeology: 'git stash' is not allowed — the stash stack is shared with every "
-                "other worktree of this clone (other trials, the operator). To test without your "
-                "edits: git diff > /tmp/mine.patch; git checkout -- <paths>; run the tests; "
-                "git apply /tmp/mine.patch"
+                "other worktree of this clone (other trials, the operator). From a shell, to "
+                "test without your edits run this one line from the worktree root: "
+                f"`{STASH_FREE_IDIOM}`"
             )
         if sub not in GIT_ALLOWED:
             return f"archaeology: 'git {sub}' is not allowed (no history/other revisions)"
@@ -2784,6 +2813,7 @@ __all__ = [
     "MODEL_CREDENTIAL_ENV",
     "NESTED_MODEL_CALL",
     "NETWORK_TOOLS",
+    "STASH_FREE_IDIOM",
     "STOP_DONE",
     "STOP_MAX_COST",
     "STOP_MAX_TOKENS",

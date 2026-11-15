@@ -5,6 +5,8 @@
 **Apparatus impact:** none. APPARATUS_VERSION stays 2.5. The arm grammar is unchanged, every new
 stamp is provenance (added to PROVENANCE_LABELS, never to the arm), and no existing row, arm or
 reader result changes.
+(Note, 2026-11-15: that was true when this change merged. ADR-0051 moves the stamp to 2.6, so a
+context-set run is now stamped 2.6, and a context-set pair is read within one apparatus.)
 
 ## Context
 
