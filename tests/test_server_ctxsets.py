@@ -46,7 +46,7 @@ from crb.server.routes.ctxsets import (
 )
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Run
-from fixtures.ctx_rows import ctx_doc, side
+from fixtures.ctx_rows import ctx_doc, req_doc, side
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, make_env
 
 SECRET = "The handler reads the flag before parsing; the fix moves the read."
@@ -250,6 +250,19 @@ class TestRead:
         assert r.status_code == 200
         assert r.json()["name"] == name and r.json()["tasks"] == 4
         assert SECRET not in r.text and "entries" not in r.json()
+
+    def test_a_stated_set_shows_its_v2_metadata_and_never_a_statement(self, env: Env) -> None:
+        statement = "The command keeps the help output of every flag unchanged"
+        doc = req_doc(tasks=_tasks(env), repo=ALPHA, statement=statement)
+        cset = ctxset.parse(doc)
+        r = _put(env, doc)
+        assert r.status_code == 201, r.text
+        d = env.get(f"/ctxsets/{cset.name}").json()
+        assert d["schema"] == ctxset.SCHEMA_V2 and d["stated"] is True
+        assert d["structure"] == "prose" and d["items_digest"] == cset.items_digest
+        assert isinstance(d["saw"], list)
+        assert statement not in env.get(f"/ctxsets/{cset.name}").text
+        assert "entries" not in d and "items" not in d
 
     def test_unknown_name_is_404(self, env: Env) -> None:
         r = env.get(f"/ctxsets/ctx.oracle.{'0' * 12}")
