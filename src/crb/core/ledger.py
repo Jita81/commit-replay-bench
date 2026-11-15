@@ -564,6 +564,11 @@ def _stated_violation(arm: str, labels: Mapping[str, str]) -> str:
         return f"ctx_prov {labels[LABEL_CTX_PROV]!r} is not a provenance count line"
     if not _stated.REQ_DRAFTER_RE.match(labels[LABEL_CTX_REQ_DRAFTER]):
         return "ctx_req_drafter is not human:<id> or model:<id>@<sha256> (ADR-0052)"
+    refused = labels.get(LABEL_CTX_REQ_REFUSED)
+    if refused is not None:
+        why = refused.split(",")
+        if why != sorted(set(why)) or not set(why) <= set(_stated.REASONS):
+            return f"ctx_req_refused {refused!r} is not a sorted set of req_guard reasons"
     return ""
 
 

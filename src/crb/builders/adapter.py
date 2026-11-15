@@ -1672,10 +1672,12 @@ def build_fn_for(
             stamps.update(
                 {k: v for k, v in stamps_of[task.task_id].items() if k not in attempt.labels}
             )
-            if LABEL_CTX_TURNS not in attempt.labels:
-                # the builder's turn count on every ctx row (ADR-0052 item 9): the cost
-                # block of a compare reads it beside tokens and cost; not provenance
-                stamps[LABEL_CTX_TURNS] = str(max(0, attempt.builder.turns))
+            if LABEL_CTX_TURNS not in attempt.labels and attempt.builder.turns > 0:
+                # the builder's turn count on a ctx row whose builder ran (ADR-0052 item 2):
+                # the cost block of a compare reads it beside tokens and cost; not
+                # provenance. A refusal before the builder ran records none, so it counts
+                # as missing, never as a zero that pulls the median down
+                stamps[LABEL_CTX_TURNS] = str(attempt.builder.turns)
         if LABEL_CONTEXT_ARM not in attempt.labels:
             # a refusal before compose is still this run's attempt: the arm's row, never
             # an unstamped one a per-arm reading drops (P-295)

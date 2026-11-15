@@ -49,6 +49,7 @@ def _run(
     provenance: str = st.PROV_NOWHERE,
     discloses: list[str] | None = None,
     control: bool = False,
+    behaviour: str = "noop",
 ) -> Any:
     task = pyrepo.feat_task()
     doc = req_doc(tasks=[task.task_id], statement=statement, provenance=provenance)
@@ -70,7 +71,7 @@ def _run(
         )
     }
     fn = adapter.build_fn_for(
-        _ladder(),
+        _ladder(behaviour),
         budget=Budget(),
         context_set="" if control else cset.name,
         ctx_entries=None if control else entries,
@@ -147,3 +148,16 @@ def test_a_control_row_carries_turns_and_no_stated_stamp(
     assert labels[ca.LABEL_CTX_TURNS] == str(Budget().max_turns)
     assert ca.LABEL_CTX_STATED not in labels
     assert ctx_label_violation("A0", labels) == ""
+
+
+@pytest.mark.parametrize("control", [False, True])
+def test_a_builder_that_never_ran_records_no_turn_count(
+    pyrepo: pr.PyRepo,
+    tmp_path: Path,
+    harness: dict[str, Any],  # noqa: F811
+    control: bool,
+) -> None:
+    """A crashed builder's row counts as missing turns, never as a zero (ADR-0052 item 2)."""
+    attempt, _ = _run(pyrepo, tmp_path, harness, statement=SAFE, control=control, behaviour="raise")
+    assert ca.LABEL_CTX_TURNS not in attempt.labels
+    assert ctx_label_violation(attempt.labels[LABEL_CONTEXT_ARM], attempt.labels) == ""

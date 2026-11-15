@@ -95,6 +95,14 @@ def test_no_other_row_carries_a_stated_stamp(key: str) -> None:
     assert "without a ctx_set" in lg.ctx_label_violation(ca.BASE_A0, {key: value})
 
 
+@pytest.mark.parametrize(
+    "refused", ["req_bogus", "req_test_span,req_length", "req_length,req_length", "", "req_length,"]
+)
+def test_a_req_row_whose_refusal_reasons_are_not_guard_reasons_is_refused(refused: str) -> None:
+    labels = {**_stamps(REQ), ca.LABEL_CTX_REQ_REFUSED: refused}
+    assert "ctx_req_refused" in lg.ctx_label_violation(REQ.arm, labels)
+
+
 def test_ctx_turns_is_an_optional_count_on_a_context_set_run_row_only() -> None:
     for arm, labels in (
         (REQ.arm, _stamps(REQ)),
