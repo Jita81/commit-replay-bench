@@ -4,7 +4,7 @@
 **Date:** 2026-11-14
 **Apparatus impact:** bumps `APPARATUS_VERSION` to **2.6**. The builder's input changes: the
 rules text, the refusal messages it reads mid-run, and an attempt refused before any model call
-when the handed test command cannot run in the builder's own environment. Nothing that grades
+when the test tool does not start in the builder's own environment. Nothing that grades
 moves: the belt set stays `v5`, the failure rule is unchanged (its golden hash at 2.6 equals
 2.4's), the deny rules and every guard accept or refuse decision are unchanged, the mutation
 scorer stays `mutation.v2`, and there is no migration and no schema change. Every posture id
@@ -85,7 +85,9 @@ and outside the model's n, as every `runner tool missing` row already does.
 **Easier.** A builder that follows its rules issues no refused command [hypothesis: the rules
 are derived from what the guard and the deny rules enforce, but no 2.6 run has measured it],
 and a builder whose test tool does not start is not paid for. A 2.6 row is separated from a
-2.5 row on the apparatus axis every reader already reads; no reader changes.
+2.5 row on the apparatus axis. A reader that pools versions still combines them: a read with
+`apparatus=all`, and the flat cost and latency means under it (P-134, G-990). This change
+does not alter those readers.
 
 **Harder.**
 
