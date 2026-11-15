@@ -17,8 +17,8 @@ ADRs:         docs/adr/0052-stated-requirement-arms.md, docs/adr/0050-context-se
 Works with:   src/crb/core/stated.py, src/crb/core/ctxset.py, src/crb/core/context_arm.py
               (the modules under test), tests/test_ctxset.py (the v1 fixtures pinned here)
 Tested by:    this file
-Touch when:   a kind, provenance value, structure, renderer, limit or the v2 schema changes
-              (an ADR amending ADR-0052 first).
+Touch when:   never for a new repository; a kind, provenance value, structure, renderer,
+              limit or the v2 schema changes (an ADR amending ADR-0052 first).
 """
 
 from __future__ import annotations

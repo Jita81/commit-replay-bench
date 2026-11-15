@@ -11,7 +11,7 @@ What it does: Builds a v2 set over the pyrepo ``feat: add subtract`` commit, run
 How:          ``ctxset.parse`` of ``fixtures.ctx_rows.req_doc``; the ``ContextEntry`` built as
               ``crb.server.worker._ctx_plan`` builds it; ``adapter.build_fn_for``.
 Layer:        tests — docs/ARCHITECTURE.md#45-c4-level-3--crbbuilders
-ADRs:         docs/adr/0052-stated-requirements-source.md, docs/adr/0050-context-set-arms.md
+ADRs:         docs/adr/0052-stated-requirement-arms.md, docs/adr/0050-context-set-arms.md
 Works with:   src/crb/builders/adapter.py (under test), src/crb/builders/brief.py
               (``req_guard``, ``gold_view``), tests/test_adapter_ctx.py (the fake builder)
 Tested by:    tests/test_adapter_req.py

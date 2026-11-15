@@ -11,7 +11,7 @@ What it does: Pins that a guard-clean stated entry lints ``ok`` (exit 0), that a
 How:          The pyrepo ``feat: add subtract`` commit (tests/fixtures/pyrepo.py) as the clone;
               documents from tests/fixtures/ctx_rows.py; ``crb.cli.main.main``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0052-stated-requirements-source.md
+ADRs:         docs/adr/0052-stated-requirement-arms.md
 Works with:   src/crb/cli/commands/ctxset.py (under test), src/crb/builders/brief.py
               (``req_guard``), tests/test_cli_ctxset.py
 Tested by:    tests/test_cli_ctxset_lint.py

@@ -22,7 +22,7 @@ How:          :class:`crb.mcp.client.CrbApi` (login, CSRF, the error envelope), 
               as-is.
 Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0050-context-set-arms.md,
-              docs/adr/0052-stated-requirements-source.md
+              docs/adr/0052-stated-requirement-arms.md
 Works with:   src/crb/server/routes/ctxsets.py (the routes), src/crb/mcp/client.py (the
               transport), src/crb/cli/main.py (the registration), docs/API.md (the
               ``/ctxsets`` routes and the refusal codes this command prints),

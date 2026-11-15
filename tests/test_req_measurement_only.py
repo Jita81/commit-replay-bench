@@ -9,7 +9,7 @@ What it does: Pins that a req arm is measurement-only, that the value readers, t
               refuse its rows while the control's plain ``A0`` rows still count.
 How:          Rows from tests/fixtures/ctx_rows.py (``req_set``, ``side``).
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0052-stated-requirements-source.md, docs/adr/0050-context-set-arms.md
+ADRs:         docs/adr/0052-stated-requirement-arms.md, docs/adr/0050-context-set-arms.md
 Works with:   src/crb/core/context_arm.py (``measurement_only``), src/crb/core/value.py,
               src/crb/core/capability.py, src/crb/server/routes/capability.py,
               src/crb/core/learn.py

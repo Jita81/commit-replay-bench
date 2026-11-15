@@ -31,7 +31,7 @@ How:          ``ctxset.parse`` → ``verify_coverage`` (+ ``verify_placebo``) �
               per-request temporary file, hard-linked into place) → ``append_system_event``
               → commit; ``rows_of_runs`` → ``ctx_pair``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0052-stated-requirements-source.md
+ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0052-stated-requirement-arms.md
 Works with:   src/crb/core/ctxset.py (the record and its verifiers), src/crb/core/ctx_compare.py
               (the paired reader), src/crb/store/ledger.py (``rows_of_runs``),
               src/crb/cli/commands/ctxset.py (the CLI over these routes), docs/API.md (the

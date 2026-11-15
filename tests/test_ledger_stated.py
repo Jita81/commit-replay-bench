@@ -10,7 +10,7 @@ What it does: Pins that a ``ctx.req*`` entries row carries every stated stamp, t
 How:          Labels from ``crb.core.ctxset.run_stamps`` on a parsed v2 set (the labels a run
               writes), hand-edited; rows written through the classification tests' ``_replay``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0052-stated-requirements-source.md, docs/adr/0050-context-set-arms.md
+ADRs:         docs/adr/0052-stated-requirement-arms.md, docs/adr/0050-context-set-arms.md
 Works with:   src/crb/core/ledger.py (under test), src/crb/core/ctxset.py (``run_stamps``),
               tests/fixtures/ctx_rows.py (``req_set``), tests/test_ledger_ctx.py
 Tested by:    tests/test_ledger_stated.py

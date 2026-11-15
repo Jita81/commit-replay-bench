@@ -17,7 +17,8 @@ ADRs:         docs/adr/0052-stated-requirement-arms.md, docs/adr/0050-context-se
 Works with:   src/crb/builders/brief.py (the module under test), src/crb/core/stated.py (the
               items and renderers), tests/test_builders_brief.py (the ADR-0050 compose tests)
 Tested by:    this file
-Touch when:   a guard rule, a reason or the req amendment changes (an ADR first).
+Touch when:   never for a new repository; a guard rule, a reason or the req amendment
+              changes (an ADR first).
 """
 
 from __future__ import annotations

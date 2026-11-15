@@ -54,6 +54,8 @@ Add opt-in context-set arms. A run without `context_set` behaves exactly as befo
    playbook line. The guard is never relaxed. Its limit is recorded here: it removes only
    tokens absent from the whole parent tree, so an entry can still restate a fix in vocabulary
    the parent already has.
+   (Amended for the `req` and `req-placebo` sources only by ADR-0052: an entry carrying
+   stated items meets `req_guard` instead of `refuse_novel`. Every other source is unchanged.)
 4. **Admission (amends ADR-0026 items 1 and 10).**
    - A hindsight set is exempt from the retrospective time rule only, never from the leak guard
      or the bare-fact refusal. The rule that test values are not entries is waived for
@@ -65,6 +67,8 @@ Add opt-in context-set arms. A run without `context_set` behaves exactly as befo
    - A placebo follows the rule of the set it is matched to.
    - A refused entry is counted and the row is still written under its arm (intention to
      treat).
+   - (Amended for the `req` and `req-placebo` sources only by ADR-0052: a stated set is exempt
+     from the time rule and from `refuse_novel` for its item entries, and meets `req_guard`.)
 5. **Provenance stamps.** A ctx row carries `ctx_set`, `ctx_source`, `ctx_gap`,
    `ctx_gap_rule`, `ctx_delivered` and `ctx_chars`, plus `ctx_drafter` on a mechanical arm and
    `ctx_ceiling` = `1` on a hindsight arm. A control row keeps plain `A0` and carries

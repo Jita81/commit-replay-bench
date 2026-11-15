@@ -12,7 +12,7 @@ What it does: Pins the stated banner and provenance line, linkage by items diges
 How:          Rows from tests/fixtures/ctx_rows.py (``req_set``, ``side``), cost and time
               overridden per row.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0052-stated-requirements-source.md, docs/adr/0050-context-set-arms.md
+ADRs:         docs/adr/0052-stated-requirement-arms.md, docs/adr/0050-context-set-arms.md
 Works with:   src/crb/core/ctx_compare.py (under test), tests/test_ctx_compare.py
 Tested by:    tests/test_ctx_compare_stated.py
 Touch when:   never for a new repository; the stated linkage, banner or cost block change.

@@ -43,7 +43,7 @@ What it does: Pairs two runs' first attempts over a set's tasks, failing closed 
 How:          Pure functions over ``GradeRow`` values and parsed ``CtxSet`` values the caller
               passes in (it reads no store).
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0052-stated-requirements-source.md,
+ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0052-stated-requirement-arms.md,
               docs/adr/0025-routing-v2.md (first attempts)
 Works with:   src/crb/core/ctxset.py (the set record), src/crb/core/ledger.py
               (``first_attempts``), src/crb/core/reading.py (``mcnemar_p``),
