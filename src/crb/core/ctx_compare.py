@@ -243,10 +243,13 @@ def _median(xs: Sequence[float]) -> float | None:
 @dataclass(frozen=True)
 class SideCost:
     """What one side's first attempts spent: ``cost_usd``, tokens and ``ctx_turns`` (the
-    builder's turns; rows written before ADR-0052 carry none and count in ``turns_missing``)."""
+    builder's turns; rows written before ADR-0052 carry none and count in ``turns_missing``).
+    ``cost_usd`` holds KNOWN costs only (``GradeRow.cost_known``); an attempt whose cost is a
+    placeholder counts in ``cost_usd_missing``, never as a measured zero."""
 
     n: int = 0
     cost_usd: tuple[float, ...] = ()
+    cost_usd_missing: int = 0
     tokens_in: tuple[int, ...] = ()
     tokens_out: tuple[int, ...] = ()
     turns: tuple[int, ...] = ()
@@ -256,6 +259,7 @@ class SideCost:
             "n": self.n,
             "cost_usd_median": _median(self.cost_usd),
             "cost_usd_total": round(sum(self.cost_usd), 6),
+            "cost_usd_missing": self.cost_usd_missing,
             "tokens_in_median": _median(self.tokens_in),
             "tokens_in_total": sum(self.tokens_in),
             "tokens_out_median": _median(self.tokens_out),
@@ -268,12 +272,18 @@ class SideCost:
 
 @dataclass(frozen=True)
 class PairedCost:
-    """Treatment minus control ``cost_usd`` over the tasks observed on both sides."""
+    """Treatment minus control ``cost_usd`` over the tasks observed on both sides with a KNOWN
+    cost on both; a task observed on both sides but unpriced on either counts in ``n_missing``."""
 
     diffs: tuple[float, ...] = ()
+    n_missing: int = 0
 
     def to_dict(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"n": len(self.diffs), "median": _median(self.diffs)}
+        out: dict[str, Any] = {
+            "n": len(self.diffs),
+            "n_missing": self.n_missing,
+            "median": _median(self.diffs),
+        }
         if len(self.diffs) >= 2:
             q1, _, q3 = statistics.quantiles(self.diffs, n=4, method="inclusive")
             out["iqr"] = [round(q1, 6), round(q3, 6)]
@@ -514,7 +524,8 @@ def _cost(rows: Sequence[GradeRow]) -> SideCost:
     turns = [int(t) for fa in fas if (t := fa.row.labels.get(LABEL_CTX_TURNS, "")).isdecimal()]
     return SideCost(
         n=len(fas),
-        cost_usd=tuple(float(fa.row.cost_usd) for fa in fas),
+        cost_usd=tuple(float(fa.row.cost_usd) for fa in fas if fa.row.cost_known),
+        cost_usd_missing=sum(1 for fa in fas if not fa.row.cost_known),
         tokens_in=tuple(int(fa.row.tokens_in) for fa in fas),
         tokens_out=tuple(int(fa.row.tokens_out) for fa in fas),
         turns=tuple(turns),
@@ -524,9 +535,17 @@ def _cost(rows: Sequence[GradeRow]) -> SideCost:
 def _paired_cost(
     control: Sequence[GradeRow], treatment: Sequence[GradeRow], tasks: Sequence[str]
 ) -> PairedCost:
-    left = {fa.task_id: float(fa.row.cost_usd) for fa in first_attempts(control)}
-    right = {fa.task_id: float(fa.row.cost_usd) for fa in first_attempts(treatment)}
-    return PairedCost(tuple(right[t] - left[t] for t in tasks if t in left and t in right))
+    # ``None`` marks an observed attempt whose cost is unknown: it is never a measured zero.
+    def priced(rows: Sequence[GradeRow]) -> dict[str, float | None]:
+        return {
+            fa.task_id: float(fa.row.cost_usd) if fa.row.cost_known else None
+            for fa in first_attempts(rows)
+        }
+
+    left, right = priced(control), priced(treatment)
+    both = [t for t in tasks if t in left and t in right]
+    diffs = tuple(r - c for t in both if (c := left[t]) is not None and (r := right[t]) is not None)
+    return PairedCost(diffs, n_missing=len(both) - len(diffs))
 
 
 def _window(rows: Sequence[GradeRow]) -> Window:

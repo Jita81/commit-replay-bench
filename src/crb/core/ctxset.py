@@ -782,6 +782,8 @@ def run_stamps(ctxset: CtxSet, role: str, gaps: Mapping[str, str]) -> dict[str, 
     if role not in ROLES:
         raise ValueError(f"role {role!r} is not one of {ROLES}")
     out: dict[str, dict[str, str]] = {}
+    # The items digest hashes every task's items: once per call, not once per task.
+    items_digest = ctxset.items_digest if role != ROLE_CONTROL and ctxset.stated else ""
     for tid in ctxset.task_ids:
         gap = gaps.get(tid)
         if gap not in (GAP_NO, GAP_YES):
@@ -804,7 +806,7 @@ def run_stamps(ctxset: CtxSet, role: str, gaps: Mapping[str, str]) -> dict[str, 
             if ctxset.stated:
                 entry = ctxset.entry_for(tid)
                 stamps[_arms.LABEL_CTX_STATED] = "1"
-                stamps[_arms.LABEL_CTX_ITEMS] = ctxset.items_digest
+                stamps[_arms.LABEL_CTX_ITEMS] = items_digest
                 stamps[_arms.LABEL_CTX_STRUCTURE] = ctxset.structure
                 stamps[_arms.LABEL_CTX_AUTHOR_SAW] = ",".join(ctxset.saw)
                 stamps[_arms.LABEL_CTX_PROV] = _stated.prov_label(entry.items)

@@ -69,7 +69,10 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
    the entry, its items and a harness-side gold view (`gold_view`: the novel set, a lookup of
    the parent tree, the source and test post-images, their added lines, and the test paths).
    It runs at compose time on every attempt and fails closed. With no gold view the reason is
-   `req_no_gold`. A withheld entry is counted (intention to treat) and its reasons are
+   `req_no_gold`. A blob the commit or its parent holds that cannot be read gives no gold view;
+   only a path one side lacks, a binary blob or a submodule pointer reads as empty, and
+   `crb ctxset lint` stops with an error on such a blob. A withheld entry is counted (intention to
+   treat) and its reasons are
    stamped. The reasons are:
    - `req_render`: the text is not the structure's rendering of the items.
    - `req_length`: more than 12 items, more than 240 characters in a statement, or more than
@@ -80,26 +83,41 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
      parent. A whole statement or a phrase wrapped round a token therefore declares nothing.
    - `req_undeclared_novel`: a statement names a novel token that its item does not declare.
      Matching is case- and whitespace-insensitive, which is stricter than `names_novel`. Only
-     the text of a declared token is masked out, so a declared token does not cover a novel
-     token outside it.
+     the text of a declared token, as a whole token, is masked out, so a declared token does
+     not cover a novel token outside it or a longer token it is part of. The statement is
+     also read with each declared token masked as a plain substring, and a novel token named
+     on either reading counts, so masking never leaves fewer tokens named.
    - `req_provenance`: an item's declared provenance is not the most answer-side of the tokens
      it discloses or names. The ranking is nowhere < product < change_detail < tests_only, and
      a token in both the source and the tests counts as change_detail. Every lookup, parent
      included, is whole-word and case-sensitive, so a token that appears only inside a longer
-     word does not lower the provenance.
+     word does not lower the provenance. The check is made twice, once on the tokens named
+     on either reading and once on those named with the substring mask alone, and the item
+     is refused when either disagrees.
    - `req_test_name`: an identifier or literal on a held-out test's definition or title line
      (pytest, unittest, Go `Test*` and `t.Run`, Rust `#[test]` and `mod tests`, JS
      `it`/`test`/`describe`, JUnit `@Test` and `@DisplayName`, parametrize ids) that neither
      the source post-image nor the parent holds. The names a test file defines (helpers,
-     fixtures, constants) count as test names too.
+     fixtures, constants, and every name an assignment in a Python test file (`.py`, `.pyi`)
+     binds, such as `LIMIT = 10`, `A, B = 1, 2` or `self.LIMIT = 10`) count as test names
+     too. The assignment rule reads only Python test files, so a Go `x := f()` defines nothing.
    - `req_test_path`: a held-out test's path, file name or specific stem.
    - `req_test_span`: eight tokens in a row shared with the change's added test lines, read
      over the whole entry, so a run split across items is still found. The change's added
      source lines count too, except a signature item's header: from its start through the
      parenthesis that closes its parameter list and an optional return annotation. The entry's
      tokens are compared only where they belong to the change's own vocabulary, so prose words
-     between copied code tokens do not break a run.
-   - `req_signature`: a signature item that carries a body.
+     between copied code tokens do not break a run. A run still counts when copies of one
+     single token of the change's own vocabulary are inserted inside it, as long as its eight
+     tokens appear in order within sixteen. This is a bound: a run padded with two or more
+     distinct tokens of the change's vocabulary, or spread wider than sixteen tokens, is not
+     found.
+   - `req_signature`: a signature item that carries a body: a brace, `;`, `=>` or `return`
+     anywhere, or executable Python before its name or past its header (a call, `=`, `raise`,
+     `yield`, `await`, `lambda`, a spaced arithmetic operator, or a statement opening the
+     text). For this check a Go method's header (`func`, a receiver, one name, the parameter
+     list and one result type or parenthesised result list) is read whole; the source-span
+     rule still exempts only through the first closing parenthesis.
 
    The limits are fixed in `crb.core.stated`. Changing them needs a new ADR. A CLI lint
    (`crb ctxset lint FILE --clone DIR`) runs the same function against a local clone before a
@@ -138,8 +156,11 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
      result, and the text rendering prints both strata (`tests_only`, `no_tests_only`), an
      empty one as `n 0`.
    - Every pair also carries a descriptive cost block: per side, the median and total of
-     `cost_usd`, `tokens_in`, `tokens_out` and `ctx_turns` over first attempts, and the paired
-     per-task cost difference (median, inclusive IQR) with its n.
+     `cost_usd`, `tokens_in`, `tokens_out` and `ctx_turns` over first attempts (`cost_usd`
+     over known costs only), the count of first attempts with no known cost (`cost_usd_missing`,
+     never read as
+     zero), and the paired per-task cost difference (median, inclusive IQR) with its n and the
+     count of tasks unpriced on either side (`n_missing`).
    - Every pair carries both sides' time windows, and a `drift` flag when the sides ran more
      than seven days apart.
    - The structure question is read only from a head-to-head pair. Subtracting two lifts over

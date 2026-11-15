@@ -85,6 +85,28 @@ def test_lint_json_lists_each_entrys_reasons(
     assert tid == task.task_id and st.REASON_UNDECLARED_NOVEL in reasons
 
 
+def test_an_unreadable_changed_blob_is_an_error_not_an_empty_file(
+    pyrepo: pr.PyRepo,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review 4580636576: a changed blob the commit holds but the read fails on is never read
+    as empty (it would add no novel tokens); only a path the commit lacks reads empty."""
+    from crb.core.git import GitRepo
+
+    task = pyrepo.feat_task()
+    real = GitRepo.show_file
+
+    def failing(self: GitRepo, sha: str, path: str) -> str | None:
+        return None if sha == task.task_id and path == pr.SRC else real(self, sha, path)
+
+    monkeypatch.setattr(GitRepo, "show_file", failing)
+    code, out, err = _lint(req_doc(tasks=[task.task_id], statement=SAFE), pyrepo, tmp_path, capsys)
+    assert code == 2 and "not readable" in err
+    assert f"{task.task_id[:12]}  ok" not in out
+
+
 def test_a_parse_refusal_is_a_one_line_error(
     pyrepo: pr.PyRepo, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -136,3 +158,6 @@ def test_compare_prints_the_stated_banner_provenance_cost_and_drift() -> None:
     assert lines[0] == cc.STATED_BANNER and lines[1].startswith("provenance ")
     assert any(line.startswith("paired cost diff") for line in lines)
     assert lines[-1].startswith("drift:")
+    # a task unpriced on either side is shown as unpriced, never folded into n
+    d["cost"] = {"paired_cost_usd_diff": {"n": 0, "n_missing": 2, "median": None}}
+    assert "paired cost diff (usd) median None n 0 (unpriced 2)" in cmd.compare_lines(d)

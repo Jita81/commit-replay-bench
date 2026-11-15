@@ -170,8 +170,9 @@ def compare_lines(d: dict[str, Any]) -> list[str]:
         lines.extend(prov_strata_lines(d.get("prov_strata") or []))
     cost = d.get("cost") or {}
     paired = cost.get("paired_cost_usd_diff") or {}
-    if paired.get("n"):
-        lines.append(f"paired cost diff (usd) median {paired['median']} n {paired['n']}")
+    if paired.get("n") or paired.get("n_missing"):
+        unpriced = f" (unpriced {paired['n_missing']})" if paired.get("n_missing") else ""
+        lines.append(f"paired cost diff (usd) median {paired['median']} n {paired['n']}{unpriced}")
     if d.get("drift"):
         lines.append("drift: the two sides ran more than a week apart")
     return lines
@@ -192,7 +193,7 @@ def lint_set(doc: object, clone: Path) -> list[tuple[str, list[str]]]:
     """``(task_id, reasons)`` per entry of a stated set; reasons empty when the entry would
     reach a brief. A parse refusal is a :class:`CliError`; a non-stated set has no entries
     to guard and answers ``[]``."""
-    from crb.builders.brief import gold_view, novel_tokens, req_guard
+    from crb.builders.brief import gold_view, req_guard
     from crb.core import ctxset
     from crb.core.git import GitError, GitRepo
     from crb.core.spec import is_test_path
@@ -215,10 +216,13 @@ def lint_set(doc: object, clone: Path) -> list[tuple[str, list[str]]]:
             raise CliError(f"{entry.task_id[:12]} is not readable in {clone.name}: {err}") from err
         tests = [p for p in changed if is_test_path(p)]
         srcs = [p for p in changed if not is_test_path(p)]
-        novel = novel_tokens(repo, parent=parent, commit=entry.task_id, paths=changed)
+        # the view reads every changed path itself and computes the novel set from those
+        # reads; a blob the commit or its parent holds but cannot be read is no view at all
         gold = gold_view(
-            repo, parent=parent, commit=entry.task_id, src_paths=srcs, test_paths=tests, novel=novel
+            repo, parent=parent, commit=entry.task_id, src_paths=srcs, test_paths=tests
         )
+        if gold is None:
+            raise CliError(f"{entry.task_id[:12]}: a changed file is not readable in {clone.name}")
         out.append((entry.task_id, req_guard(entry.text, entry.items, cset.structure, gold)))
     return out
 

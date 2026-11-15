@@ -294,6 +294,43 @@ def _show(repo: GitRepo, rev: str, path: str) -> str:
         return ""
 
 
+class GoldReadError(Exception):
+    """A blob the commit holds could not be read: the gold view would be incomplete."""
+
+
+def _show_strict(repo: GitRepo, rev: str, path: str) -> str:
+    """``path``'s text at ``rev`` for :func:`gold_view`: empty only when ``rev`` positively
+    lacks the path (an added or deleted file), its blob is binary (a NUL byte, git's rule) or
+    it is a submodule pointer; any other failed read raises :class:`GoldReadError`."""
+    try:
+        text = repo.show_file(rev, path)
+    except UnicodeDecodeError as err:
+        try:
+            blob = repo.show_blob(rev, path)
+        except Exception as inner:
+            raise GoldReadError(f"{rev[:12]}:{path}") from inner
+        if blob is not None and b"\0" in blob:
+            return ""
+        raise GoldReadError(f"{rev[:12]}:{path} is not UTF-8 text") from err
+    except Exception as err:
+        raise GoldReadError(f"{rev[:12]}:{path}") from err
+    if text is not None:
+        return text
+    try:
+        listed = repo.run("--literal-pathspecs", "ls-tree", "-z", rev, "--", path)
+    except Exception as err:
+        raise GoldReadError(f"{rev[:12]}:{path}") from err
+    if not listed.ok:
+        raise GoldReadError(f"{rev[:12]}:{path}: {listed.stderr.strip()[:200]}")
+    for record in listed.stdout.split("\0"):
+        meta, _, name = record.partition("\t")
+        if name == path:
+            if meta.split(" ")[1:2] == ["commit"]:
+                return ""
+            raise GoldReadError(f"{rev[:12]}:{path} is in the tree but unreadable")
+    return ""
+
+
 #: More candidates than this and the parent-tree read is skipped: every candidate stays
 #: novel (the guard fails closed rather than build an unbounded command line).
 MAX_CANDIDATES = 2000
@@ -308,9 +345,18 @@ def novel_tokens(
     over the parent tree decides which candidates the parent already held."""
     candidates: set[str] = set()
     for path in paths:
-        after_i, after_l = _code_tokens(_show(repo, commit, path))
-        before_i, before_l = _code_tokens(_show(repo, parent, path))
-        candidates |= (after_i - before_i) | (after_l - before_l)
+        candidates |= _introduced(_show(repo, parent, path), _show(repo, commit, path))
+    return _absent_from_parent(repo, parent, candidates)
+
+
+def _introduced(before: str, after: str) -> set[str]:
+    after_i, after_l = _code_tokens(after)
+    before_i, before_l = _code_tokens(before)
+    return (after_i - before_i) | (after_l - before_l)
+
+
+def _absent_from_parent(repo: GitRepo, parent: str, candidates: set[str]) -> frozenset[str]:
+    """The ``candidates`` the WHOLE parent tree lacks as whole words (one ``git grep``)."""
     if not candidates:
         return frozenset()
     ordered = sorted(candidates)
@@ -360,7 +406,10 @@ class GoldView:
     it): the novel tokens, the source and test post-images, the lines the change added to
     each, the held-out test paths, and ``parent_has`` — whether the parent tree holds a
     token as a whole word, case-sensitively (``git grep -w -F``, the matcher
-    :func:`novel_tokens` uses; any failure answers ``False``, so a token stays answer-side)."""
+    :func:`novel_tokens` uses; any failure answers ``False``, so a token stays answer-side).
+    ``test_after_by_path`` holds each test path's own post-image (``(path, text)``), so a
+    language-specific rule reads only its own language's files; left empty, ``test_after``
+    stands for it when every test path is one language's."""
 
     novel: frozenset[str]
     parent_has: Callable[[str], bool]
@@ -369,6 +418,7 @@ class GoldView:
     src_added: tuple[str, ...] = ()
     test_added: tuple[str, ...] = ()
     test_paths: tuple[str, ...] = ()
+    test_after_by_path: tuple[tuple[str, str], ...] = ()
 
 
 def _added_lines(before: str, after: str) -> list[str]:
@@ -389,20 +439,29 @@ def gold_view(
     src_paths: Sequence[str],
     test_paths: Sequence[str],
     novel: frozenset[str] | None = None,
-) -> GoldView:
-    """The :class:`GoldView` of one task's change, read harness-side through ``repo``."""
+) -> GoldView | None:
+    """The :class:`GoldView` of one task's change, read harness-side through ``repo``; ``None``
+    (no gold view, so :func:`req_guard` withholds the entry) when a blob the commit or its
+    parent holds cannot be read — a path either side lacks reads empty. ``novel``, when
+    given, is completed from the view's own reads (the union), never trusted short."""
+    candidates: set[str] = set()
 
-    def read(paths: Sequence[str]) -> tuple[str, list[str]]:
+    def read(paths: Sequence[str]) -> tuple[list[str], list[str]]:
         afters: list[str] = []
         added: list[str] = []
         for path in paths:
-            after = _show(repo, commit, path)
+            after = _show_strict(repo, commit, path)
+            before = _show_strict(repo, parent, path)
             afters.append(after)
-            added.extend(_added_lines(_show(repo, parent, path), after))
-        return "\n".join(afters), added
+            added.extend(_added_lines(before, after))
+            candidates.update(_introduced(before, after))
+        return afters, added
 
-    src_after, src_added = read(src_paths)
-    test_after, test_added = read(test_paths)
+    try:
+        src_afters, src_added = read(src_paths)
+        test_afters, test_added = read(test_paths)
+    except GoldReadError:
+        return None
 
     def parent_has(token: str) -> bool:
         try:
@@ -410,16 +469,17 @@ def gold_view(
         except Exception:
             return False
 
-    if novel is None:
-        novel = novel_tokens(repo, parent=parent, commit=commit, paths=(*src_paths, *test_paths))
+    known = frozenset() if novel is None else novel
+    novel = known | _absent_from_parent(repo, parent, candidates - known)
     return GoldView(
         novel=novel,
         parent_has=parent_has,
-        src_after=src_after,
-        test_after=test_after,
+        src_after="\n".join(src_afters),
+        test_after="\n".join(test_afters),
         src_added=tuple(src_added),
         test_added=tuple(test_added),
         test_paths=tuple(test_paths),
+        test_after_by_path=tuple(zip(test_paths, test_afters, strict=True)),
     )
 
 
@@ -439,6 +499,27 @@ _DEF_NAME_RE = re.compile(
     r"(?:def|function\*?|func|fn|class|const|let|var)\s+(?:\([^)]*\)\s*)?"
     r"([A-Za-z_$][A-Za-z0-9_$]*)"
 )
+#: A Python assignment of a Python test file (``LIMIT = 10``, ``LIMIT: int = 10``, ``A, B = 1, 2``,
+#: ``self.LIMIT = 10``, each target of ``A = B = 1``): every name it binds is a held-out name
+#: too. ``==`` is a comparison, not a definition.
+_PY_TARGET = r"(?:(?:self|cls)\.)?[A-Za-z_][A-Za-z0-9_]*"
+_PY_ASSIGN_RE = re.compile(
+    rf"\s*\(?\s*((?:{_PY_TARGET}\s*,\s*)*{_PY_TARGET})\s*,?\s*\)?\s*(?::[^=\n]*)?=(?!=)"
+)
+_PY_RECEIVERS = frozenset({"self", "cls"})
+_PY_SUFFIXES = (".py", ".pyi")
+
+
+def _py_assigned(line: str) -> list[str]:
+    """Every name a Python assignment line binds (empty when it is not one)."""
+    names: list[str] = []
+    pos = 0
+    while m := _PY_ASSIGN_RE.match(line, pos):
+        names += [n for n in re.findall(r"[A-Za-z_]\w*", m.group(1)) if n not in _PY_RECEIVERS]
+        pos = m.end()
+    return names
+
+
 #: English words dropped from both sides before the copy rule compares spans.
 _SPAN_STOPWORDS: frozenset[str] = frozenset(
     [
@@ -482,9 +563,28 @@ _SPAN_STOPWORDS: frozenset[str] = frozenset(
 _SPAN_TOKEN_RE = re.compile(r"[a-z_][a-z0-9_]*|\d+")
 _SIGNATURE_BODY = ("{", "}", ";", "=>")
 _SIGNATURE_RETURN_RE = re.compile(r"\breturn\b")
+#: Executable Python outside a signature item's parameter list (before its name, or past its
+#: header): a call, an ``=`` (an assignment or a comparison), a
+#: ``raise``/``yield``/``await``/``lambda``, a spaced arithmetic operator (``r ** 2``,
+#: ``x * k``), a simple statement opening the text, or a compound statement's own ``if …:``
+#: header. Prose (``raises``) stays.
+_SIGNATURE_CODE_RE = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_.]*\(|=|\b(?:raise|yield|await|lambda)\b|\*\*|\s(?://|[*/%+])\s"
+    r"|^\s*(?:pass|assert|del|import|global|nonlocal|break|continue)\b"
+    r"|^\s*(?:if|elif|else|for|while|with|try|except|finally)\b[^:]*:"
+)
 #: What a signature header may carry after its closing parenthesis: one return annotation
 #: (``-> T``) and Python's closing ``:``. Anything after it is the item's remainder.
 _SIGNATURE_TAIL_RE = re.compile(r"(?:\s*->\s*[\w.\[\]|,]+)?\s*:?")
+#: A Go method: ``func`` and a receiver group, then only one plain name before the
+#: parameter list (``func (x *T) Name(``); anything else there means no receiver.
+_GO_METHOD_RE = re.compile(r"\s*func\s*\(")
+_GO_METHOD_NAME_RE = re.compile(r"\s*[A-Za-z_][A-Za-z0-9_]*\s*(?=\()")
+#: What a Go method header may carry after its parameter list: one result, a bare type
+#: (``bool``, ``*Context``, ``[]string``, ``map[string]int``) or one parenthesised list of
+#: types (``(int, error)``) — never a brace, ``=``, a call or an operator; a name or group
+#: an ``(`` follows is a call, so it stays in the remainder.
+_GO_RESULT_RE = re.compile(r"(?:\s*(?:\([\w.*\[\], ]*\)|[\w.*\[\]]+)(?![\w.*\[\]]*\s*\())?")
 
 
 def _norm(text: str) -> str:
@@ -502,11 +602,38 @@ def _grams(tokens: Sequence[str], n: int) -> set[tuple[str, ...]]:
 def _copied_span(text: str, gold_lines: Sequence[str], n: int) -> bool:
     """Whether ``text`` shares an ``n``-token run with ``gold_lines``, read on the gold's own
     token vocabulary: every word of ``text`` the gold lines do not hold is dropped first, so
-    filler words inserted between copied tokens never break the run."""
+    filler words inserted between copied tokens never break the run; and a run still counts
+    when every token inserted inside it is a copy of one and the same gold-vocabulary token,
+    the run's ``n`` tokens within ``2n`` consecutive tokens of what is left. Filler of two or
+    more distinct gold-vocabulary tokens, or a run spread wider than ``2n``, is not found."""
     gold_seq = _span_tokens("\n".join(gold_lines))
     vocab = set(gold_seq)
     seq = [t for t in _span_tokens(text) if t in vocab]
-    return bool(_grams(seq, n) & _grams(gold_seq, n))
+    if _grams(seq, n) & _grams(gold_seq, n):
+        return True
+    by_first: dict[str, list[tuple[str, ...]]] = {}
+    for gram in _grams(gold_seq, n):
+        by_first.setdefault(gram[0], []).append(gram)
+    for i, tok in enumerate(seq):
+        window = seq[i : i + 2 * n]
+        for gram in by_first.get(tok, ()):
+            if any(_gapped(window, gram, filler) for filler in set(window)):
+                return True
+    return False
+
+
+def _gapped(window: Sequence[str], gram: Sequence[str], filler: str) -> bool:
+    """Whether ``gram`` starts ``window`` and runs on in order with only copies of
+    ``filler`` skipped between its tokens (greedy: a token equal to the next gram token is
+    always taken, which never loses a match when only one token may be skipped)."""
+    j = 0
+    for g in gram:
+        while j < len(window) and window[j] != g and window[j] == filler:
+            j += 1
+        if j >= len(window) or window[j] != g:
+            return False
+        j += 1
+    return True
 
 
 def _names_ci(text: str, token: str) -> bool:
@@ -544,40 +671,72 @@ def _change_tokens(gold: GoldView) -> set[str]:
     return out
 
 
+def _python_test_text(gold: GoldView) -> str:
+    """The post-images of the Python test files (``.py``/``.pyi``) only: per path when the
+    view carries them, else ``test_after`` when every test path is a Python file."""
+    if gold.test_after_by_path:
+        return "\n".join(t for p, t in gold.test_after_by_path if p.endswith(_PY_SUFFIXES))
+    if gold.test_paths and all(p.endswith(_PY_SUFFIXES) for p in gold.test_paths):
+        return gold.test_after
+    return ""
+
+
 def _test_def_tokens(gold: GoldView) -> set[str]:
-    """The held-out tests' own names: every token of an added test-definition line, and the
-    name any definition line of a test post-image defines (a helper, fixture or constant)."""
+    """The held-out tests' own names: every token of an added test-definition line, the
+    name any definition line of a test post-image defines (a helper, fixture or constant),
+    and every name a Python assignment of a Python test file binds."""
     out: set[str] = set()
     for line in gold.test_added:
         if _TEST_DEF_RE.match(line):
             idents, literals = _code_tokens(line)
             out |= idents | literals
+    names: list[str] = []
     for line in gold.test_after.splitlines():
-        m = _DEF_NAME_RE.match(line)
-        if m and len(m.group(1)) >= NOVEL_MIN:
-            out.add(m.group(1))
+        if m := _DEF_NAME_RE.match(line):
+            names.append(m.group(1))
+    for line in _python_test_text(gold).splitlines():
+        if not _DEF_NAME_RE.match(line):
+            names += _py_assigned(line)
+    out.update(n for n in names if len(n) >= NOVEL_MIN)
     return out
 
 
-def _signature_split(statement: str) -> tuple[str, str]:
+def _close_paren(text: str, start: int) -> int:
+    """The index of the parenthesis closing the ``(`` at ``start``; ``-1`` when unbalanced."""
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _signature_split(statement: str, *, go_method: bool = False) -> tuple[str, str]:
     """``(header, remainder)`` of a signature item: the header runs through the parenthesis
     closing the first ``(``, plus one return annotation and a closing ``:``; with no
     balanced parenthesis there is no header. Only the header is exempt from the source-span
-    rule."""
+    rule, which reads it so. With ``go_method`` (the body check), a Go method's header runs
+    on through its parameter list and one result (:data:`_GO_RESULT_RE`) instead, so the
+    receiver group is not mistaken for the whole header."""
     start = statement.find("(")
     if start < 0:
         return "", statement
-    depth = 0
-    for i in range(start, len(statement)):
-        if statement[i] == "(":
-            depth += 1
-        elif statement[i] == ")":
-            depth -= 1
-            if depth == 0:
-                m = _SIGNATURE_TAIL_RE.match(statement, i + 1)
-                end = m.end() if m else i + 1
-                return statement[:end], statement[end:]
-    return "", statement
+    close = _close_paren(statement, start)
+    if close < 0:
+        return "", statement
+    if go_method and _GO_METHOD_RE.match(statement):
+        name = _GO_METHOD_NAME_RE.match(statement, close + 1)
+        params_close = _close_paren(statement, name.end()) if name else -1
+        if params_close >= 0:
+            m = _GO_RESULT_RE.match(statement, params_close + 1)
+            end = m.end() if m else params_close + 1
+            return statement[:end], statement[end:]
+    m = _SIGNATURE_TAIL_RE.match(statement, close + 1)
+    end = m.end() if m else close + 1
+    return statement[:end], statement[end:]
 
 
 #: Test-file stems too generic to say which held-out test a text means.
@@ -614,15 +773,20 @@ def req_guard(
     ``req_disclose``: a disclosed string is not exactly one token — a novel token, a code
     token of the change's post-images, or a whole word the parent holds.
     ``req_undeclared_novel``: an item's statement names a novel token its ``discloses`` does
-    not declare exactly (a novel word inside a declared token's own text is covered by it). ``req_provenance``: an item's declared provenance is not the most
+    not declare exactly (a novel word inside a declared token's own text is covered by it;
+    a declared token is masked only as a whole token, and a token named once it is masked as
+    a plain substring counts too). ``req_provenance``: an item's declared provenance is not the most
     answer-side of its tokens' (each novel token its statement names, and each disclosed
     token). ``req_test_name``: the text names a held-out test's own name (a token of an
     added test-definition line, or a name a test file defines) that neither the source
     post-image nor the parent holds. ``req_test_path``: the text names a held-out test's
     path, file name or stem. ``req_test_span``: the entry's statements, read together in
     order on the change's token vocabulary, share an eight-token run with the change's added
-    test lines (or, past a signature item's header, its added source lines).
-    ``req_signature``: a signature item carries a body."""
+    test lines (or, past a signature item's header, its added source lines), the run's tokens
+    within sixteen with only copies of one token inserted inside it. ``req_signature``: a
+    signature item carries a body (a brace, ``;``, ``=>``, ``return``, or executable Python
+    before its name or past its header; a Go method's header runs through its parameter
+    list and one result)."""
     if gold is None:
         return [_stated.REASON_NO_GOLD]
     reasons: set[str] = set()
@@ -648,23 +812,32 @@ def req_guard(
         declared = {_norm(d) for d in valid}
         # a declared token's own text is spent: a novel word inside it (``required`` in the
         # literal ``name required``) is covered; one anywhere else must be declared itself
+        # only as a whole token (``load`` never masks the inside of ``payload``); the text
+        # masked as a plain substring is read too (``t`` spent inside ``strip`` leaves ``s``),
+        # so the guard never names fewer tokens than that reading did
         rest = _norm(item.statement)
+        spent = rest
         for d in sorted(declared, key=len, reverse=True):
-            rest = rest.replace(d, " | ")
+            rest = re.sub(r"(?<!\w)" + re.escape(d) + r"(?!\w)", " | ", rest)
+            spent = spent.replace(d, " | ")
         named = [tok for tok in gold.novel if _names_ci(rest, tok)]
-        if any(_norm(tok) not in declared for tok in named):
+        named_spent = [tok for tok in gold.novel if _names_ci(spent, tok)]
+        if any(_norm(tok) not in declared for tok in (*named, *named_spent)):
             reasons.add(_stated.REASON_UNDECLARED_NOVEL)
         if item.discloses:
-            actual = max(
-                (_token_provenance(t, gold) for t in {*valid, *named}),
-                key=lambda p: _stated.PROV_RANK[p],
-                default=_stated.PROV_NOWHERE,
-            )
-            if actual != item.provenance:
-                reasons.add(_stated.REASON_PROVENANCE)
+            for toks in ({*valid, *named, *named_spent}, {*valid, *named_spent}):
+                actual = max(
+                    (_token_provenance(t, gold) for t in toks),
+                    key=lambda p: _stated.PROV_RANK[p],
+                    default=_stated.PROV_NOWHERE,
+                )
+                if actual != item.provenance:
+                    reasons.add(_stated.REASON_PROVENANCE)
         if item.kind == _stated.KIND_SIGNATURE and (
             any(c in item.statement for c in _SIGNATURE_BODY)
             or _SIGNATURE_RETURN_RE.search(item.statement)
+            or _SIGNATURE_CODE_RE.search(_signature_split(item.statement, go_method=True)[1])
+            or _SIGNATURE_CODE_RE.search(item.statement.split("(", 1)[0])
         ):
             reasons.add(_stated.REASON_SIGNATURE)
     for tok in _test_def_tokens(gold):

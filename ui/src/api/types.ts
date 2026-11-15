@@ -2944,3 +2944,31 @@ export interface ClassSetProposal {
   repos: string[]
   classes: Array<{ slug: string; title: string; definition: string; parent: string; rule: Partial<ClassRuleWire> }>
 }
+
+/** `POST /ctxsets` (plus `stored`) and `GET /ctxsets/{name}`: a stored context set's metadata, never an entry's text or a stated item's statement. */
+export interface CtxSetMeta {
+  name: string
+  digest: string
+  /** `crb.ctxset.v1` or `crb.ctxset.v2`. */
+  schema: string
+  arm: string
+  source: string
+  kind: string
+  /** True for a stated-requirement set (v2, ADR-0052). */
+  stated: boolean
+  /** `prose` or `checklist` on a stated set, `""` on a v1 set. */
+  structure: string
+  /** What the stated set's author saw (a sorted subset of diff, tests, ticket); `[]` on a v1 set. */
+  saw: string[]
+  /** The stated set's items digest, `""` on a v1 set. */
+  items_digest: string
+  repo: string
+  method: string
+  matched_to: string
+  drafter: string
+  hindsight: boolean
+  measurement_only: true
+  tasks: number
+  /** `POST /ctxsets` only: false when the same body was already stored. */
+  stored?: boolean
+}

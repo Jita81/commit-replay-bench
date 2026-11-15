@@ -29,7 +29,7 @@ from crb.core import ctx_compare as cc
 from crb.core import ctxset
 from crb.core import stated as st
 from crb.core.context_arm import LABEL_CTX_TURNS
-from crb.core.ledger import GradeRow
+from crb.core.ledger import LABEL_COST_KNOWN, GradeRow
 from fixtures.ctx_rows import TASKS, ctx_set, req_set, side
 
 T = TASKS
@@ -190,6 +190,27 @@ def test_the_cost_block_reads_cost_tokens_and_turns_per_side_and_paired() -> Non
     assert paired["n"] == 2 and paired["median"] == pytest.approx(0.2)
     # inclusive quartiles of (0.1, 0.3)
     assert paired["iqr"] == [pytest.approx(0.15), pytest.approx(0.25)]
+
+
+def test_an_unknown_cost_is_never_a_measured_zero() -> None:
+    unknown = {LABEL_COST_KNOWN: "false"}
+    ctl = [
+        *side(PROSE, {T[0]: False}, role=ctxset.ROLE_CONTROL, cost_usd=0.0, labels=unknown),
+        *side(PROSE, {T[1]: False}, role=ctxset.ROLE_CONTROL, cost_usd=0.30),
+    ]
+    trt = [
+        *side(PROSE, {T[0]: True}, cost_usd=0.20),
+        *side(PROSE, {T[1]: True}, cost_usd=0.60),
+    ]
+    d = _pair(ctl, trt).to_dict()["cost"]
+    assert d["control"]["n"] == 2 and d["control"]["cost_usd_missing"] == 1
+    assert d["control"]["cost_usd_median"] == pytest.approx(0.3)
+    assert d["control"]["cost_usd_total"] == pytest.approx(0.3)
+    assert d["treatment"]["cost_usd_missing"] == 0
+    paired = d["paired_cost_usd_diff"]
+    # only T[1] is known on both sides: 0.60 - 0.30; T[0] is missing, not 0.20 - 0.0
+    assert paired["n"] == 1 and paired["n_missing"] == 1
+    assert paired["median"] == pytest.approx(0.3)
 
 
 @pytest.mark.parametrize(
