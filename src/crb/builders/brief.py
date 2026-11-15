@@ -50,9 +50,10 @@ source ONLY). On a ``ctx.req*`` arm an entry that carries stated items is checke
 the fixed limits, and refuses a code block, a disclosure that is not exactly one token, an
 undeclared novel token, a misstated provenance, a held-out test's name (a helper's or
 fixture's too) or path, an eight-token span copied from the change (filler words and item
-boundaries do not break it), or a signature item carrying a body. Its declared novel tokens reach the brief — that is the
-amendment. Every other line of the brief — any entry without items, every fact and every
-learned line — keeps :func:`refuse_novel` exactly as before, on a ``req`` arm too.
+boundaries do not break it), or a signature item carrying a body. Its declared novel tokens
+reach the brief — that is the amendment. Every other line of the brief — any entry without
+items, every fact and every learned line — keeps :func:`refuse_novel` exactly as before, on a
+``req`` arm too.
 
 Navigation
 ----------
