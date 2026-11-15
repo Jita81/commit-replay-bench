@@ -375,14 +375,24 @@ def _refused_git() -> str:
     return ", ".join(subs)
 
 
-def system_rules(budget: Budget) -> str:
+def system_rules(budget: Budget, *, sighted: bool) -> str:
     """The census ``wf_wave.js`` rules, appended to Claude Code's default prompt.
 
     Each sentence is true of enforcement (tests/test_builders_rules_consistency.py): the
     refused git set is read from :data:`DENY_RULES`, and the one test-without-my-edits line
     (:data:`~crb.builders.base.STASH_FREE_IDIOM`) passes the guard and no deny rule. The shared
     outcomes (tamper disqualifies; a history, network or unparseable command discards every
-    source edit) are in the task's ``DEFAULT_RULES``."""
+    source edit) are in the task's ``DEFAULT_RULES``.
+
+    ``sighted`` is the brief's mode: only a sighted brief is handed a target test command, so
+    only its finish line names one; a blind brief (every context-set run, ADR-0050) is told to
+    finish on the tests it ran. ``done`` is the CLI's own claim and is never trusted."""
+    finish = (
+        "Finish by reporting done=true only if the target test command exits 0."
+        if sighted
+        else "Finish by reporting done=true only when your change is complete and the tests "
+        "you ran pass."
+    )
     return (
         "You are completing a real code change in the git worktree you were started in.\n"
         "RULES:\n"
@@ -392,8 +402,9 @@ def system_rules(budget: Budget) -> str:
         "- Do not use git to peek at other commits (no git log/show/reflog/stash/bisect, no diff "
         "or checkout of another revision).\n"
         "- NEVER consult external sources for this change: no fetching the upstream repository, no "
-        "package-registry downloads, no web lookups of the project's history or PRs. Solve from "
-        "the local code and the failing tests only.\n"
+        "package-registry downloads, no web lookups of the project's history or PRs. Solve only "
+        "from the local code and what the task gives you (the failing tests when it names them, "
+        "and any specification, playbook or facts it lists).\n"
         "- The test environment is ALREADY PROVISIONED: NEVER install or upgrade packages (no "
         "pip/uv/npm/yarn/pnpm install, go get, cargo add, mvn dependency:*). If the tests cannot "
         "import the package, run them EXACTLY with the test command in the task — it sets the "
@@ -405,7 +416,7 @@ def system_rules(budget: Budget) -> str:
         "git -C; new untracked files are not in the patch): "
         f"`{STASH_FREE_IDIOM}`\n"
         f"Budget: roughly {budget.max_tool_calls} tool calls. If green early, stop early.\n"
-        "Finish by reporting done=true only if the target test command exits 0."
+        + finish
     )
 
 
@@ -1072,7 +1083,7 @@ class ClaudeCodeBuilder:
             "--disallowedTools",
             ",".join(DENY_RULES),
             "--append-system-prompt",
-            system_rules(budget),
+            system_rules(budget, sighted=brief.sighted),
             "--json-schema",
             json.dumps(OUTPUT_SCHEMA, separators=(",", ":")),
             "--no-session-persistence",
