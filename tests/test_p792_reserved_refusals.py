@@ -267,22 +267,33 @@ def test_p792_c7_budget_profile_mismatch_refused(
         assert "learning" not in _r_admit(w, a0l).params_json
 
 
+#: ADR-0050's two ``RunCreateRequest`` fields, the ratchet's fifth class: refused naming them
+#: under a reserved.v1 reading (a context-set run is measurement only; R9), set together on
+#: a body without ``task_ids`` — the schema refuses a set beside ``task_ids``, and a role
+#: without the set, 422 ``validation_error`` before any reading gate, so neither can be
+#: posted alone on the step-6 body as an ``_R_REFUSED`` field is. ``new_run`` stores the
+#: role (default ``entries``) whenever the set is named, so both are always named.
+_R_CTX: dict[str, Any] = {"context_set": "ctx.oracle." + "0" * 12, "context_role": "entries"}
+
+
 def test_p792_run_fields_ratchet(
     backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """C17, the ratchet: every ``RunCreateRequest`` field is classified (``_R_FREE``,
-    ``_R_DEFAULT``, ``_R_REFUSED``, ``_R_FACTORY``), so a field added to the request fails
-    here until it is; the ``params`` keys the admitted classes store are exactly the core's
-    :data:`RESERVED_RUN_PARAMS`, and no refused field's is one. Each class behaves as named
-    on ``POST /runs`` filed under a reserved.v1 reading: a free field admitted, a default
-    field admitted at its default and refused 422 ``reading_run_fields`` naming it
-    otherwise, a refused field refused naming it, a factory field 422 ``validation_error`` —
-    each refusal with nothing queued."""
-    classes = [set(_R_FREE), set(_R_DEFAULT), set(_R_REFUSED), set(_R_FACTORY)]
+    ``_R_DEFAULT``, ``_R_REFUSED``, ``_R_FACTORY``, ``_R_CTX``), so a field added to the
+    request fails here until it is; the ``params`` keys the admitted classes store are
+    exactly the core's :data:`RESERVED_RUN_PARAMS`, and no refused field's is one. Each class
+    behaves as named on ``POST /runs`` filed under a reserved.v1 reading: a free field
+    admitted, a default field admitted at its default and refused 422 ``reading_run_fields``
+    naming it otherwise, a refused field refused naming it, a factory field 422
+    ``validation_error``, the context-set pair refused naming both — each refusal with
+    nothing queued."""
+    classes = [set(_R_FREE), set(_R_DEFAULT), set(_R_REFUSED), set(_R_FACTORY), set(_R_CTX)]
     assert sum(len(c) for c in classes) == len(set().union(*classes))  # disjoint
     assert set(RunCreateRequest.model_fields) == set().union(*classes)
     assert (set(_R_FREE) | set(_R_DEFAULT)) - _R_COLUMNS == RESERVED_RUN_PARAMS
     assert RESERVED_RUN_PARAMS.isdisjoint(_R_REFUSED) and RESERVED_RUN_PARAMS.isdisjoint(_R_FACTORY)
+    assert RESERVED_RUN_PARAMS.isdisjoint(_R_CTX)
     with _r_stack(backend, tmp_path, monkeypatch) as w:
         a0 = _a0(w, ("cobra", "XS"))
         for name, over in _R_FREE.items():
@@ -299,6 +310,10 @@ def test_p792_run_fields_ratchet(
         for name, value in _R_FACTORY.items():
             err = _r_refused(w, {**a0, name: value}, 422, "validation_error")
             assert name in err["message"], (name, err)
+        # ADR-0050: a context-set run replays the set's own tasks, so it names no task_ids
+        ctx_body = {k: v for k, v in a0.items() if k != "task_ids"}
+        _r_fields(w, {**ctx_body, **_R_CTX}, sorted(_R_CTX))
+        _r_fields(w, {**ctx_body, "context_set": _R_CTX["context_set"]}, sorted(_R_CTX))
 
 
 def test_p792_empty_ladder_default_is_what_new_run_stores() -> None:

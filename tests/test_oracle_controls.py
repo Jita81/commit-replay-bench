@@ -26,10 +26,17 @@ What it does: Pins, per control on the fixture's ``fix`` task: gold goes green w
               beside it in the same posture, while a posture that stops building turns
               each catch into a VIOLATION (G-952), each witness graded with the very runner,
               executor, config and grade context of the control beside it; and that only a
-              report stating ``controls.v3`` or later is witnessed (P-372).
+              report stating ``controls.v3`` or later is witnessed (P-372); and that the RED
+              check and every control's edit are handed the grade context's dependency
+              sets, the RED check running with the one the parent tree selects, and that
+              a tree outside the closure at the RED check, or an edit stopped by a
+              harness fault, is a VIOLATION on every row and never
+              ``not_constructible`` (P-820).
 How:          ``fixtures.oracle_repo`` (module-scoped) → ``make_task`` through the real miner →
               ``controls_for_task`` with a real ``PytestRunner`` + ``LocalExecutor``; no docker,
-              no network, no model.
+              no network, no model. The P-820 cases read each hand-off where it is made:
+              a recording runner, stub closure selectors, and ``_red_at_parent`` and
+              ``_apply_control`` replaced with ``monkeypatch``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0010-polyglot-negative-controls.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md
@@ -52,9 +59,18 @@ from pathlib import Path
 
 import pytest
 
+from crb.core.deps import (
+    ROLE_GOLD,
+    ROLE_PARENT,
+    ClosureViolation,
+    TaskDeps,
+    empty_binding,
+)
 from crb.core.execution import LocalExecutor, SandboxUnavailable
 from crb.core.grade import Belts, GradeResult
 from crb.core.oracle import controls as nc
+from crb.core.qualify import adhoc_context
+from crb.core.runners.base import TestRun as Run
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import Language, RepoConfig
 from crb.core.version import APPARATUS_VERSION
@@ -484,7 +500,7 @@ def test_sandbox_unavailable_propagates(fixture_repo, fix_task, harness, scratch
         def run(self, executor, root, scope, *, timeout=0):
             raise SandboxUnavailable("no docker")
 
-        def run_for(self, executor, root, scope, *, timeout=0, authored=None):
+        def run_for(self, executor, root, scope, *, timeout=0, authored=None, deps=None):
             return self.run(executor, root, scope, timeout=timeout)
 
     with pytest.raises(SandboxUnavailable):
@@ -497,6 +513,151 @@ def test_sandbox_unavailable_propagates(fixture_repo, fix_task, harness, scratch
             scratch=scratch,
             controls=(nc.GOLD,),
         )
+
+
+# --- the dependency sets reach the RED check and every control's edit (P-820) ---------------
+class _Selects:
+    """A closure selector that answers one role for every tree, and records the trees."""
+
+    def __init__(self, role):
+        self.role = role
+        self.roots = []
+
+    def select(self, root):
+        self.roots.append(Path(root))
+        return self.role
+
+
+def _two_sets(role):
+    """A task's sets with a different binding for the parent and the gold."""
+    parent, gold = empty_binding(ROLE_PARENT, "python"), empty_binding(ROLE_GOLD, "python")
+    return TaskDeps("sealed", "python", parent, gold, gold, selector=_Selects(role))
+
+
+@pytest.mark.parametrize("role", [ROLE_PARENT, ROLE_GOLD])
+def test_red_check_runs_with_the_set_its_tree_selects(
+    fixture_repo, fix_task, harness, scratch, role
+):
+    """The RED check carries a dependency set, as every grade after it does: the one the
+    selector names for the tree it runs in. With no sets given it binds none, so a runner
+    keeps whatever it already had."""
+    seen = []
+
+    class Recording:
+        name = "recording"
+
+        def run_for(self, executor, root, scope, *, timeout=0, authored=None, deps=None):
+            seen.append((Path(root), deps))
+            return Run(returncode=1, failing=frozenset({"tests/test_x.py::test_y"}))
+
+    deps = _two_sets(role)
+    kw = {
+        "config": harness["config"],
+        "runner": Recording(),
+        "executor": harness["executor"],
+        "scratch": scratch,
+        "timeout": 5,
+    }
+    assert nc._red_at_parent(fixture_repo.git, fix_task, deps=deps, **kw) == (True, "")
+    assert nc._red_at_parent(fixture_repo.git, fix_task, **kw) == (True, "")
+    (root, bound), (_, unbound) = seen
+    assert bound is (deps.parent if role == ROLE_PARENT else deps.gold)
+    assert deps.selector.roots == [root]  # asked about the very tree the run was in
+    assert unbound is None
+
+
+def test_controls_hand_the_context_sets_to_the_red_check_and_to_every_edit(
+    fixture_repo, fix_task, harness, scratch, monkeypatch
+):
+    """``controls_for_task`` passes the grade context's sets to the RED check and to each
+    control's edit (where a Go compile probe runs). Dropping either hand-off leaves the
+    probe or the RED check without the task's dependencies in a no-network sandbox."""
+    deps = _two_sets(ROLE_GOLD)
+    _, ctx = adhoc_context(fix_task, executor=harness["executor"], deps=deps)
+    handed = {}
+
+    def red(repo, task, **kw):
+        handed["red"] = kw["deps"]
+        return True, ""
+
+    def apply(name, ws, task, config, **kw):
+        handed[name] = kw["deps"]
+        raise nc._NotConstructible("stopped by the test before any edit")
+
+    monkeypatch.setattr(nc, "_red_at_parent", red)
+    monkeypatch.setattr(nc, "_apply_control", apply)
+    rows = nc.controls_for_task(
+        fixture_repo.git,
+        fix_task,
+        config=harness["config"],
+        runner=harness["runner"],
+        executor=harness["executor"],
+        scratch=scratch,
+        controls=(nc.STUB, nc.HARDCODE_CHEAT),
+        context=ctx,
+    )
+    assert [r.observed for r in rows] == [nc.OBS_NOT_CONSTRUCTIBLE] * 2
+    assert handed == {"red": deps, nc.STUB: deps, nc.HARDCODE_CHEAT: deps}
+    assert all(v is deps for v in handed.values())
+
+
+class _Outside:
+    """A closure selector that refuses every tree."""
+
+    def select(self, root):
+        raise ClosureViolation(["example.com/elsewhere@v1.0.0"])
+
+
+def _stub_and_cheat(fixture_repo, fix_task, harness, scratch, **kw):
+    return nc.controls_for_task(
+        fixture_repo.git,
+        fix_task,
+        config=harness["config"],
+        runner=harness["runner"],
+        executor=harness["executor"],
+        scratch=scratch,
+        controls=(nc.STUB, nc.HARDCODE_CHEAT),
+        **kw,
+    )
+
+
+def test_a_parent_tree_outside_the_closure_is_a_violation_on_every_control(
+    fixture_repo, fix_task, harness, scratch
+):
+    """The RED check asks which set the parent tree selects. A tree whose manifests select
+    outside the task's sealed sets stops it there, through the real ``_red_at_parent``: every
+    control is a harness error, none is skipped and none is "not constructible"."""
+    parent, gold = empty_binding(ROLE_PARENT, "python"), empty_binding(ROLE_GOLD, "python")
+    deps = TaskDeps("sealed", "python", parent, gold, gold, selector=_Outside())
+    _, ctx = adhoc_context(fix_task, executor=harness["executor"], deps=deps)
+    rows = _stub_and_cheat(fixture_repo, fix_task, harness, scratch, context=ctx)
+    assert [(r.observed, r.verdict) for r in rows] == [(nc.OBS_ERROR, nc.VERDICT_VIOLATION)] * 2
+    assert all("harness error on RED check: ClosureViolation" in r.note for r in rows)
+
+
+@pytest.mark.parametrize(
+    "stopped",
+    [
+        ClosureViolation(["example.com/elsewhere@v1.0.0"]),
+        RuntimeError("the compile probe did not finish (timed out)"),
+    ],
+    ids=["outside-the-closure", "probe-did-not-finish"],
+)
+def test_an_edit_stopped_by_a_harness_fault_is_a_violation_never_not_constructible(
+    fixture_repo, fix_task, harness, scratch, monkeypatch, stopped
+):
+    """A control's edit that stops on a harness fault (its tree selects outside the closure,
+    or its compile probe did not finish) is a harness error on that row. Only an edit that
+    says the cheat cannot be built is ``not_constructible``."""
+
+    def apply(name, ws, task, config, **kw):
+        raise stopped
+
+    monkeypatch.setattr(nc, "_red_at_parent", lambda repo, task, **kw: (True, ""))
+    monkeypatch.setattr(nc, "_apply_control", apply)
+    rows = _stub_and_cheat(fixture_repo, fix_task, harness, scratch)
+    assert [(r.observed, r.verdict) for r in rows] == [(nc.OBS_ERROR, nc.VERDICT_VIOLATION)] * 2
+    assert all(f"harness error: {type(stopped).__name__}:" in r.note for r in rows)
 
 
 # --- the tamper guard -----------------------------------------------------------------------------

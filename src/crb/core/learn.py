@@ -120,7 +120,7 @@ from pathlib import Path
 from typing import Any
 
 from crb.core.capability import CapabilityCell, CapabilityMap
-from crb.core.context_arm import BASE_S1, BASE_S2, REPLAY_MODE, parse_arm
+from crb.core.context_arm import BASE_S1, BASE_S2, REPLAY_MODE, measurement_only, parse_arm
 from crb.core.ledger import (
     CELL_FIELDS,
     FAILURE_PROTOCOL,
@@ -2125,9 +2125,14 @@ def remeasure_plan(
 
     Cost is the cell's own mean over rows of that mode that recorded one × each request's
     commits × the rungs its run climbs (:attr:`RunRequest.rungs` — one, blind or sighted).
+    Rows of a measurement-only arm (a context set, ADR-0050 item 9) are dropped first: they
+    are never offered registration and never price or time a top-up.
     Pure; deterministic; queues nothing.
     """
-    rs = list(rows)
+    # a context-set arm (ADR-0050 item 9) is a measurement, never a cell's evidence: no reading
+    # accepts it, so it is never offered registration, and its rows never price or time a
+    # top-up (they are read paired at GET /ctxsets/compare). A control run's plain A0 stays.
+    rs = [r for r in rows if not measurement_only(r.context_arm)]
     cur = _version_key(current_apparatus)
     gold = frozenset(gold_clean_tasks) if gold_clean_tasks is not None else None
     first_look = min(rule_looks(policy.rule))

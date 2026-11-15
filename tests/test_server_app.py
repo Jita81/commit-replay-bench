@@ -209,6 +209,7 @@ class TestFactory:
             "campaigns",
             "capability",
             "classes",
+            "ctxsets",
             "decisions",
             "factory",
             "flow",

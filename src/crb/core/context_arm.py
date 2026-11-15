@@ -28,7 +28,9 @@ Navigation
 What it is:   The context-arm vocabulary: the grammar (``parse_arm`` / ``ContextArm``), the
               one helper that decides a row's arm from what its brief carried
               (``context_arm_for``), the provenance label names, the pooling refusal
-              (``ContextArmsPooled``) and the read filter (``rows_for_context_arm``).
+              (``ContextArmsPooled``), the read filter (``rows_for_context_arm``) and the
+              context-set predicates (``ctx_set_name``, ``hindsight_arm``,
+              ``measurement_only``, ADR-0050).
 What it does: Refuses an arm id outside the grammar; names an arm's role (descriptive,
               ceiling, certifies retrospectively or prospectively); decides ``A0`` / ``S3`` /
               ``S1@<author>`` / ``S2`` (with ``+L`` when the brief carried the loop) for a
@@ -39,7 +41,8 @@ How:          A regular expression per part; ``context_arm_for`` reads the proce
               every row of apparatus 2.4 or later (``crb.core.ledger.row_labels_at_write``).
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (item 1),
-              docs/adr/0025-routing-v2.md (the one bump the stamp rides)
+              docs/adr/0025-routing-v2.md (the one bump the stamp rides),
+              docs/adr/0050-context-set-arms.md (the reserved ``ctx.`` library names)
 Works with:   src/crb/core/ledger.py (the label, ``GradeRow.context_arm``, the refusal in
               ``cell_stats``), src/crb/core/reading.py (a reading's hierarchy names arms),
               src/crb/core/routing.py (routes one arm), src/crb/core/capability.py (the map
@@ -48,7 +51,8 @@ Works with:   src/crb/core/ledger.py (the label, ``GradeRow.context_arm``, the r
 Tested by:    tests/test_context_arm.py, tests/test_routing_v2.py
 Touch when:   never for a new repository; an arm base or modifier is added — an ADR amending
               ADR-0026 item 1 first; a new provenance stamp (add it to ``PROVENANCE_LABELS``, never
-              to the arm); never for a new repository.
+              to the arm); a context-set source or name rule changes (ADR-0050 first); never for
+              a new repository.
 Claims:       An arm names what the brief carried, not what the builder read; ``S3`` never
               certifies and ``A0`` never licenses (docs/EVIDENCE-AND-CLAIMS.md).
 """
@@ -81,6 +85,14 @@ MOD_FACTS = "+facts@"
 MOD_LIBRARY = "+library@"
 MOD_LOOP = "+L"
 
+#: A ``+library@`` NAME that starts with this prefix is reserved for a context set (ADR-0050
+#: item 2): ``ctx.<source>.<digest[:12]>``, and only on base ``A0`` without ``+facts`` or ``+L``.
+CTX_PREFIX = "ctx."
+#: The four context-set sources; ``oracle`` and ``oracle-placebo`` are hindsight sets.
+CTX_SOURCES: tuple[str, ...] = ("oracle", "oracle-placebo", "mech", "mech-placebo")
+CTX_HINDSIGHT_PREFIX = "ctx.oracle"
+CTX_NAME_RE = re.compile(r"^ctx\.(oracle|oracle-placebo|mech|mech-placebo)\.[0-9a-f]{12}$")
+
 #: Provenance stamps (ADR-0026 item 1): shown and filterable, never a pooling key.
 LABEL_CTX_TICKET = "ctx_ticket"
 LABEL_CTX_BRIEF = "ctx_brief"
@@ -89,6 +101,18 @@ LABEL_CTX_RULES = "ctx_rules"
 LABEL_CTX_AUTHOR = "ctx_author"
 LABEL_CTX_LIBRARY = "ctx_library"
 LABEL_CTX_REFUSED = "ctx_refused"
+#: Context-set stamps (ADR-0050 item 5): provenance, never the arm. ``ctx_set`` is the set's
+#: full digest; ``ctx_source`` its source, or ``control`` on a plain ``A0`` control row.
+LABEL_CTX_SET = "ctx_set"
+LABEL_CTX_SOURCE = "ctx_source"
+LABEL_CTX_GAP = "ctx_gap"
+LABEL_CTX_GAP_RULE = "ctx_gap_rule"
+LABEL_CTX_DELIVERED = "ctx_delivered"
+LABEL_CTX_CHARS = "ctx_chars"
+LABEL_CTX_CEILING = "ctx_ceiling"
+LABEL_CTX_DRAFTER = "ctx_drafter"
+#: ``ctx_source`` on a plain ``A0`` row of a context-set control run.
+CTX_SOURCE_CONTROL = "control"
 PROVENANCE_LABELS: tuple[str, ...] = (
     LABEL_CTX_TICKET,
     LABEL_CTX_BRIEF,
@@ -103,6 +127,15 @@ PROVENANCE_LABELS: tuple[str, ...] = (
     "checks",
     "finish_gate",
     "budget_profile",
+    # the context-set stamps (ADR-0050 item 5)
+    LABEL_CTX_SET,
+    LABEL_CTX_SOURCE,
+    LABEL_CTX_GAP,
+    LABEL_CTX_GAP_RULE,
+    LABEL_CTX_DELIVERED,
+    LABEL_CTX_CHARS,
+    LABEL_CTX_CEILING,
+    LABEL_CTX_DRAFTER,
 )
 
 #: The ``learn`` label value that means the loop was off for the run (ADR-0020 §8).
@@ -114,10 +147,17 @@ TEST_AUTHORED = "authored"
 TEST_PERSON = "person"
 
 _NAME = r"[A-Za-z0-9][A-Za-z0-9._:/-]*"
+#: A ``+library@`` NAME: any ordinary name outside the reserved ``ctx.`` namespace, or a
+#: well-formed context-set name (``CTX_NAME_RE``). A malformed ``ctx.`` name is outside the
+#: grammar, so it can never parse as an ordinary, certifying library arm (ADR-0050 item 2).
+_LIBRARY_NAME = (
+    rf"(?!{re.escape(CTX_PREFIX)}){_NAME}"
+    rf"|{CTX_NAME_RE.pattern.removeprefix('^').removesuffix('$')}"
+)
 _ARM_RE = re.compile(
     rf"^(?P<base>A0|S1@(?P<author>{_NAME})|S2|S3)"
     rf"(?:\+facts@(?P<facts>{_NAME}))?"
-    rf"(?:\+library@(?P<library>{_NAME}))?"
+    rf"(?:\+library@(?P<library>{_LIBRARY_NAME}))?"
     r"(?P<loop>\+L)?$"
 )
 
@@ -233,6 +273,30 @@ def loop_on(labels: Mapping[str, str]) -> bool:
     return labels.get(LABEL_LEARN, LEARN_OFF) not in ("", LEARN_OFF)
 
 
+def ctx_set_name(arm: str) -> str:
+    """The context-set NAME an arm's ``+library@`` modifier carries (ADR-0050 item 2), or
+    ``""`` when the arm names no context set (or is outside the grammar). Derived from the arm
+    id alone, so no run parameter can disagree with it."""
+    m = _ARM_RE.match((arm or "").strip())
+    if not m:
+        return ""
+    name = m.group("library") or ""
+    return name if CTX_NAME_RE.match(name) else ""
+
+
+def hindsight_arm(arm: str) -> bool:
+    """``True`` for a hindsight context-set arm (``ctx.oracle.*`` and its placebo
+    ``ctx.oracle-placebo.*``): written with hindsight of the answer, exempt from the
+    retrospective time rule only, and read as a ceiling (ADR-0050 items 2 and 4)."""
+    return ctx_set_name(arm).startswith(CTX_HINDSIGHT_PREFIX)
+
+
+def measurement_only(arm: str) -> bool:
+    """``True`` for any context-set arm: no reading accepts it and it never certifies,
+    licenses, routes or enters the value scorecard (ADR-0050 item 9)."""
+    return ctx_set_name(arm) != ""
+
+
 def context_arm_for(
     *,
     process_step: str,
@@ -307,7 +371,20 @@ __all__ = [
     "BASE_S1",
     "BASE_S2",
     "BASE_S3",
+    "CTX_HINDSIGHT_PREFIX",
+    "CTX_NAME_RE",
+    "CTX_PREFIX",
+    "CTX_SOURCES",
+    "CTX_SOURCE_CONTROL",
     "LABEL_CONTEXT_ARM",
+    "LABEL_CTX_CEILING",
+    "LABEL_CTX_CHARS",
+    "LABEL_CTX_DELIVERED",
+    "LABEL_CTX_DRAFTER",
+    "LABEL_CTX_GAP",
+    "LABEL_CTX_GAP_RULE",
+    "LABEL_CTX_SET",
+    "LABEL_CTX_SOURCE",
     "PROVENANCE_LABELS",
     "REPLAY_MODE",
     "TEST_AUTHORED",
@@ -316,8 +393,11 @@ __all__ = [
     "ContextArmsPooled",
     "arms_present",
     "context_arm_for",
+    "ctx_set_name",
+    "hindsight_arm",
     "is_arm",
     "loop_on",
+    "measurement_only",
     "mode_admits",
     "parse_arm",
     "rows_for_context_arm",

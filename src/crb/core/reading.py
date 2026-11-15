@@ -201,6 +201,7 @@ from crb.core.context_arm import (
     BASE_S3,
     LEARN_OFF,
     ContextArm,
+    measurement_only,
     parse_arm,
 )
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
@@ -1090,6 +1091,12 @@ def _validate(
     arms = [*hierarchy, *(a for a, _ in descriptive)]
     if len(set(arms)) != len(arms):
         return "an arm appears twice in the reading"
+    for a_id in arms:
+        if measurement_only(a_id):
+            return (
+                f"{a_id} is a measurement-only arm (a context set, ADR-0050): no reading "
+                "certifies or reads it; compare it at GET /ctxsets/compare"
+            )
     parsed = [parse_arm(a) for a in hierarchy]
     for a in parsed:
         if a.descriptive:

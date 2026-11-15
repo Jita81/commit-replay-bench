@@ -17,7 +17,10 @@ What it is:   The docker-marked end-to-end proof of the sealed posture: per-task
               (stream Q).
 What it does: Builds the fixture repository and its module mirror, resolves the live posture,
               admits the task through ``PostureGate`` (qualify-first), replays the gold
-              through ``crb.core.run.run`` and asserts a clean row; moves the environment under
+              through ``crb.core.run.run`` and asserts a clean row; runs the stub and
+              hard-coded-answer controls in that posture and asserts both are built
+              (never ``not_constructible``) and the stub is caught (P-820); moves the
+              environment under
               a non-target test (a read-only tree: belt 3's control is red, an environment
               row) and bloats the trial's own tree past a small copy (the gold's fits: a
               disqualification, nothing revoked); empties the sealed cache and asserts the
@@ -33,6 +36,7 @@ Works with:   src/crb/server/posture_gate.py (``PostureGate``: admission and ``c
               src/crb/provision/__init__.py (``SealedProvider``: its resolve seals a
               quarantined set afresh), src/crb/core/qualify.py (``GoldWitness``),
               src/crb/core/grade.py (the witness), src/crb/core/run.py (the run loop),
+              src/crb/core/oracle/controls.py (the controls and their compile probe),
               tests/fixtures/goproxy.py and tests/fixtures/langs/gorepo_deps.py (the
               repository and its mirror), tests/conftest_langs.py (the images)
 Tested by:    tests/test_posture_e2e_docker.py
@@ -60,6 +64,7 @@ from crb.core.execution import DockerExecutor, DockerSettings
 from crb.core.git import GitRepo
 from crb.core.grade import GradeContext, grade
 from crb.core.mine import change_identity
+from crb.core.oracle import controls as nc
 from crb.core.qualify import GoldWitness
 from crb.core.run import BuildAttempt, RunSpec, run
 from crb.core.runners import get_runner
@@ -210,6 +215,28 @@ def test_the_sealed_posture_provisions_qualifies_replays_and_never_blames_the_mo
     deps = g1.deps_for(task)
     # the posture named the image by content id, and every container now runs that id
     assert executor.image_id().startswith("sha256:")
+
+    # (a2) the negative controls in the same posture (P-820). The stub and the hard-coded
+    # answer are compile-probed before they are graded: the probe must start the test
+    # binary it builds under /tmp and resolve the third-party module from the sealed
+    # cache with no network, exactly as the belt run does. A probe that cannot is read
+    # as "the cheat does not compile" and the control is never exercised.
+    control_rows = nc.controls_for_task(
+        repo,
+        task,
+        config=config,
+        runner=runner,
+        executor=executor,
+        scratch=scratch / "work",
+        controls=(nc.STUB, nc.HARDCODE_CHEAT),
+        timeout=600,
+        context=ctx,
+    )
+    said = [(r.control, r.observed, r.verdict, r.note) for r in control_rows]
+    assert [r.control for r in control_rows] == [nc.STUB, nc.HARDCODE_CHEAT], said
+    assert all(r.observed != nc.OBS_NOT_CONSTRUCTIBLE for r in control_rows), said
+    assert all(r.verdict != nc.VERDICT_VIOLATION for r in control_rows), said
+    assert control_rows[0].verdict == nc.VERDICT_OK, said  # the stub: built, then caught
 
     def graded(ex: DockerExecutor, edit: Callable[[Workspace], None], name: str) -> Any:
         """Grade a trial (``edit`` applied) with ``ex`` for the trial AND its witness."""

@@ -148,6 +148,7 @@ from crb.builders.brief import (
     LABEL_CONTEXT_ARM,
     LABEL_CTX_AUTHOR,
     TICKET_MESSAGE,
+    ContextEntry,
     S1Arm,
     Ticket,
     compose,
@@ -174,6 +175,12 @@ from crb.builders.container import (
 from crb.builders.openai_client import ModelCallError
 from crb.builders.toolcheck import builder_tool_refusal, runner_tool_missing, tool_check_command
 from crb.core.checks import LABEL_CHECKS, CheckCommand, ResolvedChecks
+from crb.core.context_arm import (
+    CTX_NAME_RE,
+    CTX_SOURCE_CONTROL,
+    LABEL_CTX_SET,
+    LABEL_CTX_SOURCE,
+)
 from crb.core.deps import DepsBinding, TaskDeps
 from crb.core.evidence import BuilderRef
 from crb.core.execution import (
@@ -370,14 +377,31 @@ def loop_on(learning: LearningSnapshot | None) -> bool:
 
 
 def run_arm_for(
-    mode: str, *, learning: LearningSnapshot | None, s1_author_model: str | None
+    mode: str,
+    *,
+    learning: LearningSnapshot | None,
+    s1_author_model: str | None,
+    context_set: str = "",
 ) -> str:
     """The arm EVERY attempt of a run is stamped with (ADR-0026 item 1): ``S1@<author>`` on
     the ``S1`` arm (``s1_author_model`` set), else the run's own arm — blind ``A0``, sighted
     ``S3`` — each with ``+L`` when the repository's loop switch is on for the run. One answer
     per run, so an authoring failure or a harness refusal lands in the same arm as a success
     (docs/PREVENTION.md P-295). :func:`build_fn_for`'s closure stamps it; at module level a
-    caller outside the closure names the arm the run's rows will carry."""
+    caller outside the closure names the arm the run's rows will carry.
+
+    ``context_set`` (ADR-0050; a ``ctx.<source>.<hex>`` name, the ``entries`` role only)
+    makes the arm ``A0+library@<context_set>``: blind, without ``S1`` and with the loop off —
+    anything else raises :class:`ValueError` rather than stamp an arm the run did not run."""
+    if context_set:
+        if not CTX_NAME_RE.match(context_set):
+            raise ValueError(f"{context_set!r} is not a context-set name (ADR-0050)")
+        if mode == MODE_SIGHTED or s1_author_model is not None or loop_on(learning):
+            raise ValueError(
+                f"a context-set run ({context_set}) is blind A0 with no S1 author and the "
+                "loop off (ADR-0050 item 2)"
+            )
+        return context_arm_for(base=ARM_A0, library_version=context_set)
     if s1_author_model is not None:
         return context_arm_for(base=ARM_S1, author=s1_author_model, plus_l=loop_on(learning))
     base = ARM_S3 if mode == MODE_SIGHTED else ARM_A0
@@ -715,6 +739,49 @@ def discarded_edits_diff(ws: Workspace, config: RepoConfig, protected: Sequence[
     return text
 
 
+def _check_ctx_args(
+    context_set: str,
+    ctx_entries: Mapping[str, ContextEntry] | None,
+    ctx_stamps: Mapping[str, Mapping[str, str]] | None,
+    *,
+    s1: S1Arm | None,
+    learning: LearningSnapshot | None,
+) -> None:
+    """:func:`build_fn_for`'s context-set arguments agree with each other (ADR-0050), or
+    :class:`ValueError` before any attempt: ``ctx_entries`` only with ``context_set``; a
+    ``context_set`` only with stamps for exactly its entries' tasks, each naming that set and
+    its source; stamps without ``context_set`` are a control run's (``ctx_source`` =
+    ``control``); and every context-set run, control included, is ``A0`` with no ``S1``
+    author and the loop off — the ledger refuses a ctx stamp on any other arm."""
+    if not context_set and not ctx_entries and not ctx_stamps:
+        return
+    if ctx_entries and not context_set:
+        raise ValueError("context-set entries without the set's arm (context_set)")
+    if not ctx_stamps:
+        raise ValueError("a context-set run names its per-task ctx stamps (ctx_stamps)")
+    if s1 is not None or loop_on(learning):
+        raise ValueError("a context-set run is A0 with no S1 author and the loop off (ADR-0050)")
+    for tid, stamp in ctx_stamps.items():
+        if not stamp.get(LABEL_CTX_SET):
+            raise ValueError(f"task {tid}: ctx stamps without ctx_set")
+    if not context_set:
+        bad = sorted(
+            t for t, v in ctx_stamps.items() if v.get(LABEL_CTX_SOURCE) != CTX_SOURCE_CONTROL
+        )
+        if bad:
+            raise ValueError(f"a control run's stamps say ctx_source=control; not for {bad}")
+        return
+    m = CTX_NAME_RE.match(context_set)
+    if not m:
+        raise ValueError(f"{context_set!r} is not a context-set name (ADR-0050)")
+    source, hexpart = m.group(1), context_set.rsplit(".", 1)[1]
+    if set(ctx_stamps) != set(ctx_entries or {}):
+        raise ValueError("a context-set run's entries and stamps cover different tasks")
+    for tid, stamp in ctx_stamps.items():
+        if stamp.get(LABEL_CTX_SOURCE) != source or not stamp[LABEL_CTX_SET].startswith(hexpart):
+            raise ValueError(f"task {tid}: ctx stamps do not name the set {context_set}")
+
+
 def _failed_attempt(rung_label: str, mode: str, error: str) -> BuildAttempt:
     """An attempt that never reached a builder (unknown rung, un-instantiable builder)."""
     return BuildAttempt(BuilderRef(name=rung_label, mode=mode), error=_prefixed("", error))
@@ -1025,6 +1092,9 @@ def build_fn_for(
     s1: S1Arm | None = None,
     commit_dates: CommitDatesFn | None = None,
     tool_check_executor: ToolCheckExecutorFn | None = None,
+    context_set: str = "",
+    ctx_entries: Mapping[str, ContextEntry] | None = None,
+    ctx_stamps: Mapping[str, Mapping[str, str]] | None = None,
 ) -> BuildFn:
     """The ``build_fn`` for :func:`crb.core.run.run` over ``ladder``.
 
@@ -1105,7 +1175,22 @@ def build_fn_for(
         ``None`` (the default): the builder image (:func:`builder_executor`, the
         worktree read-only, the harness links mounted) for a sealed builder, the run's
         executor for a host builder under a local run, else the host. Tests inject fakes.
+    context_set / ctx_entries / ctx_stamps:
+        A context-set run (ADR-0050). ``ctx_stamps`` — task id → the ctx labels every row of
+        that task carries (``crb.core.ctxset.run_stamps``, computed by the worker), merged
+        at the one exit beside the arm so a row that failed before compose carries them too
+        (the composer's own counts win). ``context_set`` (the set's ``ctx.<source>.<hex>``
+        name) and ``ctx_entries`` (task id → the task's ONE entry) are the ``entries`` role:
+        the arm becomes ``A0+library@<context_set>`` and the entry reaches the brief through
+        the composer's admission and leak guard. Without ``context_set`` the stamps are a
+        ``control`` run's: plain ``A0``, nothing delivered. Inconsistent arguments raise
+        :class:`ValueError` here, before any attempt; all three default to nothing (no
+        change for any other run). This module never reads a set — the worker hands it
+        plain ``ContextEntry`` values (the import contract keeps ``crb.core.ctxset`` out).
     """
+    _check_ctx_args(context_set, ctx_entries, ctx_stamps, s1=s1, learning=learning)
+    entries_of: dict[str, ContextEntry] = dict(ctx_entries or {})
+    stamps_of: dict[str, dict[str, str]] = {tid: dict(v) for tid, v in (ctx_stamps or {}).items()}
     index = rung_index(ladder)
     dates_cache: dict[str, str] = {}
 
@@ -1377,7 +1462,10 @@ def build_fn_for(
         """The arm EVERY attempt of this run is stamped with: :func:`run_arm_for` over this
         run's loop snapshot and ``S1`` author (docs/PREVENTION.md P-295)."""
         return run_arm_for(
-            mode, learning=learning, s1_author_model=s1.author_model if s1 is not None else None
+            mode,
+            learning=learning,
+            s1_author_model=s1.author_model if s1 is not None else None,
+            context_set=context_set,
         )
 
     #: the finish gate's parent verdicts per (task, mode, commands, binding) — see
@@ -1551,6 +1639,9 @@ def build_fn_for(
         pending or re-rolled, its arm undecided — P-795).
         The executor is this exit's, whatever an earlier stamp said."""
         where = executor_of(rung_label)
+        if stamps_of and mode == MODE_SIGHTED:
+            # before any spend: a context-set run, control included, is blind (ADR-0050)
+            raise ValueError("a context-set run is blind; it never builds sighted")
         try:
             attempt = attempt_of(ws, task, mode, rung_label)
         except SandboxUnavailable:
@@ -1564,6 +1655,14 @@ def build_fn_for(
             # the S1 arm: the authored test is gone before the held-out grade (ADR-0026)
             remove_authored(ws)
         stamps: dict[str, str] = {}
+        if stamps_of:
+            # a context-set run (ADR-0050 item 5): every row of the task carries the set's
+            # stamps, a refusal before compose too; the composer's own counts win
+            if task.task_id not in stamps_of:
+                raise ValueError(f"task {task.task_id} is not in this run's context set")
+            stamps.update(
+                {k: v for k, v in stamps_of[task.task_id].items() if k not in attempt.labels}
+            )
         if LABEL_CONTEXT_ARM not in attempt.labels:
             # a refusal before compose is still this run's attempt: the arm's row, never
             # an unstamped one a per-arm reading drops (P-295)
@@ -1624,6 +1723,9 @@ def build_fn_for(
         if isinstance(gate, str):
             return _failed_attempt(rung_label, mode, gate)
         texts, _ids, dropped, id_of = context_lines(ws, task)
+        # a context-set run's entry for this task (ADR-0050): the composer admits it by the
+        # arm's rule and its leak guard reads it, so an entry-only brief is guarded too
+        ctx_entry = entries_of.get(task.task_id)
         # the gold post-image is the commit's source AND its own (held-out) tests: a token
         # only the held-out test introduced — an expected value, a test's name — is the
         # answer too. The set is harness-side; the builder never sees it (ADR-0026 item 7)
@@ -1634,7 +1736,7 @@ def build_fn_for(
                 commit=task.task_id,
                 paths=(*task.src_files, *task.test_files),
             )
-            if texts
+            if texts or ctx_entry is not None
             else frozenset()
         )
         s1_test: tuple[str, str] | None = None
@@ -1688,6 +1790,8 @@ def build_fn_for(
                 novel=novel,
                 retrospective=True,
                 root=str(ws.root),
+                library=(ctx_entry,) if ctx_entry is not None else (),
+                parent_rev=ws.parent if ctx_entry is not None else "",
             )
         brief = composed.brief
         kept_ids = [id_of[t] for t in brief.playbook if t in id_of]

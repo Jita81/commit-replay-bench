@@ -446,7 +446,7 @@ and at the ledger); the worker admits only tasks qualified in the live posture
 fixes from rows graded before them; belts, the failure rule and `mutation.v2` are unchanged.
 The apparatus is part of the posture id, so every task is qualified again at 2.5.
 
-**2.6 (ADR-0050) — the builder's input changes.** The rules a builder is told agree with what
+**2.6 (ADR-0051) — the builder's input changes.** The rules a builder is told agree with what
 the guard and the deny rules enforce, a refusal names its cause, and an attempt whose handed
 test command cannot run in the builder's own environment is refused before any model call.
 Belts, the failure rule, the deny rules and `mutation.v2` are unchanged; every task is

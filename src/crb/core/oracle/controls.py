@@ -138,6 +138,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from crb.core.deps import TaskDeps
 from crb.core.execution import Command, Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_SIGHTED, GradeContext, GradeResult, grade
@@ -848,11 +849,13 @@ def _apply_control(
     runner: BaseRunner,
     executor: Executor,
     timeout: int = 0,
+    deps: TaskDeps | None = None,
 ) -> str:
     """Perform the control's edit in ``ws`` (parent + tests overlaid). Returns a note.
     Raises one of :data:`NOT_CONSTRUCTIBLE_ERRORS` with the reason when it cannot be
     built. ``gold`` / ``noop`` / ``test_tamper`` are language-agnostic; the other four
-    dispatch on ``config.language``."""
+    dispatch on ``config.language``. ``deps`` is the grade context's dependency sets:
+    a compile probe runs with the set the edited tree selects, as the grade after it."""
     if name == GOLD:
         ws.overlay_sources(task.src_files)
         return ""
@@ -868,7 +871,9 @@ def _apply_control(
     if lang is Language.PYTHON:
         return _apply_python(name, ws, task, config)
     if lang is Language.GO:
-        return _apply_go(name, ws, task, config, runner=runner, executor=executor, timeout=timeout)
+        return _apply_go(
+            name, ws, task, config, runner=runner, executor=executor, timeout=timeout, deps=deps
+        )
     if lang is Language.JAVASCRIPT:
         return _apply_js(name, ws, task, config, executor=executor)
     raise _NotConstructible(
@@ -943,23 +948,40 @@ def _go_compile_error(
     runner: BaseRunner,
     executor: Executor,
     timeout: int,
+    deps: TaskDeps | None = None,
 ) -> str:
     """``""`` when the packages in ``scope`` — tests included — compile; else the
-    toolchain's tail. Uses the runner's own command (toolchain, env, sandbox) with
-    ``go test -run '^$'``, which builds every test binary and runs nothing."""
+    toolchain's tail. The command is the belt run's own (:meth:`BaseRunner.run`: the
+    runner's command, the dependency set this tree selects, the declared environment)
+    with its arguments alone replaced by ``go test -run '^$'``, which builds every test
+    binary and runs no test. No declared service is started for it.
+
+    The command is copied whole, never field by field (P-820): a probe without the
+    exec ``/tmp`` cannot start the binary it has just built, and one without the
+    sealed module cache cannot resolve an import in a sandbox with no network. Either
+    read as "does not compile" on a cheat that builds. ``deps`` is the grade
+    context's sets; with none the runner's current binding is kept. A tree whose
+    manifests select outside the closure raises ``ClosureViolation``, which the
+    caller records as a harness error, never as a cheat that could not be built. So
+    does a probe that did not finish (it timed out, was cancelled, or the sandbox
+    could not set its tree up): it raises ``RuntimeError``, because whether the
+    cheat builds is then not known.
+
+    The runner's compile-only gate run is not used here: it passes ``-vet=off``, and
+    the probe must stop wherever ``go test`` would stop before it runs a test."""
     t = timeout or int(runner.opts.get("timeout", runner.default_timeout))
-    base = runner.command(ws.root, scope, executor=executor, timeout=t)
-    argv = (base.argv[0], "test", "-count=1", "-run", "^$", *(tuple(scope) or ("./...",)))
-    res = executor.run(
-        Command(
-            argv,
-            base.root,
-            cwd_rel=base.cwd_rel,
-            env=base.env,
-            timeout=base.timeout,
-            writable_paths=base.writable_paths,
+    binding = deps.binding_for(ws.root) if deps is not None else runner.deps
+    with runner.deps_bound(binding):
+        base = runner.bind_deps(
+            runner.command(ws.root, scope, executor=executor, timeout=t), executor
         )
-    )
+        argv = (base.argv[0], "test", "-count=1", "-run", "^$", *(tuple(scope) or ("./...",)))
+        res = executor.run(runner.declare(dataclasses.replace(base, argv=argv), executor))
+    if res.env_error or res.timed_out or res.cancelled:
+        stopped = res.env_error or ("timed out" if res.timed_out else "cancelled")
+        raise RuntimeError(
+            f"the compile probe did not finish ({stopped}): whether the cheat builds is not known"
+        )
     if res.ok:
         return ""
     return redact_and_cap(tail_of(res.combined, _CHECK_TAIL_LINES), max_chars=_CHECK_TAIL_CHARS)
@@ -979,6 +1001,7 @@ def _apply_go(
     runner: BaseRunner,
     executor: Executor,
     timeout: int,
+    deps: TaskDeps | None = None,
 ) -> str:
     """The four language-specific controls for Go: text transforms from ``controls_go``,
     each compile-checked with ``go test -run '^$'`` so a non-building cheat is
@@ -992,7 +1015,7 @@ def _apply_go(
 
     def compiled(what: str) -> None:
         err = _go_compile_error(
-            ws, task.target_tests, runner=runner, executor=executor, timeout=timeout
+            ws, task.target_tests, runner=runner, executor=executor, timeout=timeout, deps=deps
         )
         if err:
             raise _NotConstructible(f"{what} does not compile against the target test — {err}")
@@ -1304,14 +1327,26 @@ def _red_at_parent(
     scratch: Path,
     timeout: int,
     on_event: EventFn | None = None,
+    deps: TaskDeps | None = None,
 ) -> tuple[bool, str]:
-    """(is_red, note). Vacuous controls are never a violation — but a harness error is."""
+    """(is_red, note). Vacuous controls are never a violation — but a harness error is.
+
+    The run carries the dependency set the parent tree selects from ``deps`` (the
+    grade context's), as every grade after it does (P-820): without it a target that
+    imports a module is red here because the sandbox could not fetch the module, which
+    says nothing about the tests."""
     dest = opaque_dest(scratch, "ctrl", avoid=(task.task_id,))  # never the commit's name (B1)
     _emit(on_event, "controls.red_check", task=task.task_id, worktree=dest.name)
     with Workspace.create(repo, task.task_id, dest, config=config) as ws:
         ws.overlay_tests(task.test_files)
+        binding = deps.binding_for(ws.root) if deps is not None else None
         run = runner.run_for(
-            executor, ws.root, task.target_tests, timeout=timeout, authored=task.authored
+            executor,
+            ws.root,
+            task.target_tests,
+            timeout=timeout,
+            authored=task.authored,
+            deps=binding,
         )
     if run.timed_out:
         return False, "target timed out at the parent — no usable RED oracle"
@@ -1420,6 +1455,7 @@ def controls_for_task(
             scratch=scratch,
             timeout=timeout,
             on_event=on_event,
+            deps=gctx.deps,
         )
     except SandboxUnavailable:
         raise
@@ -1451,6 +1487,7 @@ def controls_for_task(
                         runner=runner,
                         executor=executor,
                         timeout=timeout,
+                        deps=gctx.deps,
                     )
                 except NOT_CONSTRUCTIBLE_ERRORS as nc:
                     rows.append(

@@ -72,7 +72,7 @@ GOLDEN: dict[str, str] = {
     "2.4": "08d22b5d006f77b4b60954876f6ebba145072e155379cffc83ae8548a326f661",
     # 2.5 (ADR-0049): the stamp alone moved; the rule is 2.4's, so the hash is 2.4's
     "2.5": "08d22b5d006f77b4b60954876f6ebba145072e155379cffc83ae8548a326f661",
-    # 2.6 (ADR-0050): builder input moved; the rule is 2.4's, so the hash is 2.4's
+    # 2.6 (ADR-0051): builder input moved; the rule is 2.4's, so the hash is 2.4's
     "2.6": "08d22b5d006f77b4b60954876f6ebba145072e155379cffc83ae8548a326f661",
 }
 #: SHA-256 of the canonical JSON of ``OUTAGE_ERROR_MARKERS_V1`` (frozen at 2.3).
@@ -87,7 +87,7 @@ GOLDEN_SOURCE: dict[str, str] = {
     "2.4": "4bc0aa97759143cb4159822ace028ba567a992d00f73cef58f728b7fed45ce60",
     # 2.5 (ADR-0049): the rule's source is 2.4's
     "2.5": "4bc0aa97759143cb4159822ace028ba567a992d00f73cef58f728b7fed45ce60",
-    # 2.6 (ADR-0050): the rule's source is 2.4's
+    # 2.6 (ADR-0051): the rule's source is 2.4's
     "2.6": "4bc0aa97759143cb4159822ace028ba567a992d00f73cef58f728b7fed45ce60",
 }
 #: The hash of the frozen 2.3 rule's source (``derive_failure_kind_v1`` and what it calls).

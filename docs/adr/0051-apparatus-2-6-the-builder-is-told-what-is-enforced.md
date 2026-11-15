@@ -1,6 +1,6 @@
-# ADR-0050 — Apparatus 2.6: the builder is told what is enforced and can run its tests
+# ADR-0051 — Apparatus 2.6: the builder is told what is enforced and can run its tests
 
-**Status:** Proposed
+**Status:** Proposed (DL-419)
 **Date:** 2026-11-14
 **Apparatus impact:** bumps `APPARATUS_VERSION` to **2.6**. The builder's input changes: the
 rules text, the refusal messages it reads mid-run, and an attempt refused before any model call
@@ -97,7 +97,9 @@ axis every reader already reads; no reader changes.
 - A sealed Python builder on the default image is now refused before the model is called,
   where it used to be paid for and fail. Select `crb-builder-python` for such a repository.
 
-**Must never.** Blend 2.5 and 2.6 rows in a rate, a reading or a claim.
+**Must never.** Blend 2.5 and 2.6 rows in a rate, a reading or a claim. This holds for the
+context-set arms of ADR-0050 too, which landed at 2.5: a context-set run graded at 2.6 is paired
+only with a control graded at 2.6, and the paired reader already refuses a blend of apparatus.
 
 **New on 2.6 rows.** The discard record: the kept discarded patch, the `discarded_files` count
 label and the task id on the `builder.discard` event. A 2.5 row carries none of them, and its

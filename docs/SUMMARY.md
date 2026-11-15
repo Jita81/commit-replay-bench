@@ -2,7 +2,7 @@
 
 *For an NHS engineering or assurance reader deciding whether to put it on a repository.
 Written 2026-09-25 against `main` (version 2.0.0a1, apparatus 2.2); the routing rule revised
-2026-09-27 for apparatus 2.4; apparatus 2.5 (ADR-0049) moves only the stamp; 2.6 (2026-11-14, ADR-0050) changes the builder's input. Every figure carries its tag ([Evidence and claims §1](EVIDENCE-AND-CLAIMS.md#1-claim-tags)); where this page and
+2026-09-27 for apparatus 2.4; apparatus 2.5 (ADR-0049) moves only the stamp; 2.6 (2026-11-14, ADR-0051) changes the builder's input. Every figure carries its tag ([Evidence and claims §1](EVIDENCE-AND-CLAIMS.md#1-claim-tags)); where this page and
 the ledger disagree, the ledger is right.*
 
 ## What it is
