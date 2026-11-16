@@ -12,6 +12,8 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The scroll-to-hash unit tests no longer depend on timers.** The test page released its target and the cards above it on real timers, so on a busy machine both could fire before the test took its first count and the landing test failed with nothing wrong. The test now releases each step itself and asserts the exact sequence of landings; the hook is unchanged. ([#152](https://github.com/Jita81/commit-replay-bench/pull/152))
+
 - **Optional extras alone no longer ask a Python project for a lock.** A `pyproject.toml` whose only dependencies are under `[project.optional-dependencies]`, with no setup.py or setup.cfg and no lock, was refused `PROVISION_NO_LOCK` as if it declared runtime dependencies; it now gets the no-dependencies recipe. A project with `project.dependencies` and no lock is still refused (P-829). ([#151](https://github.com/Jita81/commit-replay-bench/pull/151))
 
 - **Apparatus 2.6 separates rows graded after the builder-input fixes.** `APPARATUS_VERSION` moves from 2.5 to 2.6 (ADR-0051), since nothing on a row told the two apart: the treatment fingerprint hashes the image tag and the rules label is provenance, never a pooling key. The belt set stays `v5`; the failure rule, the deny rules and `mutation.v2` are unchanged; there is no migration. Every posture id moves, so every task is qualified again at 2.6, and 2.5 and 2.6 rows are never pooled ([#149](https://github.com/Jita81/commit-replay-bench/pull/149)).
