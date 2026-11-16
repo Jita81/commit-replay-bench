@@ -919,9 +919,10 @@ _TABLE_ROW_RE = re.compile(r"\s*\{")
 #: A pytest ``ids=`` list or tuple opening: its literals are case names.
 _IDS_OPEN_RE = re.compile(r"\bids\s*=\s*[\[(]")
 #: A line that opens with a triple-quoted string, and a line that ends a ``def`` or ``class``
-#: header (``def f():``, ``class C:``, or the ``) -> None:`` of a wrapped signature).
+#: header (``def f():``, ``class C:``, or the ``) -> None:`` of a wrapped signature); a colon
+#: inside a trailing comment (``) == (  # expected:``) does not end a header.
 _DOCSTRING_RE = re.compile(r"\s*[rRuU]?(?:\"\"\"|''')")
-_HEADER_END_RE = re.compile(r"\s*(?:(?:async\s+)?def\s|class\s|\)).*:\s*(?:#.*)?$")
+_HEADER_END_RE = re.compile(r"\s*(?:(?:async\s+)?def\s|class\s|\))[^#\n]*:\s*(?:#.*)?$")
 
 
 def _in_ids_list(masked: str, start: int) -> bool:

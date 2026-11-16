@@ -1244,3 +1244,13 @@ def test_a_docstring_under_an_unchanged_test_header_is_not_asserted() -> None:
         novel=frozenset(), test_added=(doc,), test_after=elsewhere, test_paths=("x_test.py",)
     )
     assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
+    # A colon inside a trailing comment does not make the line above a header: the expected
+    # value of an assertion stays asserted when only that value changed.
+    msg = "cannot divide by zero here"
+    value = f'        """{msg}"""'
+    after = (
+        f"def test_div():\n    assert render(\n        x\n    ) == (  # expected:\n{value}\n    )\n"
+    )
+    item = StatedItem("i02", "rule", f"It raises: {msg}.", "nowhere")
+    view = gold(novel=frozenset(), test_added=(value,), test_after=after, test_paths=("x_test.py",))
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
