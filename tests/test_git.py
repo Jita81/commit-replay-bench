@@ -13,8 +13,8 @@ ADRs:         docs/adr/0008-stdlib-core-and-downward-layers.md
 Works with:   src/crb/core/git.py (under test), tests/fixtures/pyrepo.py (the history),
               tests/test_git_clone.py (the clone half of the same module)
 Tested by:    tests/test_git.py
-Touch when:   a git operation is added to the wrapper (one case here; the wrapper stays argv-only,
-              never a shell).
+Touch when:   onboarding a client repository never needs it; a git operation is added to the
+              wrapper (one case here; the wrapper stays argv-only, never a shell).
 """
 
 from __future__ import annotations
