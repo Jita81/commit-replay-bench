@@ -160,7 +160,7 @@ def test_changed_and_diff_names_read_a_non_utf8_path_reversibly(tmp_path: Path) 
     commit = _git(root, "commit-tree", tree, "-m", "one")
     _git(root, "update-ref", "HEAD", commit)
     repo = GitRepo(root)
-    name = raw_name.decode("utf-8", "surrogateescape")
+    name = os.fsdecode(raw_name)
     assert repo.changed_files("HEAD") == [name]
     assert os.fsencode(name) == raw_name
     # the index holds the path, the working tree does not: a deletion against HEAD
@@ -217,7 +217,10 @@ def test_z_paths_follow_a_non_utf8_filesystem_encoding(tmp_path: Path) -> None:
     )
     assert done.returncode == 0, done.stderr
     if done.stdout.strip() == "utf8":
-        pytest.skip("this platform fixes the filesystem encoding to UTF-8")
+        pytest.skip(
+            "this platform fixes the filesystem encoding to UTF-8"
+            " (outside review of pull request 150, -z path decoding)"
+        )
     assert done.stdout.strip() == "ok"
 
 
@@ -230,7 +233,10 @@ def test_a_non_utf8_path_on_disk_matches_the_filesystem_walk(tmp_path: Path) -> 
         with open(os.fsencode(root) + b"/bad\xffname.py", "wb") as fh:
             fh.write(b"x = 1\n")
     except OSError as err:
-        pytest.skip(f"the filesystem refuses a non-UTF-8 file name: {err}")
+        pytest.skip(
+            f"the filesystem refuses a non-UTF-8 file name: {err}"
+            " (outside review of pull request 150, -z path decoding)"
+        )
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "one"], check=True)
     repo = GitRepo(root)
