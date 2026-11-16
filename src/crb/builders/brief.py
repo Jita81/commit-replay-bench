@@ -509,7 +509,9 @@ def gold_view(
 
     def product_has(token: str) -> bool:
         try:
-            out = repo.run("grep", "-I", "-z", "-w", "-F", "-e", token, parent, check=False)
+            out = repo.run(
+                "grep", "-I", "-z", "-w", "-F", "-e", token, parent, check=False, raw=True
+            )
         except Exception:
             return False
         prefix = f"{parent}:"
@@ -887,12 +889,20 @@ _LITERAL_RE = re.compile(r'"((?:[^"\\\n]|\\.)*)"|\'((?:[^\'\\\n]|\\.)*)\'|`([^`\
 _FORMAT_VERB_RE = re.compile(r"%[-+#0-9.*]*[A-Za-z%]|\{[\w:.!]*\}")
 _LITERAL_WORD_RE = re.compile(r"[a-z0-9]+")
 #: What ends the text before a literal that names a test case rather than asserting a value:
-#: a Go ``t.Run(`` or Python ``subTest(`` first argument, a ``name:`` / ``desc:`` /
-#: ``description:`` field (quoted key or not), or a pytest ``id=``.
+#: a Go ``t.Run(`` or Python ``subTest(`` first argument, or a pytest ``id=``.
 _CASE_NAME_BEFORE_RE = re.compile(
-    r"(?:\.Run\(|\bsubTest\((?:msg\s*=\s*)?|\b(?:name|desc|description)[\"']?\s*:|\bid\s*=)\s*$",
+    r"(?:\.Run\(|\bsubTest\((?:msg\s*=\s*)?|\bid\s*=)\s*$",
     re.IGNORECASE,
 )
+#: A ``name:`` / ``desc:`` / ``description:`` field (quoted key or not) ending the text before
+#: a literal. It names a case only in a table row (:data:`_TABLE_ROW_RE`): the same field in
+#: an asserted value (``assert x == {"name": ...}``, ``want := &T{Name: ...}``) is asserted.
+_CASE_FIELD_BEFORE_RE = re.compile(
+    r"\b(?:name|desc|description)[\"']?\s*:\s*$",
+    re.IGNORECASE,
+)
+#: A line that opens a bare table row: ``{`` first, nothing before it.
+_TABLE_ROW_RE = re.compile(r"\s*\{")
 #: A pytest ``ids=`` list or tuple opening: its literals are case names.
 _IDS_OPEN_RE = re.compile(r"\bids\s*=\s*[\[(]")
 #: A line that opens with a triple-quoted string, and a line that ends a ``def`` or ``class``
@@ -913,8 +923,8 @@ def _in_ids_list(masked: str, start: int) -> bool:
 
 def _asserted_literals(lines: Sequence[str]) -> Iterator[str]:
     """The contents of the string literals on added test ``lines`` that may be asserted: every
-    literal except a test case's name or description (:data:`_CASE_NAME_BEFORE_RE`, a pytest
-    ``ids=`` list) and a docstring directly under a ``def`` / ``class`` header. Conservative: a
+    literal except a test case's name or description (:data:`_CASE_NAME_BEFORE_RE`, a
+    table row's :data:`_CASE_FIELD_BEFORE_RE` field, a pytest ``ids=`` list) and a docstring directly under a ``def`` / ``class`` header. Conservative: a
     literal the rule cannot place (a positional table field, a wrapped call) counts."""
     prev = ""
     for line in lines:
@@ -926,8 +936,13 @@ def _asserted_literals(lines: Sequence[str]) -> Iterator[str]:
         for m in found:
             masked[m.start() + 1 : m.end() - 1] = " " * (m.end() - m.start() - 2)
         flat = "".join(masked)
+        row = bool(_TABLE_ROW_RE.match(line))
         for m in found:
-            if _CASE_NAME_BEFORE_RE.search(line, 0, m.start()) or _in_ids_list(flat, m.start()):
+            if (
+                _CASE_NAME_BEFORE_RE.search(line, 0, m.start())
+                or (row and _CASE_FIELD_BEFORE_RE.search(line, 0, m.start()))
+                or _in_ids_list(flat, m.start())
+            ):
                 continue
             yield next(g for g in m.groups() if g is not None)
 

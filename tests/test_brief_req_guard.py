@@ -755,7 +755,8 @@ def test_a_case_name_quoted_in_an_item_is_not_refused() -> None:
 
 def test_an_asserted_message_beside_a_case_name_is_still_refused() -> None:
     """The same words asserted are refused, on their own line or after a case name on one line;
-    a literal the rule cannot place (a positional table field) counts as asserted."""
+    a literal the rule cannot place (a positional table field) counts as asserted, and so does
+    a ``name:`` field outside a table row (an asserted value)."""
     item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
     for lines in (
         (f'\tassert.Equal(t, "{CASE_NAME}", err.Error())',),
@@ -764,6 +765,9 @@ def test_an_asserted_message_beside_a_case_name_is_still_refused() -> None:
         (f'@pytest.mark.parametrize("m", ["{CASE_NAME}"], ids=["one"])',),
         (f'    assert str(err) == "{CASE_NAME}"',),
         ("x = run()", f'    """{CASE_NAME}."""'),
+        (f'    assert resp.json() == {{"name": "{CASE_NAME}"}}',),
+        (f'\twant := &Widget{{Name: "{CASE_NAME}"}}',),
+        ("\twant := &Widget{", f'\t\tName: "{CASE_NAME}",'),
     ):
         view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.go",))
         assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view), lines
@@ -1122,3 +1126,26 @@ def test_gold_view_product_has_skips_comments_and_test_files(
         assert stated.REASON_PROVENANCE in req_guard(entry(item).text, (item,), "prose", view)
         moved = StatedItem("i01", "name", f"Add {tok}", "change_detail", (tok,))
         assert req_guard(entry(moved).text, (moved,), "prose", view) == []
+
+
+def test_gold_view_product_has_reads_a_non_utf8_parent_file(tmp_path: Path) -> None:
+    """A latin-1 text file in the parent holding the token does not hide its product hit."""
+    root = tmp_path / "latin"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "legacy.txt").write_bytes(b"caf\xe9 Ready here\n")
+    (root / "widget.py").write_text("def Ready():\n    return 1\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    parent = _git(root, "rev-parse", "HEAD")
+    (root / "widget.py").write_text("def Ready():\n    return 2\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "change")
+    repo, commit = GitRepo(root), _git(root, "rev-parse", "HEAD")
+    view = gold_view(repo, parent=parent, commit=commit, src_paths=("widget.py",), test_paths=())
+    assert view is not None and view.product_has is not None
+    assert view.product_has("Ready")
+    item = StatedItem("i01", "name", "Keep Ready", "product", ("Ready",))
+    assert req_guard(entry(item).text, (item,), "prose", view) == []
