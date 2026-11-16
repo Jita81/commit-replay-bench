@@ -23,6 +23,7 @@ import os
 import re
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -164,6 +165,60 @@ def test_changed_and_diff_names_read_a_non_utf8_path_reversibly(tmp_path: Path) 
     assert os.fsencode(name) == raw_name
     # the index holds the path, the working tree does not: a deletion against HEAD
     assert repo.diff_names("HEAD") == [name]
+
+
+_FS_PROBE = """
+import os, sys
+from crb.core.git import GitRepo
+if sys.getfilesystemencoding().lower().replace("-", "") == "utf8":
+    print("utf8")
+    raise SystemExit(0)
+raw = bytes.fromhex(sys.argv[2])
+repo = GitRepo(sys.argv[1])
+for names in (repo.changed_files("HEAD"), repo.diff_names("HEAD")):
+    assert names == [os.fsdecode(raw)], names
+    assert os.fsencode(names[0]) == raw, names
+print("ok")
+"""
+
+
+def test_z_paths_follow_a_non_utf8_filesystem_encoding(tmp_path: Path) -> None:
+    """Outside review: under a filesystem encoding that is not UTF-8 a tracked ``café.py``
+    is named as :func:`os.fsdecode` names it, so it equals the directory listing's name and
+    goes back to git as the same bytes. Run in a child interpreter under the C locale; where
+    the platform fixes the filesystem encoding to UTF-8 (macOS) the case cannot arise."""
+    root = tmp_path / "repo"
+    _fixture_repo(root)
+    raw_name = "café.py".encode()
+    blob = _git(root, "hash-object", "-w", "--stdin", stdin=b"x = 1\n")
+    _git(
+        root,
+        "update-index",
+        "-z",
+        "--index-info",
+        stdin=b"100644 " + blob.encode() + b"\t" + raw_name + b"\0",
+    )
+    commit = _git(root, "commit-tree", _git(root, "write-tree"), "-m", "one")
+    _git(root, "update-ref", "HEAD", commit)
+    env = {
+        **os.environ,
+        "LC_ALL": "C",
+        "LANG": "C",
+        "PYTHONUTF8": "0",
+        "PYTHONCOERCECLOCALE": "0",
+        "PYTHONPATH": os.pathsep.join(sys.path),
+    }
+    done = subprocess.run(
+        [sys.executable, "-c", _FS_PROBE, str(root), raw_name.hex()],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    if done.stdout.strip() == "utf8":
+        pytest.skip("this platform fixes the filesystem encoding to UTF-8")
+    assert done.stdout.strip() == "ok"
 
 
 def test_a_non_utf8_path_on_disk_matches_the_filesystem_walk(tmp_path: Path) -> None:

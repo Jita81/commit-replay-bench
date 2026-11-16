@@ -175,8 +175,9 @@ class GitRepo:
         process environment — the channel for a one-shot credential
         (:func:`git_config_env`), which must never be an argument: an argv is readable by
         every user on the host. ``raw=True`` (for ``-z`` path output) decodes stdout
-        byte-exactly: no newline translation (a ``\\r`` in a name stays one) and a byte that
-        is not UTF-8 kept as a surrogate escape, as :func:`os.fsdecode` names the file."""
+        byte-exactly: no newline translation (a ``\\r`` in a name stays one), decoded with
+        :func:`os.fsdecode`, so a name equals the one a directory listing gives under any
+        filesystem encoding and a byte outside it is kept as a surrogate escape."""
         argv = [self.git_binary, "-C", str(cwd or self.path), *args]
         full_env = None if env is None else {**os.environ, **dict(env)}
         try:
@@ -191,7 +192,7 @@ class GitRepo:
         except subprocess.TimeoutExpired as e:
             raise GitError(argv, 124, f"timed out after {self.timeout}s") from e
         if raw:
-            out = (p.stdout or b"").decode("utf-8", "surrogateescape")
+            out = os.fsdecode(p.stdout or b"")
             err = (p.stderr or b"").decode("utf-8", "replace")
             res = GitResult(p.returncode, out, err)
         else:
