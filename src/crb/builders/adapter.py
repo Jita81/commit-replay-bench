@@ -1343,17 +1343,18 @@ def build_fn_for(
                 authored=task.authored,
                 deps=self_binding(task, rung_label, ws),
             )
-        except SandboxUnavailable:
-            raise
-        except Exception as exc:  # the instrument, not the build: never a miss
-            _LOG.warning("task %s: S1 self verdict: %s: %s", task.task_id, type(exc).__name__, exc)
-        else:
+            # read inside the handler: attribution reads sibling test files, and a read
+            # that fails is the instrument's too, never the builder's error
             if run.env_error or run.parse_error:
                 verdict = RESULT_ERROR
             elif run.timed_out:
                 verdict = RESULT_FAIL
             else:
                 verdict = RESULT_PASS if self_green(run, ws, task, path, content) else RESULT_FAIL
+        except SandboxUnavailable:
+            raise
+        except Exception as exc:  # the instrument, not the build: never a miss
+            _LOG.warning("task %s: S1 self verdict: %s: %s", task.task_id, type(exc).__name__, exc)
         return {LABEL_S1_SELF_VERDICT: verdict, LABEL_S1_SELF_PATH: path}
 
     def self_green(run: TestRun, ws: Workspace, task: TaskSpec, path: str, content: str) -> bool:

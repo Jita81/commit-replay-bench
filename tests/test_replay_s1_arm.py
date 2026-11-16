@@ -1450,6 +1450,28 @@ def test_the_self_verdict_maps_a_timeout_to_fail_and_a_harness_raise_to_error(
     assert attempt.labels[LABEL_S1_SELF_VERDICT] == verdict
 
 
+def test_a_sibling_read_that_fails_in_the_self_verdict_is_an_error_not_a_builder_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Attribution reads the sibling test files of the built tree. A read that fails there
+    is the instrument's: the row keeps the builder's record and reads ``error``; it is
+    never turned into an errored attempt."""
+    real = adapter._go_tests_beside
+    calls: list[Path] = []
+
+    def flaky(test_file: Path) -> frozenset[str]:
+        calls.append(test_file)
+        if len(calls) > 1:  # the RED reads first; the self verdict reads second
+            raise OSError("sibling test unreadable")
+        return real(test_file)
+
+    monkeypatch.setattr(adapter, "_go_tests_beside", flaky)
+    attempt, _ = _s1_on_go(tmp_path, monkeypatch, _Seq(_RED, _RED))
+    assert len(calls) == 2
+    assert not attempt.error, attempt.error
+    assert attempt.labels[LABEL_S1_SELF_VERDICT] == "error"
+
+
 def test_sandbox_unavailable_in_the_self_verdict_stops_the_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
