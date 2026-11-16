@@ -669,6 +669,10 @@ def _parse_v2(doc: Mapping[str, Any], source: str) -> CtxSet:
         if over:
             raise CtxSetRefused(REASON_ITEMS_LENGTH, f"{where}: {over}")
         gaps = _parse_gaps(entry, where)
+        if gaps and source.endswith(PLACEBO_SUFFIX):
+            raise _schema(
+                f"{where}.gaps on a placebo: a placebo records no requirement gap (ADR-0053)"
+            )
         entries.append(
             CtxEntryRecord(
                 task_id=task_id,

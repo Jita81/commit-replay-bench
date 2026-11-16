@@ -264,7 +264,9 @@ author could not answer. Each gap is `{"question": str, "decision": kind}`, wher
 is one trimmed line of at most 240 characters with no code fence, and `decision` is one of
 the item kinds (`name`, `signature`, `error_text`, `format`, `rule`, `value`). At most as many
 gaps as items are allowed, and no question repeats. A malformed gap is refused like a
-malformed item (`ctxset_schema`, or `ctxset_items_length` over the limits). The set's digest
+malformed item (`ctxset_schema`, or `ctxset_items_length` over the limits). A `req-placebo`
+set records no gaps (`ctxset_schema`), so a treatment and its placebo are refused and stamped
+alike. The set's digest
 includes `gaps` only when the list is non-empty, so a set without gaps keeps its digest; the
 items digest never includes them, so a closed set pairs with the same control. A gap is never
 rendered into the builder's brief.

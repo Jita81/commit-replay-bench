@@ -170,7 +170,7 @@ def test_the_opt_in_stamps_only_open_gap_tasks_and_the_ledger_accepts_it() -> No
     assert ca.LABEL_CTX_OPEN_GAPS not in control[TASKS[0]]
 
 
-@pytest.mark.parametrize("value", ["0", "-1", "two", ""])
+@pytest.mark.parametrize("value", ["0", "-1", "two", "", "01", "\u0661", "+2", " 2"])
 def test_the_ledger_refuses_a_malformed_open_gaps_stamp(value: str) -> None:
     cset = ctxset.parse(_with_gaps(req_doc(), GAPS))
     labels = ctxset.run_stamps(cset, ctxset.ROLE_ENTRIES, dict.fromkeys(cset.task_ids, "1"))
@@ -183,6 +183,19 @@ def test_no_control_row_carries_the_open_gaps_stamp() -> None:
     control = ctxset.run_stamps(cset, ctxset.ROLE_CONTROL, dict.fromkeys(cset.task_ids, "1"))
     labels = {**control[TASKS[0]], ca.LABEL_CTX_OPEN_GAPS: "2"}
     assert "arm's own stamps" in lg.ctx_label_violation(ca.BASE_A0, labels)
+
+
+def test_a_placebo_records_no_gap() -> None:
+    # A placebo's gaps would be refused or stamped apart from its treatment's, so the pair
+    # would split unevenly; only the treatment carries the questions (ADR-0053).
+    treatment = ctxset.parse(req_doc())
+    doc = _with_gaps(req_doc(ctxset.SOURCE_REQ_PLACEBO, matched_to=treatment.digest), GAPS)
+    with pytest.raises(CtxSetRefused) as e:
+        ctxset.parse(doc)
+    assert e.value.reason == ctxset.REASON_SCHEMA
+    assert "placebo" in str(e.value)
+    empty = _with_gaps(req_doc(ctxset.SOURCE_REQ_PLACEBO, matched_to=treatment.digest), [])
+    assert ctxset.parse(empty).open_gaps == {}
 
 
 # --- the run schema -------------------------------------------------------------------------

@@ -545,6 +545,8 @@ CTX_STATED_LABELS: tuple[str, ...] = (
 #: on a run that opted in to measuring them, the task's open-gap count (ADR-0053).
 _CTX_STATED_OPTIONAL: tuple[str, ...] = (LABEL_CTX_REQ_REFUSED, LABEL_CTX_OPEN_GAPS)
 _CTX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+# ASCII only: ``str.isdecimal`` would also pass non-ASCII digits such as "\u0661".
+_POSITIVE_COUNT_RE = re.compile(r"[1-9][0-9]*")
 
 
 def _stated_violation(arm: str, labels: Mapping[str, str]) -> str:
@@ -569,7 +571,7 @@ def _stated_violation(arm: str, labels: Mapping[str, str]) -> str:
     if not _stated.REQ_DRAFTER_RE.match(labels[LABEL_CTX_REQ_DRAFTER]):
         return "ctx_req_drafter is not human:<id> or model:<id>@<sha256> (ADR-0052)"
     open_gaps = labels.get(LABEL_CTX_OPEN_GAPS)
-    if open_gaps is not None and (not open_gaps.isdecimal() or int(open_gaps) < 1):
+    if open_gaps is not None and not _POSITIVE_COUNT_RE.fullmatch(open_gaps):
         return f"ctx_open_gaps {open_gaps!r} is not a positive count (ADR-0053)"
     refused = labels.get(LABEL_CTX_REQ_REFUSED)
     if refused is not None:

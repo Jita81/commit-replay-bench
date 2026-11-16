@@ -1514,6 +1514,10 @@ def submit_refusals(
       naming ``context_set`` on an unsealed deployment, naming a set not stored, or whose
       stored set fails its digest or does not cover gold-clean tasks of the repository
       (ADR-0050; :func:`ctxset_refusal`; the worker re-checks at claim);
+    * 409 ``ctx_open_gaps`` — a run delivering (role ``entries``) a set any of whose entries
+      records an open requirement gap, unless it opts in with ``measure_open_gaps``; the
+      detail's ``gaps`` lists each task's questions (ADR-0053; :func:`ctxset_refusal`; the
+      worker re-checks at claim);
     * 422 ``builder_login_invalid`` — a builder this run would call (the same list the
       presence check reads, an ``S1`` test author included) has a login whose last
       verification failed; one that is not fresh is verified once first — LAST, after every

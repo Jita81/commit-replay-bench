@@ -28,6 +28,8 @@ such a set. The tool should push back on a request with known gaps until they ar
      `rule`, `value`): the kind of item the answer would become.
    - The list holds at most as many gaps as an entry may hold items, and no question repeats.
    - A malformed gap is refused as strictly as a malformed item. A v1 entry refuses `gaps`.
+   - A `req-placebo` set refuses `gaps`: only the treatment carries the questions, so the
+     pair is refused, run and stamped alike.
 2. **The digest.** The set digest includes `gaps` only when the list is non-empty, so every
    existing set keeps its digest and its name. The items digest never includes gaps, so a
    closed set pairs with the control of the open one.
