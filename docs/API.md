@@ -262,8 +262,9 @@ on `/capability-map` or `/routes` is **422 `measurement_only_arm`**, `detail: {a
 A `crb.ctxset.v2` entry may carry an optional `gaps` list: the requirement questions its
 author could not answer. Each gap is `{"question": str, "decision": kind}`, where the question
 is one trimmed line of at most 240 characters with no code fence, and `decision` is one of
-the item kinds (`name`, `signature`, `error_text`, `format`, `rule`, `value`). At most as many
-gaps as items are allowed, and no question repeats. A malformed gap is refused like a
+the item kinds (`name`, `signature`, `error_text`, `format`, `rule`, `value`). An entry holds
+at most `MAX_GAPS` gaps (`crb.core.stated`, equal to the fixed item limit `MAX_ITEMS`, not
+the entry's own item count), and no question repeats. A malformed gap is refused like a
 malformed item (`ctxset_schema`, or `ctxset_items_length` over the limits). A `req-placebo`
 set records no gaps (`ctxset_schema`), so a treatment and its placebo are refused and stamped
 alike. The set's digest
