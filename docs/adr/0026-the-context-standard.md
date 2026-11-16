@@ -119,7 +119,9 @@ rule makes them prospective (item 10).
    An `S1` row the builder did not error also carries the arm's own verdict (P-832):
    `s1_self_verdict` (`pass`, `fail` — a timeout included — or `error`) is the authored test,
    as written, run on the built tree before it is removed for the grade, and `s1_self_path`
-   names it. It is what the factory itself would have said; the held-out grade stays the
+   names it. It is read by id, as the arm's RED is: a test the authored file defines, less
+   the task's baseline-failing ids, so a failing sibling in the same Go package never decides
+   it; a runner whose ids cannot name the file's tests reads the run's own green. It is what the factory itself would have said; the held-out grade stays the
    row's verdict, and the label never changes a verdict, a failure kind or a cell.
    `crb.core.ledger.cell_stats` raises `ContextArmsPooled` for rows of two arms, as it raises
    `ChecksArmsPooled` (ADR-0024) and `ApparatusPooled` (ADR-0025). A reading (item 2) pins one

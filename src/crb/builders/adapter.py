@@ -1318,7 +1318,9 @@ def build_fn_for(
         authored test, as the author wrote it, run before it is removed for the grade.
         ``{}`` when this worktree holds no authored test (an ``A0`` row, an authoring miss)
         or the attempt errored (its edits are discarded; there is no built tree to judge).
-        ``pass`` when green; ``fail`` when red or timed out (P-693, as ``run_held_out``
+        ``pass`` when no test the authored file defines fails (:func:`self_green`: by id, as
+        the RED is attributed, so a baseline-failing sibling in a Go package never decides
+        it); ``fail`` when one does or the run timed out (P-693, as ``run_held_out``
         reads it); ``error`` when the environment or the report failed, or the harness
         raised around the run — an instrument failure, never a miss.
         ``SandboxUnavailable`` propagates. The caller removes the authored test after."""
@@ -1351,8 +1353,24 @@ def build_fn_for(
             elif run.timed_out:
                 verdict = RESULT_FAIL
             else:
-                verdict = RESULT_PASS if run.green else RESULT_FAIL
+                verdict = RESULT_PASS if self_green(run, ws, task, path, content) else RESULT_FAIL
         return {LABEL_S1_SELF_VERDICT: verdict, LABEL_S1_SELF_PATH: path}
+
+    def self_green(run: TestRun, ws: Workspace, task: TaskSpec, path: str, content: str) -> bool:
+        """Whether the tests the authored file defines pass on the built tree — attributed
+        by id as the RED is (:func:`authored_red`), so a baseline-failing or broken sibling
+        in the run's scope (a Go package) never decides the arm's verdict. A run with no
+        failing id, or a runner whose ids name neither the file nor its tests, reads the
+        run's own green."""
+        if run.green or not run.failing:
+            return run.green
+        # the names the built tree's other test files there declare: one may share an
+        # authored test's id, so it never decides the verdict (R6A-LASTFIX-R1-2)
+        beside = _go_tests_beside(ws.root / path) if runner.name == "go" else frozenset()
+        own = authored_red(
+            runner.name, path, content, run.failing, task.baseline_failing, beside=beside
+        )
+        return run.green if own is None else not own
 
     def author_s1(
         ws: Workspace,

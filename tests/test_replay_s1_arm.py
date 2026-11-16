@@ -54,6 +54,7 @@ import crb.builders as builders_pkg
 from crb.builders import adapter
 from crb.builders.base import STOP_DONE, Budget, BuildOutcome, EscalationLadder, Rung
 from crb.builders.brief import LABEL_CONTEXT_ARM, LABEL_CTX_AUTHOR, S1Arm
+from crb.builders.container import BuilderContainerSettings
 from crb.core.deps import SCHEME_GO, BundleMount, DepsBinding, TaskDeps, register_store_root
 from crb.core.execution import Command, ExecResult, LocalExecutor, SandboxUnavailable
 from crb.core.git import GitRepo
@@ -72,6 +73,7 @@ from crb.core.spec import TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
 from fixtures.server_seed import ALPHA, envelope, login, make_env
+from fixtures.tool_check import passing_check
 from test_builders_brief import Recorder, _replay
 
 try:
@@ -567,10 +569,12 @@ def _s1_on_go(
     baseline: tuple[str, ...] = (),
     parent: dict[str, str] | None = None,
     deps: Any = None,
+    **build_kw: Any,
 ) -> tuple[Any, Any]:
     """One S1 attempt on the Go fixture's feat commit through the run's own ``BuildFn``,
     under the sealed binding (``parent`` = more files at the parent; ``deps`` = another
-    ``TaskDeps``); returns the attempt and the task's deps."""
+    ``TaskDeps``; ``build_kw`` = more ``build_fn_for`` arguments); returns the attempt and
+    the task's deps."""
     monkeypatch.setitem(builders_pkg._REGISTRY, "idle", _Idle)
     monkeypatch.setattr(_Idle, "calls", 0)
     root, feat = gorepo.build(tmp_path, extra=parent)
@@ -601,6 +605,7 @@ def _s1_on_go(
         config=cfg,
         s1=S1Arm(author=author, author_model="t1"),
         deps_for=lambda t: deps,
+        **build_kw,
     )
     with Workspace.create(repo, feat, tmp_path / "ws", config=cfg) as ws:
         try:
@@ -1348,14 +1353,90 @@ def test_the_self_verdict_runs_under_the_grades_binding_never_the_parents(
     assert attempt.labels[LABEL_S1_SELF_PATH] == GO_AUTHORED
 
 
+#: A sealed builder container that never starts: ``_Session`` stands in for its session.
+_CONTAINER = BuilderContainerSettings(image="crb-builder:test", user="10001:10001")
+
+
+class _Session:
+    """Stands in for :class:`ContainerSession`: no daemon, no overrides."""
+
+    def __init__(self, settings: BuilderContainerSettings, checkout: Any, **kw: Any) -> None:
+        self.checkout = checkout
+
+    def __enter__(self) -> _Session:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def overrides_for(self, builder: str) -> dict[str, Any]:
+        return {}
+
+
+def test_the_self_verdict_runs_under_the_builders_set_when_the_builder_ran_sealed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A builder that ran in the sealed container rendered its own test command under the
+    builder's set: the self verdict reads the built tree under that set, never the
+    parent's and never unbound (F87-1)."""
+    monkeypatch.setattr(adapter, "SEALABLE_BUILDERS", frozenset({"idle"}))
+    executor = _Seq(_RED, _GREEN)
+    attempt, deps = _s1_on_go(
+        tmp_path,
+        monkeypatch,
+        executor,
+        container=_CONTAINER,
+        session_factory=_Session,
+        tool_check_executor=passing_check,
+    )
+    assert attempt.labels["builder_executor"] == "docker"
+    (red_cmd, _), (self_cmd, present) = executor.ran("test")
+    assert present, "the self verdict ran without the authored test on disk"
+    assert _bound_to(red_cmd, deps)
+    assert deps.builder.mounts[0] in self_cmd.ro_mounts, self_cmd.ro_mounts
+    assert deps.parent.mounts[0] not in self_cmd.ro_mounts
+    assert self_cmd.env.get("GOMODCACHE") == "/deps/gomod"
+    assert attempt.labels[LABEL_S1_SELF_VERDICT] == "pass"
+
+
+#: ``go test -json`` for the ``calc`` package with a sibling ``TestOld`` failing beside the
+#: authored ``TestNew`` (``new`` = its action).
+def _with_old(new: str) -> ExecResult:
+    return ExecResult(
+        1,
+        _go_events(("run", "TestOld"), ("fail", "TestOld"), ("run", "TestNew"), (new, "TestNew")),
+        "",
+    )
+
+
+@pytest.mark.parametrize(("new", "verdict"), [("pass", "pass"), ("fail", "fail")])
+def test_a_baseline_failing_sibling_never_decides_the_self_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, new: str, verdict: str
+) -> None:
+    """The Go scope is the whole package: a sibling test that already fails at the parent
+    once read every S1 row there ``fail``, though every test the authored file defines
+    passed. The verdict is read by id, as the RED is (``authored_red``)."""
+    baseline = (f"{gorepo.CALC_PKG}::TestOld",)
+    attempt, _ = _s1_on_go(
+        tmp_path, monkeypatch, _Seq(_with_old("fail"), _with_old(new)), baseline=baseline
+    )
+    assert not attempt.error, attempt.error
+    assert attempt.labels[LABEL_S1_SELF_VERDICT] == verdict
+
+
 @pytest.mark.parametrize(
     ("answer", "verdict"),
     [
         (_RED, "fail"),
         (ExecResult(124, "", "", timed_out=True), "fail"),
         (RuntimeError("the harness broke"), "error"),
+        (ExecResult(1, "", "", env_error="the tree could not be copied"), "error"),
+        (
+            ExecResult(1, json.dumps({"Action": "fail", "Package": gorepo.CALC_PKG}) + "\n", ""),
+            "error",
+        ),
     ],
-    ids=["red", "timeout", "harness-raised"],
+    ids=["red", "timeout", "harness-raised", "env-error", "parse-error"],
 )
 def test_the_self_verdict_maps_a_timeout_to_fail_and_a_harness_raise_to_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, answer: Any, verdict: str
