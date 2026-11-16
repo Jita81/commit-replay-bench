@@ -123,6 +123,12 @@ class GitResult:
         """Non-blank stdout lines (the shape of ``--name-only`` style output)."""
         return [ln for ln in self.stdout.split("\n") if ln.strip()]
 
+    @property
+    def paths(self) -> list[str]:
+        """The non-empty NUL-separated fields of ``-z`` output: each path exactly as the tree
+        holds it, never git's display quoting (``"caf\\303\\251.py"``)."""
+        return [p for p in self.stdout.split("\0") if p]
+
 
 def git_config_env(
     pairs: Mapping[str, str], *, base: Mapping[str, str] | None = None
@@ -204,8 +210,8 @@ class GitRepo:
         return self.run(*args, check=True).stdout.split()
 
     def changed_files(self, sha: str) -> list[str]:
-        """Files touched by ``sha`` (relative to its first parent)."""
-        return self.run("show", "--name-only", "--pretty=format:", sha, check=True).lines
+        """Files touched by ``sha`` (relative to its first parent), each path raw (``-z``)."""
+        return self.run("show", "--name-only", "-z", "--pretty=format:", sha, check=True).paths
 
     def numstat_churn(self, base: str, head: str, paths: list[str]) -> int:
         """Added + deleted lines between ``base`` and ``head`` restricted to ``paths``."""
@@ -243,8 +249,9 @@ class GitRepo:
         return self.rev_parse(f"{sha}~1")
 
     def diff_names(self, ref: str, *, cwd: str | Path | None = None) -> list[str]:
-        """``git diff --name-only <ref>`` in the worktree (working tree vs ``ref``)."""
-        return self.run("diff", "--name-only", ref, cwd=cwd, check=True).lines
+        """``git diff --name-only -z <ref>`` in the worktree (working tree vs ``ref``), each
+        path raw, as the filesystem walk that compares against it names it."""
+        return self.run("diff", "--name-only", "-z", ref, cwd=cwd, check=True).paths
 
     def diff_paths_against(
         self, ref: str, paths: list[str], *, cwd: str | Path | None = None

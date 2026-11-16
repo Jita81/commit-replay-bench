@@ -161,3 +161,35 @@ def test_compare_prints_the_stated_banner_provenance_cost_and_drift() -> None:
     # a task unpriced on either side is shown as unpriced, never folded into n
     d["cost"] = {"paired_cost_usd_diff": {"n": 0, "n_missing": 2, "median": None}}
     assert "paired cost diff (usd) median None n 0 (unpriced 2)" in cmd.compare_lines(d)
+
+
+def test_a_non_ascii_changed_path_is_read_not_display_quoted(tmp_path: Path) -> None:
+    """Review 4580935916: git display-quotes a non-ASCII path (``"src/caf\\303\\251.py"``);
+    read so, the view finds no such file and an undeclared identifier added there lints ok."""
+    import subprocess
+
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "fixture@example.invalid")
+    git("config", "user.name", "fixture")
+    git("config", "core.quotePath", "true")
+    (root / "src").mkdir()
+    (root / "tests").mkdir()
+    src, test = root / "src" / "café.py", root / "tests" / "test_café.py"
+    src.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    test.write_text("def test_add():\n    assert True\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "parent")
+    src.write_text(src.read_text() + "\n\ndef subtract(a, b):\n    return a - b\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "change")
+    sha = git("rev-parse", "HEAD")
+    ((tid, reasons),) = cmd.lint_set(req_doc(tasks=[sha], statement=LEAK), root)
+    assert tid == sha and st.REASON_UNDECLARED_NOVEL in reasons

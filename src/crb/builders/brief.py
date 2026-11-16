@@ -508,6 +508,31 @@ _PY_ASSIGN_RE = re.compile(
 )
 _PY_RECEIVERS = frozenset({"self", "cls"})
 _PY_SUFFIXES = (".py", ".pyi")
+#: A method declaration of a JVM or .NET test file, after any annotations or attributes on
+#: the same line (``@Test void x()``, ``[Fact] public async Task X()``, ``public <T> T x(``,
+#: Kotlin ``fun x(``): the name it declares is a held-out name, so a method declared on the
+#: line after ``@Test`` is one too. Only those files are read so (a Go or Python test is not).
+_JVM_SUFFIXES = (".java", ".kt", ".kts", ".scala", ".groovy", ".cs")
+_JVM_METHOD_RE = re.compile(
+    r"^\s*(?:(?:@[\w.]+(?:\([^)]*\))?|\[[^\]]*\])\s*)*"
+    r"(?:(?:public|private|protected|internal|static|final|abstract|override|open|suspend"
+    r"|async|virtual|sealed|synchronized|default|inline|operator|infix)\s+)*"
+    r"(?:<[^<>()]*>\s*)?"
+    r"(?:fun\s+(?:<[^<>()]*>\s*)?|def\s+|(?P<type>[\w.]+(?:<[^()]*?>)?(?:\[\])*\??)\s+)"
+    r"(?P<name>[A-Za-z_]\w*)\s*\("
+)
+#: Words a statement line starts with that :data:`_JVM_METHOD_RE` would read as a type.
+_JVM_NOT_TYPES = frozenset(
+    {"return", "new", "throw", "throws", "else", "case", "await", "yield", "assert", "goto"}
+)
+
+
+def _jvm_declared(line: str) -> str | None:
+    """The method name a JVM or .NET declaration line declares (``None`` when it is not one)."""
+    m = _JVM_METHOD_RE.match(line)
+    if not m or (m.group("type") or "") in _JVM_NOT_TYPES:
+        return None
+    return m.group("name")
 
 
 def _py_assigned(line: str) -> list[str]:
@@ -671,12 +696,12 @@ def _change_tokens(gold: GoldView) -> set[str]:
     return out
 
 
-def _python_test_text(gold: GoldView) -> str:
-    """The post-images of the Python test files (``.py``/``.pyi``) only: per path when the
-    view carries them, else ``test_after`` when every test path is a Python file."""
+def _test_text(gold: GoldView, suffixes: tuple[str, ...] = _PY_SUFFIXES) -> str:
+    """The post-images of the test files ending in ``suffixes`` (default: Python) only: per
+    path when the view carries them, else ``test_after`` when every test path ends so."""
     if gold.test_after_by_path:
-        return "\n".join(t for p, t in gold.test_after_by_path if p.endswith(_PY_SUFFIXES))
-    if gold.test_paths and all(p.endswith(_PY_SUFFIXES) for p in gold.test_paths):
+        return "\n".join(t for p, t in gold.test_after_by_path if p.endswith(suffixes))
+    if gold.test_paths and all(p.endswith(suffixes) for p in gold.test_paths):
         return gold.test_after
     return ""
 
@@ -684,7 +709,8 @@ def _python_test_text(gold: GoldView) -> str:
 def _test_def_tokens(gold: GoldView) -> set[str]:
     """The held-out tests' own names: every token of an added test-definition line, the
     name any definition line of a test post-image defines (a helper, fixture or constant),
-    and every name a Python assignment of a Python test file binds."""
+    every name a Python assignment of a Python test file binds, and every method name a
+    JVM or .NET test file declares (the one after ``@Test`` included)."""
     out: set[str] = set()
     for line in gold.test_added:
         if _TEST_DEF_RE.match(line):
@@ -694,9 +720,12 @@ def _test_def_tokens(gold: GoldView) -> set[str]:
     for line in gold.test_after.splitlines():
         if m := _DEF_NAME_RE.match(line):
             names.append(m.group(1))
-    for line in _python_test_text(gold).splitlines():
+    for line in _test_text(gold).splitlines():
         if not _DEF_NAME_RE.match(line):
             names += _py_assigned(line)
+    for line in _test_text(gold, _JVM_SUFFIXES).splitlines():
+        if declared := _jvm_declared(line):
+            names.append(declared)
     out.update(n for n in names if len(n) >= NOVEL_MIN)
     return out
 

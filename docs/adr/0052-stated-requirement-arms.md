@@ -101,6 +101,10 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
      fixtures, constants, and every name an assignment in a Python test file (`.py`, `.pyi`)
      binds, such as `LIMIT = 10`, `A, B = 1, 2` or `self.LIMIT = 10`) count as test names
      too. The assignment rule reads only Python test files, so a Go `x := f()` defines nothing.
+     In a JVM or .NET test file (`.java`, `.kt`, `.kts`, `.scala`, `.groovy`, `.cs`) every
+     method name it declares counts, after any annotation or attribute on the same line, so
+     the method on the line after `@Test` or `[Fact]` is one. Not read: Kotlin backtick
+     names, extension functions, Scala type parameters and JVM or .NET fields.
    - `req_test_path`: a held-out test's path, file name or specific stem.
    - `req_test_span`: eight tokens in a row shared with the change's added test lines, read
      over the whole entry, so a run split across items is still found. The change's added
@@ -122,7 +126,9 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
    The limits are fixed in `crb.core.stated`. Changing them needs a new ADR. A CLI lint
    (`crb ctxset lint FILE --clone DIR`) runs the same function against a local clone before a
    set is stored. That lint splits paths by the generic test-path heuristic; the run's guard
-   stays authoritative.
+   stays authoritative. The lint and the miner, whose task paths the run's guard reads, list
+   changed paths NUL-separated (`-z`), so a non-ASCII path is read as itself, not as git's
+   display quoting.
 4. **Items and structure (`crb.core.stated`, schema `crb.ctxset.v2`).**
    - A v2 entry holds items, never text. Each item is
      `{item_id, kind, statement, provenance, discloses}`.

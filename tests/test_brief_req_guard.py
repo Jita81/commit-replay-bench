@@ -380,6 +380,53 @@ def test_the_python_assignment_rule_reads_only_python_test_files() -> None:
     assert stated.REASON_TEST_NAME in guard(item, view=as_python)
 
 
+def test_an_annotated_jvm_or_dotnet_test_method_is_a_held_out_name() -> None:
+    """Review 4580935910: a method declared on the line after ``@Test`` (or a C#
+    ``[Fact]``), a same-line ``@Test void x()`` and a Kotlin ``fun x()`` define held-out
+    names, even disclosed with a correct ``tests_only`` provenance."""
+    cases = {
+        "src/test/java/WidgetTest.java": (
+            "class WidgetTest {\n"
+            "    @Test\n"
+            "    void rejectsEmptyWidget() {\n"
+            '        assertThrows(IllegalArgumentException.class, () -> make(""));\n'
+            "    }\n"
+            "    @ParameterizedTest\n"
+            '    @ValueSource(strings = {"a b", "c"})\n'
+            "    public void acceptsShortWidgets(String s) {}\n"
+            "    @Test public static void inlineAnnotatedWidgetCase() {}\n"
+            "}\n",
+            ("rejectsEmptyWidget", "acceptsShortWidgets", "inlineAnnotatedWidgetCase"),
+        ),
+        "src/test/kotlin/WidgetTest.kt": (
+            "class WidgetTest {\n    @Test\n    fun rejectsBlankWidgetName() {}\n}\n",
+            ("rejectsBlankWidgetName",),
+        ),
+        "tests/WidgetTests.cs": (
+            "public class WidgetTests {\n"
+            "    [Fact]\n"
+            "    public async Task RejectsNullWidgetInput() {}\n"
+            "}\n",
+            ("RejectsNullWidgetInput",),
+        ),
+    }
+    for path, (test_after, names) in cases.items():
+        view = gold(
+            novel=gold().novel | set(names),
+            test_after=test_after,
+            test_paths=(path,),
+            test_added=tuple(test_after.splitlines()),
+        )
+        for name in names:
+            item = StatedItem("i01", "rule", f"Cover {name}", "tests_only", (name,))
+            assert stated.REASON_TEST_NAME in guard(item, view=view), (path, name)
+    # a call or a return inside a JVM test body defines nothing
+    body = "    @Test\n    void ok() {\n        return buildWidgetSample();\n    }\n"
+    view = gold(test_after=body, test_paths=("WidgetTest.java",), test_added=())
+    item = StatedItem("i01", "rule", "Keep buildWidgetSample", "nowhere")
+    assert stated.REASON_TEST_NAME not in guard(item, view=view)
+
+
 def test_a_disclosure_masks_only_whole_tokens() -> None:
     """Review 4580636571: a disclosed ``load`` (the parent's) must not mask ``load`` inside
     the distinct novel token ``payload``, nor a literal ``10`` inside ``1000``."""

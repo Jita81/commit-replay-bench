@@ -84,6 +84,27 @@ def test_changed_files(pyrepo: pr.PyRepo) -> None:
     assert set(repo.changed_files(pyrepo.initial_sha)) == {"pytest.ini", pr.SRC, pr.TEST_CALC}
 
 
+def test_changed_and_diff_names_read_a_non_ascii_path_raw(tmp_path: Path) -> None:
+    """A non-ASCII path comes back as the path itself, never git's display quoting."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    for args in (
+        ("init", "-q"),
+        ("config", "user.email", "fixture@example.invalid"),
+        ("config", "user.name", "fixture"),
+        ("config", "core.quotePath", "true"),
+    ):
+        subprocess.run(["git", "-C", str(root), *args], check=True)
+    (root / "café.py").write_text("x = 1\n", encoding="utf-8")
+    (root / "plain.py").write_text("y = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "one"], check=True)
+    repo = GitRepo(root)
+    assert sorted(repo.changed_files("HEAD")) == ["café.py", "plain.py"]
+    (root / "café.py").write_text("x = 2\n", encoding="utf-8")
+    assert repo.diff_names("HEAD") == ["café.py"]
+
+
 def test_numstat_churn(pyrepo: pr.PyRepo) -> None:
     repo = pyrepo.repo
     assert (
