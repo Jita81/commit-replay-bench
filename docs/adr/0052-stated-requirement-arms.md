@@ -128,6 +128,11 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
      text). For this check a Go method's header (`func`, a receiver, one name, the parameter
      list and one result type or parenthesised result list) is read whole; the source-span
      rule still exempts only through the first closing parenthesis.
+   - `req_asserted_literal`: four words in a row of a string literal an added test line may
+     assert (case names, `t.Run` and `subTest` titles, pytest ids and test docstrings aside)
+     that neither the request nor the parent holds. Known limits: only literals of four or
+     more words are checked; a filler word inside a quote, or a multi-line raw string, evades
+     it; mechanism statements and mirrored cases rely on human leak review.
 
    The limits are fixed in `crb.core.stated`. Changing them needs a new ADR. A CLI lint
    (`crb ctxset lint FILE --clone DIR`) runs the same function against a local clone before a

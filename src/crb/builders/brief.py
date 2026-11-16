@@ -95,7 +95,7 @@ import difflib
 import hashlib
 import json
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -886,6 +886,50 @@ _LITERAL_RE = re.compile(r'"((?:[^"\\\n]|\\.)*)"|\'((?:[^\'\\\n]|\\.)*)\'|`([^`\
 #: dropped before words are read on both sides, so ``writer %T does`` reads ``writer does``.
 _FORMAT_VERB_RE = re.compile(r"%[-+#0-9.*]*[A-Za-z%]|\{[\w:.!]*\}")
 _LITERAL_WORD_RE = re.compile(r"[a-z0-9]+")
+#: What ends the text before a literal that names a test case rather than asserting a value:
+#: a Go ``t.Run(`` or Python ``subTest(`` first argument, a ``name:`` / ``desc:`` /
+#: ``description:`` field (quoted key or not), or a pytest ``id=``.
+_CASE_NAME_BEFORE_RE = re.compile(
+    r"(?:\.Run\(|\bsubTest\((?:msg\s*=\s*)?|\b(?:name|desc|description)[\"']?\s*:|\bid\s*=)\s*$",
+    re.IGNORECASE,
+)
+#: A pytest ``ids=`` list or tuple opening: its literals are case names.
+_IDS_OPEN_RE = re.compile(r"\bids\s*=\s*[\[(]")
+#: A line that opens with a triple-quoted string, and a line that ends a ``def`` or ``class``
+#: header (``def f():``, ``class C:``, or the ``) -> None:`` of a wrapped signature).
+_DOCSTRING_RE = re.compile(r"\s*[rRuU]?(?:\"\"\"|''')")
+_HEADER_END_RE = re.compile(r"\s*(?:(?:async\s+)?def\s|class\s|\)).*:\s*(?:#.*)?$")
+
+
+def _in_ids_list(masked: str, start: int) -> bool:
+    """Whether position ``start`` of ``masked`` (a line with literal contents blanked) lies
+    inside a pytest ``ids=[...]`` opened earlier on the same line."""
+    opens = list(_IDS_OPEN_RE.finditer(masked, 0, start))
+    if not opens:
+        return False
+    gap = masked[opens[-1].end() : start]
+    return 1 + gap.count("[") + gap.count("(") - gap.count("]") - gap.count(")") > 0
+
+
+def _asserted_literals(lines: Sequence[str]) -> Iterator[str]:
+    """The contents of the string literals on added test ``lines`` that may be asserted: every
+    literal except a test case's name or description (:data:`_CASE_NAME_BEFORE_RE`, a pytest
+    ``ids=`` list) and a docstring directly under a ``def`` / ``class`` header. Conservative: a
+    literal the rule cannot place (a positional table field, a wrapped call) counts."""
+    prev = ""
+    for line in lines:
+        after_header, prev = bool(_HEADER_END_RE.match(prev)), line
+        if after_header and _DOCSTRING_RE.match(line):
+            continue
+        found = list(_LITERAL_RE.finditer(line))
+        masked = list(line)
+        for m in found:
+            masked[m.start() + 1 : m.end() - 1] = " " * (m.end() - m.start() - 2)
+        flat = "".join(masked)
+        for m in found:
+            if _CASE_NAME_BEFORE_RE.search(line, 0, m.start()) or _in_ids_list(flat, m.start()):
+                continue
+            yield next(g for g in m.groups() if g is not None)
 
 
 def _literal_words(text: str) -> list[str]:
@@ -896,8 +940,9 @@ def _literal_words(text: str) -> list[str]:
 
 def _asserted_literal(statement: str, gold: GoldView, request: str) -> bool:
     """Whether ``statement`` repeats :data:`~crb.core.stated.LITERAL_RUN_WORDS` words in a
-    row of a string literal on an added held-out test line (a whole literal of that many words
-    or more included) that neither ``request`` nor the parent tree holds as a run."""
+    row of a string literal an added held-out test line may assert (:func:`_asserted_literals`;
+    a whole literal of that many words or more included) that neither ``request`` nor the
+    parent tree holds as a run."""
     n = _stated.LITERAL_RUN_WORDS
     said = _grams(_literal_words(statement), n)
     if not said:
@@ -905,9 +950,8 @@ def _asserted_literal(statement: str, gold: GoldView, request: str) -> bool:
     asked = _grams(_literal_words(request), n)
     has_run = gold.parent_has_run or (lambda run: gold.parent_has(" ".join(run)))
     runs: set[tuple[str, ...]] = set()
-    for line in gold.test_added:
-        for m in _LITERAL_RE.finditer(line):
-            runs |= _grams(_literal_words(next(g for g in m.groups() if g is not None)), n)
+    for literal in _asserted_literals(gold.test_added):
+        runs |= _grams(_literal_words(literal), n)
     return any(not has_run(run) for run in sorted((runs & said) - asked))
 
 
@@ -940,7 +984,8 @@ def req_guard(
     signature item carries a body (a brace, ``;``, ``=>``, ``return``, or executable Python
     before its name or past its header; a Go method's header runs through its parameter
     list and one result). ``req_asserted_literal``: an item's statement repeats four words in
-    a row of a string literal an added held-out test line holds (format verbs dropped, case,
+    a row of a string literal an added held-out test line may assert (a case name, ``t.Run``
+    or ``subTest`` title, pytest id or test docstring aside; format verbs dropped, case,
     whitespace and punctuation ignored) that neither ``request`` — the text the builder is
     given — nor the parent tree holds; the author restates it in their own words."""
     if gold is None:

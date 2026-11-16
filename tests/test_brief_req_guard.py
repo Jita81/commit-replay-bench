@@ -731,6 +731,44 @@ def test_an_asserted_literal_the_parent_tree_holds_is_not_refused(tmp_path: Path
     assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
 
 
+#: A case name of four or more words, the same words in each test-naming position.
+CASE_NAME = "flush on a hijacked writer"
+CASE_NAME_LINES = (
+    (f'\tt.Run("{CASE_NAME}", func(t *testing.T) {{',),
+    (f'\t\t{{name: "{CASE_NAME}", in: 3, want: 4}},',),
+    (f'\t{{"name": "{CASE_NAME}", "in": 3}},',),
+    (f'@pytest.mark.parametrize("n", [3, 4], ids=["{CASE_NAME}", "flush twice"])',),
+    (f'    pytest.param(3, 4, id="{CASE_NAME}"),',),
+    (f'        with self.subTest("{CASE_NAME}"):',),
+    ("def test_flush(self) -> None:", f'    """{CASE_NAME}."""'),
+)
+
+
+def test_a_case_name_quoted_in_an_item_is_not_refused() -> None:
+    """A literal that names a test case (``t.Run``, ``subTest``, a ``name:`` field, pytest ids,
+    a test docstring) is not asserted, so an item quoting it is not ``req_asserted_literal``."""
+    item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
+    for lines in CASE_NAME_LINES:
+        view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.go",))
+        assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=view), lines
+
+
+def test_an_asserted_message_beside_a_case_name_is_still_refused() -> None:
+    """The same words asserted are refused, on their own line or after a case name on one line;
+    a literal the rule cannot place (a positional table field) counts as asserted."""
+    item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
+    for lines in (
+        (f'\tassert.Equal(t, "{CASE_NAME}", err.Error())',),
+        (f'\t{{name: "flush twice", want: "{CASE_NAME}"}},',),
+        (f'\t{{"flush twice", "{CASE_NAME}"}},',),
+        (f'@pytest.mark.parametrize("m", ["{CASE_NAME}"], ids=["one"])',),
+        (f'    assert str(err) == "{CASE_NAME}"',),
+        ("x = run()", f'    """{CASE_NAME}."""'),
+    ):
+        view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.go",))
+        assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view), lines
+
+
 # -- compose: the amendment is req-only -------------------------------------------------------
 
 
