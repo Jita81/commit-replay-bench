@@ -137,6 +137,7 @@ from crb.core.context_arm import (
     LABEL_CTX_GAP,
     LABEL_CTX_GAP_RULE,
     LABEL_CTX_ITEMS,
+    LABEL_CTX_OPEN_GAPS,
     LABEL_CTX_PROV,
     LABEL_CTX_REQ_DRAFTER,
     LABEL_CTX_REQ_REFUSED,
@@ -550,13 +551,18 @@ CTX_STATED_LABELS: tuple[str, ...] = (
     LABEL_CTX_PROV,
     LABEL_CTX_REQ_DRAFTER,
 )
+#: Stated stamps a ``ctx.req*`` entries row carries only sometimes: the guard's refusal and,
+#: on a run that opted in to measuring them, the task's open-gap count (ADR-0053).
+_CTX_STATED_OPTIONAL: tuple[str, ...] = (LABEL_CTX_REQ_REFUSED, LABEL_CTX_OPEN_GAPS)
 _CTX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+# ASCII only: ``str.isdecimal`` would also pass non-ASCII digits such as "\u0661".
+_POSITIVE_COUNT_RE = re.compile(r"[1-9][0-9]*")
 
 
 def _stated_violation(arm: str, labels: Mapping[str, str]) -> str:
     """Why a context-set arm row's stated stamps disagree with its arm (ADR-0052), or ``""``."""
     if not stated_arm(arm):
-        stray = [k for k in (*CTX_STATED_LABELS, LABEL_CTX_REQ_REFUSED) if k in labels]
+        stray = [k for k in (*CTX_STATED_LABELS, *_CTX_STATED_OPTIONAL) if k in labels]
         return f"stated-requirement stamps {stray} on a non-req arm {arm!r}" if stray else ""
     missing = [k for k in CTX_STATED_LABELS if not labels.get(k)]
     if missing:
@@ -574,6 +580,9 @@ def _stated_violation(arm: str, labels: Mapping[str, str]) -> str:
         return f"ctx_prov {labels[LABEL_CTX_PROV]!r} is not a provenance count line"
     if not _stated.REQ_DRAFTER_RE.match(labels[LABEL_CTX_REQ_DRAFTER]):
         return "ctx_req_drafter is not human:<id> or model:<id>@<sha256> (ADR-0052)"
+    open_gaps = labels.get(LABEL_CTX_OPEN_GAPS)
+    if open_gaps is not None and not _POSITIVE_COUNT_RE.fullmatch(open_gaps):
+        return f"ctx_open_gaps {open_gaps!r} is not a positive count (ADR-0053)"
     refused = labels.get(LABEL_CTX_REQ_REFUSED)
     if refused is not None:
         why = refused.split(",")
@@ -599,7 +608,7 @@ def ctx_label_violation(arm: str, labels: Mapping[str, str]) -> str:
     them. ``ctx_turns`` is optional, decimal, and only on a context-set run's row."""
     name = ctx_set_name(arm)
     present = [k for k in (*CTX_RUN_LABELS, *CTX_ARM_LABELS) if k in labels]
-    stated_present = [k for k in (*CTX_STATED_LABELS, LABEL_CTX_REQ_REFUSED) if k in labels]
+    stated_present = [k for k in (*CTX_STATED_LABELS, *_CTX_STATED_OPTIONAL) if k in labels]
     if not name and not present:
         orphan = [*stated_present, *([LABEL_CTX_TURNS] if LABEL_CTX_TURNS in labels else [])]
         if orphan:

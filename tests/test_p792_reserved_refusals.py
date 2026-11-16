@@ -267,13 +267,18 @@ def test_p792_c7_budget_profile_mismatch_refused(
         assert "learning" not in _r_admit(w, a0l).params_json
 
 
-#: ADR-0050's two ``RunCreateRequest`` fields, the ratchet's fifth class: refused naming them
-#: under a reserved.v1 reading (a context-set run is measurement only; R9), set together on
-#: a body without ``task_ids`` — the schema refuses a set beside ``task_ids``, and a role
+#: ADR-0050's context-set ``RunCreateRequest`` fields (ADR-0053 adds the opt-in), the fifth
+#: class: refused naming them under a reserved.v1 reading (a context-set run is measurement
+#: only; R9), set together on a body without ``task_ids`` — the schema refuses a set beside ``task_ids``, and a role
 #: without the set, 422 ``validation_error`` before any reading gate, so neither can be
 #: posted alone on the step-6 body as an ``_R_REFUSED`` field is. ``new_run`` stores the
 #: role (default ``entries``) whenever the set is named, so both are always named.
-_R_CTX: dict[str, Any] = {"context_set": "ctx.oracle." + "0" * 12, "context_role": "entries"}
+_R_CTX: dict[str, Any] = {
+    "context_set": "ctx.oracle." + "0" * 12,
+    "context_role": "entries",
+    # ADR-0053: the open-gaps opt-in is a context-set field, stored only when true
+    "measure_open_gaps": True,
+}
 
 
 def test_p792_run_fields_ratchet(
@@ -313,7 +318,11 @@ def test_p792_run_fields_ratchet(
         # ADR-0050: a context-set run replays the set's own tasks, so it names no task_ids
         ctx_body = {k: v for k, v in a0.items() if k != "task_ids"}
         _r_fields(w, {**ctx_body, **_R_CTX}, sorted(_R_CTX))
-        _r_fields(w, {**ctx_body, "context_set": _R_CTX["context_set"]}, sorted(_R_CTX))
+        _r_fields(
+            w,
+            {**ctx_body, "context_set": _R_CTX["context_set"]},
+            ["context_role", "context_set"],
+        )
 
 
 def test_p792_empty_ladder_default_is_what_new_run_stores() -> None:

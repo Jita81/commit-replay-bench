@@ -74,6 +74,7 @@ export const ADR_TITLES: ReadonlyArray<readonly [string, string]> = [
   ['0050', 'Context-set arms: a governed paired measurement of supplied context'],
   ['0051', 'Apparatus 2.6: the builder is told what is enforced and can run its tests'],
   ['0052', 'Stated-requirement arms: pass rate when every required item is stated'],
+  ['0053', 'Open requirement gaps: a stated set records its questions and a run refuses them'],
 ]
 
 /** `ADR-0015` — the name a record carries in the /help/docs route. */
