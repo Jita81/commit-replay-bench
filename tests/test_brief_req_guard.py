@@ -740,7 +740,6 @@ CASE_NAME_LINES = (
     (f'@pytest.mark.parametrize("n", [3, 4], ids=["{CASE_NAME}", "flush twice"])',),
     (f'    pytest.param(3, 4, id="{CASE_NAME}"),',),
     (f'        with self.subTest("{CASE_NAME}"):',),
-    ("def test_flush(self) -> None:", f'    """{CASE_NAME}."""'),
 )
 
 
@@ -751,6 +750,11 @@ def test_a_case_name_quoted_in_an_item_is_not_refused() -> None:
     for lines in CASE_NAME_LINES:
         view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.go",))
         assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=view), lines
+    # a test docstring, read in the parsed Python post-image
+    added = ("    def test_flush(self) -> None:", f'        """{CASE_NAME}."""')
+    after = "class TestFlush:\n" + "\n".join(added) + "\n        assert True\n"
+    view = gold(novel=frozenset(), test_added=added, test_after=after, test_paths=("x_test.py",))
+    assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=view)
 
 
 def test_an_asserted_message_beside_a_case_name_is_still_refused() -> None:
@@ -1231,9 +1235,9 @@ def test_an_id_keyword_outside_a_pytest_param_is_asserted() -> None:
 
 
 def test_a_docstring_under_an_unchanged_test_header_is_not_asserted() -> None:
-    """A docstring added beneath a test header the change left alone is read by the test
-    post-image, where the header sits right above it; the same line anywhere else in the
-    post-image (not under a header) keeps it asserted."""
+    """A docstring added beneath a test header the change left alone is read in the parsed
+    test post-image, where it is the function's docstring; the same line anywhere else in the
+    post-image (not a docstring) keeps it asserted."""
     item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
     doc = f'    """{CASE_NAME}."""'
     after = f"def test_flush() -> None:\n{doc}\n    assert True\n"
@@ -1253,4 +1257,57 @@ def test_a_docstring_under_an_unchanged_test_header_is_not_asserted() -> None:
     )
     item = StatedItem("i02", "rule", f"It raises: {msg}.", "nowhere")
     view = gold(novel=frozenset(), test_added=(value,), test_after=after, test_paths=("x_test.py",))
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
+
+
+def test_a_triple_quoted_value_under_a_parenthesised_key_is_asserted() -> None:
+    """A line ending ``):`` inside an expected dictionary is no header: the triple-quoted
+    value under it is not a docstring in the parsed post-image, so it stays asserted."""
+    msg = "cannot divide by zero here"
+    value = f'        """{msg}"""'
+    added = ("    assert result == {", "        (", "            key", "        ):", value, "    }")
+    after = "def test_div():\n" + "\n".join(added) + "\n"
+    item = StatedItem("i01", "rule", f"It raises: {msg}.", "nowhere")
+    view = gold(novel=frozenset(), test_added=added, test_after=after, test_paths=("x_test.py",))
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
+
+
+def test_a_renamed_header_does_not_make_a_later_expected_string_a_docstring() -> None:
+    """A change that renames a test and replaces an expected string further down leaves the
+    two added lines adjacent in ``test_added``; the post-image shows the string is not a
+    docstring, so it stays asserted."""
+    msg = "cannot divide by zero here"
+    value = f'        """{msg}"""'
+    header = "def test_div_renamed():"
+    after = f"{header}\n    result = run()\n    assert result == (\n{value}\n    )\n"
+    item = StatedItem("i01", "rule", f"It raises: {msg}.", "nowhere")
+    view = gold(
+        novel=frozenset(), test_added=(header, value), test_after=after, test_paths=("x_test.py",)
+    )
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
+
+
+def test_a_docstring_is_exempt_only_in_a_parsed_python_post_image() -> None:
+    """Fail closed: a docstring-shaped line in a non-Python test file, a post-image that does
+    not parse, or a docstring whose text the post-image also holds as another string, is
+    asserted; the same docstring in a parsed Python file is not."""
+    item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
+    doc = f'    """{CASE_NAME}."""'
+    after = f"def test_flush() -> None:\n{doc}\n    assert True\n"
+    cases = (
+        (after, ("x_test.py",), False),
+        (after, ("x_test.go",), True),
+        (after + "def broken(:\n", ("x_test.py",), True),
+        (after + f'WANT = "{CASE_NAME}."\n', ("x_test.py",), True),
+    )
+    for text, paths, refused in cases:
+        view = gold(novel=frozenset(), test_added=(doc,), test_after=text, test_paths=paths)
+        assert (stated.REASON_ASSERTED_LITERAL in guard(item, view=view)) is refused, (text, paths)
+    # per-path post-images: the line counts when any non-Python file also holds it
+    view = gold(
+        novel=frozenset(),
+        test_added=(doc,),
+        test_paths=("x_test.py", "y_test.go"),
+        test_after_by_path=(("x_test.py", after), ("y_test.go", f"x := `\n{doc}\n`\n")),
+    )
     assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)

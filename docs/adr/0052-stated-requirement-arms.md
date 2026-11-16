@@ -134,10 +134,14 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
      that neither the request nor the parent holds; format verbs are dropped on both sides,
      the parent lookup included. A `name:`, `desc:` or `description:` field names a case
      only in a line that opens with `{` (a table row); an `id=` only as an argument of a
-     `pytest.param` (or `param`) call open on the same line; a docstring only directly under
-     a `def` or `class` header, read in the test post-image when the header is unchanged.
-     Known limits: an `id=` on its own line of a wrapped `pytest.param` is read as asserted
-     (a false refusal, never a leak); only
+     `pytest.param` (or `param`) call open on the same line; a docstring only when the
+     Python test post-image parses (the standard `ast` module) and the added line lies only
+     inside a module, class or function docstring there (its first statement, a string
+     constant alone on its lines) whose text no other string of the post-image holds — no
+     neighbouring added line or header pattern exempts it, and a post-image that is missing,
+     not Python or does not parse exempts nothing. Known limits: a docstring or comment of a
+     non-Python test file is read as asserted, as is an `id=` on its own line of a wrapped
+     `pytest.param` (false refusals, never a leak); only
      literals of four or more words are checked; a filler word inside a quote, or a
      multi-line raw string, evades it; a table row's `desc:` or `description:` field that
      holds expected text (help text under test) is read as a case name; mechanism statements

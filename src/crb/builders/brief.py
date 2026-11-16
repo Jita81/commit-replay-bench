@@ -91,6 +91,7 @@ Claims:       an arm names what the brief carried, never how good it was; only a
 
 from __future__ import annotations
 
+import ast
 import difflib
 import hashlib
 import json
@@ -437,8 +438,9 @@ class GoldView:
     question the ``product`` provenance asks: whether the parent holds the token that way in
     a file that is not a test file, on a line that is not only a comment; ``None`` reads
     ``parent_has``. ``parent_has_run`` asks whether the parent holds a run of words in order,
-    case-insensitively, with only non-alphanumeric characters between them; ``None`` asks
-    ``parent_has`` for the words joined by single spaces."""
+    case-insensitively, with only non-alphanumeric characters or a format verb or placeholder
+    (:data:`_RUN_GAP_ERE`) between them; ``None`` asks ``parent_has`` for the words joined by
+    single spaces."""
 
     novel: frozenset[str]
     parent_has: Callable[[str], bool]
@@ -918,11 +920,10 @@ _CASE_FIELD_BEFORE_RE = re.compile(
 _TABLE_ROW_RE = re.compile(r"\s*\{")
 #: A pytest ``ids=`` list or tuple opening: its literals are case names.
 _IDS_OPEN_RE = re.compile(r"\bids\s*=\s*[\[(]")
-#: A line that opens with a triple-quoted string, and a line that ends a ``def`` or ``class``
-#: header (``def f():``, ``class C:``, or the ``) -> None:`` of a wrapped signature); a colon
-#: inside a trailing comment (``) == (  # expected:``) does not end a header.
-_DOCSTRING_RE = re.compile(r"\s*[rRuU]?(?:\"\"\"|''')")
-_HEADER_END_RE = re.compile(r"\s*(?:(?:async\s+)?def\s|class\s|\))[^#\n]*:\s*(?:#.*)?$")
+#: The line breaks :mod:`ast` counts lines by, so a row of :func:`_docstring_rows` is a line
+#: here (``str.splitlines`` also breaks on form feeds and other separators).
+_AST_LINE_RE = re.compile(r"\r\n|\r|\n")
+_DOC_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 
 
 def _in_ids_list(masked: str, start: int) -> bool:
@@ -951,20 +952,71 @@ def _owning_call(masked: str, start: int) -> str:
     return ""
 
 
-def _docstring_lines(post_image: str) -> frozenset[str]:
-    """The lines of a test post-image that open a docstring directly under a ``def`` /
-    ``class`` header and appear nowhere else in it: an added line among them is a docstring
-    even when its header is unchanged (so not among the added lines)."""
-    under: set[str] = set()
+def _docstring_rows(tree: ast.Module, lines: Sequence[str], others: set[str]) -> set[int]:
+    """The 1-based rows of ``lines`` (the source ``tree`` parsed) that a module, class or
+    function docstring fills whole — its first statement, an expression statement holding a
+    string constant, nothing but whitespace before it on its first row or after it on its last
+    — unless its text is also held by another string constant (``others``, the docstring-free
+    string constants of every parsed post-image)."""
+    rows: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, _DOC_OWNERS) or not node.body:
+            continue
+        doc = node.body[0]
+        if not (
+            isinstance(doc, ast.Expr)
+            and isinstance(doc.value, ast.Constant)
+            and isinstance(doc.value.value, str)
+            and doc.end_lineno is not None
+            and doc.end_col_offset is not None
+            and doc.value.value not in others
+        ):
+            continue
+        head = lines[doc.lineno - 1].encode()[: doc.col_offset]
+        tail = lines[doc.end_lineno - 1].encode()[doc.end_col_offset :]
+        if not head.strip() and not tail.strip():
+            rows.update(range(doc.lineno, doc.end_lineno + 1))
+    return rows
+
+
+def _docstring_lines(gold: GoldView) -> frozenset[str]:
+    """The test post-image lines that lie only inside docstrings (:func:`_docstring_rows`) of
+    Python test files that parse: an added line among them is a docstring, never asserted.
+    A line any other row of any test post-image also holds — a non-Python file, a Python file
+    that does not parse, or a non-docstring row — is not among them (fails closed)."""
+    if gold.test_after_by_path:
+        posts = [(p.endswith(_PY_SUFFIXES), t) for p, t in gold.test_after_by_path]
+    else:
+        python = bool(gold.test_paths) and all(p.endswith(_PY_SUFFIXES) for p in gold.test_paths)
+        posts = [(python, gold.test_after)]
+    trees: list[ast.Module | None] = []
+    docs: set[int] = set()  # the ids of docstring constants
+    others: set[str] = set()
+    for python, text in posts:
+        try:
+            tree = ast.parse(text) if python else None
+        except (SyntaxError, ValueError, RecursionError):  # ValueError: a null byte
+            tree = None
+        trees.append(tree)
+        nodes = list(ast.walk(tree)) if tree is not None else []
+        for node in nodes:
+            if isinstance(node, _DOC_OWNERS) and node.body and isinstance(node.body[0], ast.Expr):
+                docs.add(id(node.body[0].value))
+        for node in nodes:
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in docs
+            ):
+                others.add(node.value)
+    inside: set[str] = set()
     elsewhere: set[str] = set()
-    prev = ""
-    for line in post_image.splitlines():
-        if _DOCSTRING_RE.match(line):
-            (under if _HEADER_END_RE.match(prev) else elsewhere).add(line)
-        else:
-            elsewhere.add(line)
-        prev = line
-    return frozenset(under - elsewhere)
+    for (_python, text), tree in zip(posts, trees, strict=True):
+        lines = _AST_LINE_RE.split(text)
+        rows = _docstring_rows(tree, lines, others) if tree is not None else set()
+        for row, line in enumerate(lines, 1):
+            (inside if row in rows else elsewhere).add(line)
+    return frozenset(inside - elsewhere)
 
 
 def _asserted_literals(
@@ -973,14 +1025,11 @@ def _asserted_literals(
     """The contents of the string literals on added test ``lines`` that may be asserted: every
     literal except a test case's name or description (:data:`_CASE_NAME_BEFORE_RE`, a
     table row's :data:`_CASE_FIELD_BEFORE_RE` field, a pytest ``ids=`` list, the ``id=`` of a
-    pytest ``param`` on the same line) and a docstring directly under a ``def`` / ``class``
-    header, among the added lines or (``docstrings``, :func:`_docstring_lines`) in the test
-    post-image. Conservative: a literal the rule cannot place (a positional table field, a
-    wrapped call, an ``id=`` of any other call) counts."""
-    prev = ""
+    pytest ``param`` on the same line) and a line of ``docstrings`` (:func:`_docstring_lines`:
+    a docstring in the parsed Python test post-image). Conservative: a literal the rule cannot
+    place (a positional table field, a wrapped call, an ``id=`` of any other call) counts."""
     for line in lines:
-        after_header, prev = bool(_HEADER_END_RE.match(prev)), line
-        if (after_header and _DOCSTRING_RE.match(line)) or line in docstrings:
+        if line in docstrings:
             continue
         found = list(_LITERAL_RE.finditer(line))
         masked = list(line)
@@ -1020,7 +1069,7 @@ def _asserted_literal(statement: str, gold: GoldView, request: str) -> bool:
     asked = _grams(_literal_words(request), n)
     has_run = gold.parent_has_run or (lambda run: gold.parent_has(" ".join(run)))
     runs: set[tuple[str, ...]] = set()
-    for literal in _asserted_literals(gold.test_added, _docstring_lines(gold.test_after)):
+    for literal in _asserted_literals(gold.test_added, _docstring_lines(gold)):
         runs |= _grams(_literal_words(literal), n)
     return any(not has_run(run) for run in sorted((runs & said) - asked))
 
@@ -1055,7 +1104,8 @@ def req_guard(
     before its name or past its header; a Go method's header runs through its parameter
     list and one result). ``req_asserted_literal``: an item's statement repeats four words in
     a row of a string literal an added held-out test line may assert (a case name, ``t.Run``
-    or ``subTest`` title, pytest id or test docstring aside; format verbs dropped, case,
+    or ``subTest`` title, pytest id or a docstring of a parsed Python test post-image aside;
+    format verbs dropped, case,
     whitespace and punctuation ignored) that neither ``request`` — the text the builder is
     given — nor the parent tree holds; the author restates it in their own words."""
     if gold is None:
