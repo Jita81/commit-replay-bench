@@ -193,3 +193,52 @@ def test_a_non_ascii_changed_path_is_read_not_display_quoted(tmp_path: Path) -> 
     sha = git("rev-parse", "HEAD")
     ((tid, reasons),) = cmd.lint_set(req_doc(tasks=[sha], statement=LEAK), root)
     assert tid == sha and st.REASON_UNDECLARED_NOVEL in reasons
+
+
+def test_an_asserted_literal_is_withheld_unless_the_commit_message_states_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``req_asserted_literal`` reads the commit message as the request: an item repeating a
+    literal the held-out test asserts is withheld, with the advice line, until the message
+    states that text itself."""
+    import subprocess
+
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "fixture@example.invalid")
+    git("config", "user.name", "fixture")
+    (root / "tests").mkdir()
+    # the parent holds each word of the statement, never four of the literal's in a row
+    words = "# Dividing fails with the text: here zero, divide or cannot.\n"
+    (root / "calc.py").write_text(words + "def div(a, b):\n    return a / b\n", encoding="utf-8")
+    test = root / "tests" / "test_calc.py"
+    test.write_text("def test_div():\n    assert True\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "parent")
+    parent = git("rev-parse", "HEAD")
+    asserted = "    with pytest.raises(ValueError, match='cannot divide %s by zero here'):\n"
+    changed = test.read_text() + asserted + "        div(1, 0)\n"
+    statement = "Dividing by zero fails with the text: Cannot divide by zero here"
+    for message, withheld in (
+        ("fix: refuse a zero divisor", True),
+        ("fix: refuse a zero divisor\n\nSay: cannot divide by zero here.", False),
+    ):
+        git("checkout", "-q", "--detach", parent)
+        test.write_text(changed, encoding="utf-8")
+        git("add", "-A")
+        git("commit", "-q", "-m", message)
+        sha = git("rev-parse", "HEAD")
+        path = tmp_path / "set.json"
+        path.write_text(json.dumps(req_doc(tasks=[sha], statement=statement)), encoding="utf-8")
+        capsys.readouterr()
+        code = main(["ctxset", "lint", str(path), "--clone", str(root)])
+        out = capsys.readouterr().out
+        assert (code == 2) is withheld, out
+        assert (st.ASSERTED_LITERAL_ADVICE in out) is withheld, out

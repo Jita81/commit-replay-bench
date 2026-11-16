@@ -436,7 +436,9 @@ class GoldView:
     stands for it when every test path is one language's. ``product_has`` is the stricter
     question the ``product`` provenance asks: whether the parent holds the token that way in
     a file that is not a test file, on a line that is not only a comment; ``None`` reads
-    ``parent_has``."""
+    ``parent_has``. ``parent_has_run`` asks whether the parent holds a run of words in order,
+    case-insensitively, with only non-alphanumeric characters between them; ``None`` asks
+    ``parent_has`` for the words joined by single spaces."""
 
     novel: frozenset[str]
     parent_has: Callable[[str], bool]
@@ -447,6 +449,7 @@ class GoldView:
     test_paths: tuple[str, ...] = ()
     test_after_by_path: tuple[tuple[str, str], ...] = ()
     product_has: Callable[[str], bool] | None = None
+    parent_has_run: Callable[[Sequence[str]], bool] | None = None
 
 
 #: A line that is only a comment (``//``, ``#``, ``/*``, a ``*`` continuation, ``--``): a word
@@ -520,12 +523,21 @@ def gold_view(
                 return True
         return False
 
+    def parent_has_run(run: Sequence[str]) -> bool:
+        # the words are [a-z0-9]+ (``_literal_words``), so the pattern needs no escaping
+        pattern = "[^A-Za-z0-9]+".join(run)
+        try:
+            return repo.run("grep", "-q", "-I", "-i", "-w", "-E", "-e", pattern, parent).ok
+        except Exception:
+            return False
+
     known = frozenset() if novel is None else novel
     novel = known | _absent_from_parent(repo, parent, candidates - known)
     return GoldView(
         novel=novel,
         parent_has=parent_has,
         product_has=product_has,
+        parent_has_run=parent_has_run,
         src_after="\n".join(src_afters),
         test_after="\n".join(test_afters),
         src_added=tuple(src_added),
@@ -866,11 +878,43 @@ def _names_test_path(text: str, gold: GoldView) -> bool:
     return False
 
 
+#: A string literal of a test line: double-quoted, single-quoted or a Go raw string.
+_LITERAL_RE = re.compile(r'"((?:[^"\\\n]|\\.)*)"|\'((?:[^\'\\\n]|\\.)*)\'|`([^`\n]*)`')
+#: A format verb or placeholder (``%T``, ``%-5.2f``, ``%%``, ``{}``, ``{0}``, ``{name}``),
+#: dropped before words are read on both sides, so ``writer %T does`` reads ``writer does``.
+_FORMAT_VERB_RE = re.compile(r"%[-+#0-9.*]*[A-Za-z%]|\{[\w:.!]*\}")
+_LITERAL_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _literal_words(text: str) -> list[str]:
+    """``text``'s words for the asserted-literal rule: lower-case alphanumeric runs, with
+    format verbs dropped (so case, whitespace and punctuation never break a run)."""
+    return _LITERAL_WORD_RE.findall(_FORMAT_VERB_RE.sub(" ", text).lower())
+
+
+def _asserted_literal(statement: str, gold: GoldView, request: str) -> bool:
+    """Whether ``statement`` repeats :data:`~crb.core.stated.LITERAL_RUN_WORDS` words in a
+    row of a string literal on an added held-out test line (a whole literal of that many words
+    or more included) that neither ``request`` nor the parent tree holds as a run."""
+    n = _stated.LITERAL_RUN_WORDS
+    said = _grams(_literal_words(statement), n)
+    if not said:
+        return False
+    asked = _grams(_literal_words(request), n)
+    has_run = gold.parent_has_run or (lambda run: gold.parent_has(" ".join(run)))
+    runs: set[tuple[str, ...]] = set()
+    for line in gold.test_added:
+        for m in _LITERAL_RE.finditer(line):
+            runs |= _grams(_literal_words(next(g for g in m.groups() if g is not None)), n)
+    return any(not has_run(run) for run in sorted((runs & said) - asked))
+
+
 def req_guard(
     text: str,
     items: Sequence[_stated.StatedItem],
     structure: str,
     gold: GoldView | None,
+    request: str = "",
 ) -> list[str]:
     """The reasons a stated-requirement entry is withheld (ADR-0052 item 3), sorted; empty
     when it may reach the brief. Fails closed: no ``gold`` view is ``req_no_gold``.
@@ -893,7 +937,10 @@ def req_guard(
     within sixteen with only copies of one token inserted inside it. ``req_signature``: a
     signature item carries a body (a brace, ``;``, ``=>``, ``return``, or executable Python
     before its name or past its header; a Go method's header runs through its parameter
-    list and one result)."""
+    list and one result). ``req_asserted_literal``: an item's statement repeats four words in
+    a row of a string literal an added held-out test line holds (format verbs dropped, case,
+    whitespace and punctuation ignored) that neither ``request`` — the text the builder is
+    given — nor the parent tree holds; the author restates it in their own words."""
     if gold is None:
         return [_stated.REASON_NO_GOLD]
     reasons: set[str] = set()
@@ -947,6 +994,8 @@ def req_guard(
             or _SIGNATURE_CODE_RE.search(item.statement.split("(", 1)[0])
         ):
             reasons.add(_stated.REASON_SIGNATURE)
+        if _asserted_literal(item.statement, gold, request):
+            reasons.add(_stated.REASON_ASSERTED_LITERAL)
     for tok in _test_def_tokens(gold):
         if _names_ci(text, tok) and not _holds(gold.src_after, tok) and not gold.parent_has(tok):
             reasons.add(_stated.REASON_TEST_NAME)
@@ -1057,7 +1106,9 @@ def compose(
     req_reasons: set[str] = set()
     req_kept: list[ContextEntry] = []
     for e in req_entries:
-        why = req_guard(e.text, e.items, e.structure, gold)
+        why = req_guard(
+            e.text, e.items, e.structure, gold, request=f"{ticket.subject}\n{ticket.message}"
+        )
         if why:
             req_reasons.update(why)
             refused_lib.append(e.text)

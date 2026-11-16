@@ -212,6 +212,7 @@ def lint_set(doc: object, clone: Path) -> list[tuple[str, list[str]]]:
         try:
             parent = repo.parent(entry.task_id)
             changed = repo.changed_files(entry.task_id)
+            request = repo.message(entry.task_id)
         except GitError as err:
             raise CliError(f"{entry.task_id[:12]} is not readable in {clone.name}: {err}") from err
         tests = [p for p in changed if is_test_path(p)]
@@ -223,11 +224,14 @@ def lint_set(doc: object, clone: Path) -> list[tuple[str, list[str]]]:
         )
         if gold is None:
             raise CliError(f"{entry.task_id[:12]}: a changed file is not readable in {clone.name}")
-        out.append((entry.task_id, req_guard(entry.text, entry.items, cset.structure, gold)))
+        why = req_guard(entry.text, entry.items, cset.structure, gold, request=request)
+        out.append((entry.task_id, why))
     return out
 
 
 def cmd_lint(args: argparse.Namespace) -> int:
+    from crb.core.stated import ASSERTED_LITERAL_ADVICE, REASON_ASSERTED_LITERAL
+
     path = Path(args.file)
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
@@ -240,6 +244,8 @@ def cmd_lint(args: argparse.Namespace) -> int:
     else:
         lines = [f"{t[:12]}  {'withheld ' + ','.join(r) if r else 'ok'}" for t, r in results]
         lines.append(f"{len(results) - len(withheld)}/{len(results)} entries pass the guard")
+        if any(REASON_ASSERTED_LITERAL in r for _t, r in withheld):
+            lines.append(f"{REASON_ASSERTED_LITERAL}: {ASSERTED_LITERAL_ADVICE}")
         print_lines(lines)
     if withheld:
         raise CliError(f"{len(withheld)} entr{'y' if len(withheld) == 1 else 'ies'} withheld")

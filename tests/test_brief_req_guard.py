@@ -611,6 +611,104 @@ def test_a_go_method_signature_is_a_header_not_a_body() -> None:
         assert stated.REASON_SIGNATURE in guard(item, view=view), body
 
 
+#: A held-out Go assertion on a panic message (the review's flush-panic case).
+PANIC_TEST = (
+    "func TestResponse_FlushPanics(t *testing.T) {",
+    '\tassert.PanicsWithError(t, "echo: response writer *echo.testResponseWriter does not '
+    'support flushing (http.Flusher interface)", func() {',
+)
+PANIC_ITEMS = (
+    "The panic value is an error. Its text is echo: response writer, a space, the writer's Go "
+    "type as printed by fmt, a space, then does not support flushing (http.Flusher interface).",
+    "Flush panics with echo: Response Writer %T DOES NOT support   flushing.",
+)
+
+
+def _panic_view(**kw: Any) -> GoldView:
+    return gold(novel=frozenset(), test_added=PANIC_TEST, test_paths=("response_test.go",), **kw)
+
+
+def test_a_statement_repeating_an_asserted_literal_is_refused() -> None:
+    """Four words in a row of a literal the held-out test asserts, held neither by the request
+    nor by the parent, are refused whatever the case, spacing, punctuation or format verb."""
+    for statement in PANIC_ITEMS:
+        item = StatedItem("i01", "error_text", statement, "change_detail")
+        assert stated.REASON_ASSERTED_LITERAL in guard(item, view=_panic_view()), statement
+    own_words = StatedItem(
+        "i01", "error_text", "Flush panics with an error naming the writer's type", "nowhere"
+    )
+    assert guard(own_words, view=_panic_view()) == []
+
+
+def test_an_asserted_literal_the_request_states_is_not_refused() -> None:
+    item = StatedItem("i01", "error_text", PANIC_ITEMS[0], "change_detail")
+    e = entry(item)
+    request = (
+        "Restore the flush panic: echo: response writer %T does not support flushing "
+        "(http.Flusher interface)"
+    )
+    assert stated.REASON_ASSERTED_LITERAL not in req_guard(
+        e.text, e.items, e.structure, _panic_view(), request=request
+    )
+    # compose reads the request from the ticket the builder is given
+    refused = _compose(REQ_ARM, (e,), gold=_panic_view(), novel=frozenset())
+    assert refused.labels[LABEL_CTX_REQ_REFUSED] == stated.REASON_ASSERTED_LITERAL
+    ticket = Ticket("fix: restore the flush panic", request)
+    delivered = compose(
+        REQ_ARM,
+        ticket,
+        repo="gorepo",
+        language="go",
+        mode="blind",
+        library=(e,),
+        novel=frozenset(),
+        gold=_panic_view(),
+    )
+    assert delivered.labels[LABEL_CTX_DELIVERED] == "1"
+
+
+def test_an_asserted_literal_the_parent_tree_holds_is_not_refused(tmp_path: Path) -> None:
+    item = StatedItem("i01", "error_text", PANIC_ITEMS[0], "change_detail")
+    held = _panic_view(parent_has_run=lambda run: run == ("does", "not", "support", "flushing"))
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=held)  # other runs stay novel
+    every = _panic_view(parent_has_run=lambda run: True)
+    assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=every)
+    # gold_view's own lookup over a real parent tree: case and punctuation between words aside
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "response.go").write_text("package echo\n")
+    (root / "response_test.go").write_text("package echo\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    bare = _git(root, "rev-parse", "HEAD")
+    (root / "legacy.go").write_text(
+        'var msg = "ECHO: Response-Writer %T does not support flushing (http.Flusher interface)"\n'
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent with the message")
+    holding = _git(root, "rev-parse", "HEAD")
+    (root / "response_test.go").write_text("package echo\n" + "\n".join(PANIC_TEST) + "\n")
+    _git(root, "add", "response_test.go")
+    _git(root, "commit", "-q", "-m", "change")
+    commit = _git(root, "rev-parse", "HEAD")
+    repo = GitRepo(root)
+    tests = ("response_test.go",)
+    view = gold_view(repo, parent=holding, commit=commit, src_paths=(), test_paths=tests)
+    assert view is not None
+    assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=view)
+    _git(root, "checkout", "-q", "-b", "without", bare)
+    (root / "response_test.go").write_text("package echo\n" + "\n".join(PANIC_TEST) + "\n")
+    _git(root, "add", "response_test.go")
+    _git(root, "commit", "-q", "-m", "change without the message")
+    commit = _git(root, "rev-parse", "HEAD")
+    view = gold_view(repo, parent=bare, commit=commit, src_paths=(), test_paths=tests)
+    assert view is not None
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
+
+
 # -- compose: the amendment is req-only -------------------------------------------------------
 
 
