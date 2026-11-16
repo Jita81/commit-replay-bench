@@ -480,6 +480,28 @@ def test_jvm_and_dotnet_declaration_forms_are_held_out_names(
     assert stated.REASON_TEST_NAME in guard(item, view=view), (path, name)
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "public record class HiddenWidgetSeed(int Value);",
+        "public readonly record struct HiddenWidgetSeed(int Value);",
+    ],
+)
+def test_a_csharp_record_class_or_struct_names_its_type_not_the_keyword(line: str) -> None:
+    """Outside review: ``record class X`` and ``record struct X`` declare ``X``; reading the
+    ``class`` or ``struct`` keyword as the name let a type declared only in the held-out test
+    be disclosed with a ``tests_only`` provenance."""
+    test_after = f"{line}\npublic class WidgetTests {{}}\n"
+    view = gold(
+        novel=gold().novel | {"HiddenWidgetSeed"},
+        test_after=test_after,
+        test_paths=("tests/WidgetTests.cs",),
+        test_added=tuple(test_after.splitlines()),
+    )
+    item = StatedItem("i01", "rule", "Cover HiddenWidgetSeed", "tests_only", ("HiddenWidgetSeed",))
+    assert stated.REASON_TEST_NAME in guard(item, view=view)
+
+
 def test_a_jvm_statement_line_defines_no_name_and_a_long_line_stays_linear() -> None:
     """A Groovy command call or an infix assertion is a statement, not a declaration; a line
     of thousands of block comments or annotations is read in linear time."""

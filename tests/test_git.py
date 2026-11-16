@@ -23,6 +23,7 @@ import os
 import re
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -103,6 +104,146 @@ def test_changed_and_diff_names_read_a_non_ascii_path_raw(tmp_path: Path) -> Non
     assert sorted(repo.changed_files("HEAD")) == ["café.py", "plain.py"]
     (root / "café.py").write_text("x = 2\n", encoding="utf-8")
     assert repo.diff_names("HEAD") == ["café.py"]
+
+
+def _fixture_repo(root: Path) -> None:
+    root.mkdir()
+    for args in (
+        ("init", "-q"),
+        ("config", "user.email", "fixture@example.invalid"),
+        ("config", "user.name", "fixture"),
+    ):
+        subprocess.run(["git", "-C", str(root), *args], check=True)
+
+
+def _git(root: Path, *args: str, stdin: bytes | None = None) -> str:
+    return (
+        subprocess.run(
+            ["git", "-C", str(root), *args], input=stdin, capture_output=True, check=True
+        )
+        .stdout.decode("ascii")
+        .strip()
+    )
+
+
+def test_changed_and_diff_names_keep_a_carriage_return_in_a_path(tmp_path: Path) -> None:
+    """Outside review: a ``\\r`` in a tracked name is read as itself, never translated to
+    a newline by text-mode decoding."""
+    root = tmp_path / "repo"
+    _fixture_repo(root)
+    name = "odd\rname.py"
+    (root / name).write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "one"], check=True)
+    repo = GitRepo(root)
+    assert repo.changed_files("HEAD") == [name]
+    (root / name).write_text("x = 2\n", encoding="utf-8")
+    assert repo.diff_names("HEAD") == [name]
+
+
+def test_changed_and_diff_names_read_a_non_utf8_path_reversibly(tmp_path: Path) -> None:
+    """Outside review: a tracked name holding a byte that is not UTF-8 neither raises nor is
+    mangled; it is decoded as :func:`os.fsdecode` names the file. The tree is built with git
+    plumbing, so no filesystem support for such a name is needed (APFS refuses one)."""
+    root = tmp_path / "repo"
+    _fixture_repo(root)
+    raw_name = b"bad\xffname.py"
+    blob = _git(root, "hash-object", "-w", "--stdin", stdin=b"x = 1\n")
+    _git(
+        root,
+        "update-index",
+        "-z",
+        "--index-info",
+        stdin=b"100644 " + blob.encode() + b"\t" + raw_name + b"\0",
+    )
+    tree = _git(root, "write-tree")
+    commit = _git(root, "commit-tree", tree, "-m", "one")
+    _git(root, "update-ref", "HEAD", commit)
+    repo = GitRepo(root)
+    name = os.fsdecode(raw_name)
+    assert repo.changed_files("HEAD") == [name]
+    assert os.fsencode(name) == raw_name
+    # the index holds the path, the working tree does not: a deletion against HEAD
+    assert repo.diff_names("HEAD") == [name]
+
+
+_FS_PROBE = """
+import os, sys
+from crb.core.git import GitRepo
+if sys.getfilesystemencoding().lower().replace("-", "") == "utf8":
+    print("utf8")
+    raise SystemExit(0)
+raw = bytes.fromhex(sys.argv[2])
+repo = GitRepo(sys.argv[1])
+for names in (repo.changed_files("HEAD"), repo.diff_names("HEAD")):
+    assert names == [os.fsdecode(raw)], names
+    assert os.fsencode(names[0]) == raw, names
+print("ok")
+"""
+
+
+def test_z_paths_follow_a_non_utf8_filesystem_encoding(tmp_path: Path) -> None:
+    """Outside review: under a filesystem encoding that is not UTF-8 a tracked ``café.py``
+    is named as :func:`os.fsdecode` names it, so it equals the directory listing's name and
+    goes back to git as the same bytes. Run in a child interpreter under the C locale; where
+    the platform fixes the filesystem encoding to UTF-8 (macOS) the case cannot arise."""
+    root = tmp_path / "repo"
+    _fixture_repo(root)
+    raw_name = "café.py".encode()
+    blob = _git(root, "hash-object", "-w", "--stdin", stdin=b"x = 1\n")
+    _git(
+        root,
+        "update-index",
+        "-z",
+        "--index-info",
+        stdin=b"100644 " + blob.encode() + b"\t" + raw_name + b"\0",
+    )
+    commit = _git(root, "commit-tree", _git(root, "write-tree"), "-m", "one")
+    _git(root, "update-ref", "HEAD", commit)
+    env = {
+        **os.environ,
+        "LC_ALL": "C",
+        "LANG": "C",
+        "PYTHONUTF8": "0",
+        "PYTHONCOERCECLOCALE": "0",
+        "PYTHONPATH": os.pathsep.join(sys.path),
+    }
+    done = subprocess.run(
+        [sys.executable, "-c", _FS_PROBE, str(root), raw_name.hex()],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    if done.stdout.strip() == "utf8":
+        pytest.skip(
+            "this platform fixes the filesystem encoding to UTF-8"
+            " (outside review of pull request 150, -z path decoding)"
+        )
+    assert done.stdout.strip() == "ok"
+
+
+def test_a_non_utf8_path_on_disk_matches_the_filesystem_walk(tmp_path: Path) -> None:
+    """Where the filesystem accepts a non-UTF-8 name, ``diff_names`` names it exactly as
+    a directory listing does (the comparison the workspace makes)."""
+    root = tmp_path / "repo"
+    _fixture_repo(root)
+    try:
+        with open(os.fsencode(root) + b"/bad\xffname.py", "wb") as fh:
+            fh.write(b"x = 1\n")
+    except OSError as err:
+        pytest.skip(
+            f"the filesystem refuses a non-UTF-8 file name: {err}"
+            " (outside review of pull request 150, -z path decoding)"
+        )
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "one"], check=True)
+    repo = GitRepo(root)
+    listed = [p for p in os.listdir(root) if p != ".git"]
+    assert repo.changed_files("HEAD") == listed
+    (root / listed[0]).write_bytes(b"x = 2\n")
+    assert repo.diff_names("HEAD") == listed
 
 
 def test_numstat_churn(pyrepo: pr.PyRepo) -> None:
