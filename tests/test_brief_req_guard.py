@@ -9,7 +9,9 @@ What it does: Pins each guard reason on a minimal ``GoldView``; that a stated en
               (the ADR-0052 amendment); that the same text is refused on an oracle, mech or
               plain library arm, and that an entry without items, a fact or a learned line
               naming a novel token is refused on a req arm too; that a guard refusal is
-              counted and its reasons stamped; and ``gold_view`` over a real two-commit repo.
+              counted and its reasons stamped; ``gold_view`` over a real two-commit repo; that
+              ``novel_tokens`` agrees with ``parent_has`` on a word held only inside a longer
+              match; and that ``product`` needs the word in parent product code.
 How:          Hand-built ``GoldView`` values (``parent_has`` over a fixed set); one temporary
               git repository for ``gold_view``; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -38,6 +40,7 @@ from crb.builders.brief import (
     Ticket,
     compose,
     gold_view,
+    novel_tokens,
     refuse_novel,
     req_guard,
 )
@@ -802,3 +805,137 @@ def test_gold_view_never_trusts_a_short_novel_set(
     assert view is not None
     assert {"name required", "extra_token_only_passed"} <= view.novel
     assert "validate" not in view.novel
+
+
+# -- the parent-tree read: one rule for novel_tokens and parent_has ----------------------------
+
+
+@pytest.fixture
+def shadowed(tmp_path: Path) -> tuple[GitRepo, str, str]:
+    """The parent holds "Service" and "Unavailable" only inside the phrase "Service
+    Unavailable", in a file the change does not touch; the change adds that phrase as a
+    string literal, so the literal and both words are candidates."""
+    root = tmp_path / "shadow"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "timeout.py").write_text("# returns 503 Service Unavailable to the client\n")
+    (root / "calc.py").write_text("def validate(name):\n    return name\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    parent = _git(root, "rev-parse", "HEAD")
+    (root / "calc.py").write_text(
+        'def validate(name):\n    if not name:\n        raise ValueError("Service Unavailable")\n'
+        "    return name\n"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "change")
+    return GitRepo(root), parent, _git(root, "rev-parse", "HEAD")
+
+
+def _shadow_view(shadowed: tuple[GitRepo, str, str]) -> GoldView:
+    repo, parent, commit = shadowed
+    view = gold_view(repo, parent=parent, commit=commit, src_paths=("calc.py",), test_paths=())
+    assert view is not None
+    return view
+
+
+def test_novel_tokens_sees_a_word_inside_a_longer_parent_match(
+    shadowed: tuple[GitRepo, str, str],
+) -> None:
+    repo, parent, commit = shadowed
+    novel = novel_tokens(repo, parent=parent, commit=commit, paths=("calc.py",))
+    view = _shadow_view(shadowed)
+    assert view.parent_has("Service") and view.parent_has("Unavailable")
+    assert "Service" not in novel and "Unavailable" not in novel
+    assert "Service" not in view.novel and "Unavailable" not in view.novel
+
+
+def test_novel_tokens_agrees_with_parent_has_on_every_candidate(
+    shadowed: tuple[GitRepo, str, str],
+) -> None:
+    """Both ways: a held word is not novel, and a word the parent lacks (``ValueError``)
+    stays novel — the extra passes never drop an absent token."""
+    repo, parent, commit = shadowed
+    novel = novel_tokens(repo, parent=parent, commit=commit, paths=("calc.py",))
+    view = _shadow_view(shadowed)
+    assert "ValueError" in novel
+    for tok in ("Service", "Unavailable", "Service Unavailable", "ValueError"):
+        assert (tok in novel) == (not view.parent_has(tok)), tok
+
+
+def test_a_statement_naming_a_parent_word_is_not_refused_as_undeclared(
+    shadowed: tuple[GitRepo, str, str],
+) -> None:
+    view = _shadow_view(shadowed)
+    item = StatedItem(
+        "i01",
+        "error_text",
+        "An empty name raises ValueError reporting that the Service is Unavailable",
+        "change_detail",
+        ("ValueError",),
+    )
+    assert req_guard(entry(item).text, (item,), "prose", view) == []
+
+
+# -- provenance: product means the parent's product code ---------------------------------------
+
+
+def test_provenance_product_needs_the_token_in_parent_product_code() -> None:
+    """A word the parent holds only in a comment or a test file is not ``product``: it ranks
+    by the change's post-images (here the source: ``change_detail``)."""
+    item = StatedItem("i01", "name", "Add validate", "product", ("validate",))
+    weak = gold(product_has=lambda tok: False)
+    assert stated.REASON_PROVENANCE in req_guard(entry(item).text, (item,), "prose", weak)
+    relabelled = StatedItem("i01", "name", "Add validate", "change_detail", ("validate",))
+    assert req_guard(entry(relabelled).text, (relabelled,), "prose", weak) == []
+
+
+def test_provenance_never_drops_below_product_for_a_parent_word() -> None:
+    """A parent word neither post-image holds stays ``product``, never ``nowhere``, however
+    the parent holds it."""
+    item = StatedItem("i01", "rule", "Keep the Config loader", "product", ("Config",))
+    view = gold(product_has=lambda tok: False)
+    assert req_guard(entry(item).text, (item,), "prose", view) == []
+
+
+@pytest.fixture
+def comment_and_test_only(tmp_path: Path) -> tuple[GitRepo, str, str]:
+    root = tmp_path / "prov"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "encode.py").write_text(
+        "# Marshal is the counterpart of Unmarshal\ndef Unmarshal(b):\n    return b\n"
+    )
+    (root / "tests").mkdir()
+    (root / "tests" / "test_header.py").write_text("def test_h():\n    h = Clone()\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    parent = _git(root, "rev-parse", "HEAD")
+    (root / "encode.py").write_text(
+        "# Marshal is the counterpart of Unmarshal\ndef Unmarshal(b):\n    return b\n"
+        "def Marshal(v):\n    return Clone(v)\n"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "change")
+    return GitRepo(root), parent, _git(root, "rev-parse", "HEAD")
+
+
+def test_gold_view_product_has_skips_comments_and_test_files(
+    comment_and_test_only: tuple[GitRepo, str, str],
+) -> None:
+    repo, parent, commit = comment_and_test_only
+    view = gold_view(repo, parent=parent, commit=commit, src_paths=("encode.py",), test_paths=())
+    assert view is not None
+    assert view.parent_has("Marshal") and view.parent_has("Clone")
+    assert view.product_has is not None
+    assert not view.product_has("Marshal") and not view.product_has("Clone")
+    assert view.product_has("Unmarshal")
+    for tok in ("Marshal", "Clone"):
+        item = StatedItem("i01", "name", f"Add {tok}", "product", (tok,))
+        assert stated.REASON_PROVENANCE in req_guard(entry(item).text, (item,), "prose", view)
+        moved = StatedItem("i01", "name", f"Add {tok}", "change_detail", (tok,))
+        assert req_guard(entry(moved).text, (moved,), "prose", view) == []

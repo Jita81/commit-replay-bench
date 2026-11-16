@@ -105,7 +105,7 @@ from crb.core import context_arm as _arms
 from crb.core import stated as _stated
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_BLIND
-from crb.core.spec import RepoConfig
+from crb.core.spec import RepoConfig, is_test_path
 
 #: The arm grammar is the core's, ONE vocabulary (``crb.core.context_arm``, ADR-0026 item 1):
 #: the composer names its bases and labels through it, so a brief and a ledger row can never
@@ -334,6 +334,10 @@ def _show_strict(repo: GitRepo, rev: str, path: str) -> str:
 #: More candidates than this and the parent-tree read is skipped: every candidate stays
 #: novel (the guard fails closed rather than build an unbounded command line).
 MAX_CANDIDATES = 2000
+#: How many ``git grep -o`` passes :func:`_absent_from_parent` makes. ``-o`` prints one match
+#: per position (the longest), so a candidate inside a longer candidate's match is only seen
+#: on a later pass without that longer one. Past this many passes the rest stay novel.
+MAX_GREP_PASSES = 8
 
 
 def novel_tokens(
@@ -356,27 +360,45 @@ def _introduced(before: str, after: str) -> set[str]:
 
 
 def _absent_from_parent(repo: GitRepo, parent: str, candidates: set[str]) -> frozenset[str]:
-    """The ``candidates`` the WHOLE parent tree lacks as whole words (one ``git grep``)."""
+    """The ``candidates`` the WHOLE parent tree lacks as whole words: the same answer as
+    ``git grep -q -w -F`` per candidate (``GoldView.parent_has``), in few ``git grep`` runs.
+
+    ``git grep -o`` prints only the longest match at a position and resumes after it, so a
+    candidate the parent holds only inside a longer candidate's match ("Service" inside the
+    literal "Service Unavailable") is not printed. Every printed line that equals a remaining
+    candidate is one the parent holds; drop those and grep again for the rest, until a pass
+    sees nothing new. A printed line is only ever an exact pattern found as a whole word, so a
+    pass can drop a held token but never an absent one; past :data:`MAX_GREP_PASSES`, or on
+    any failure, the rest stay novel (fail closed)."""
     if not candidates:
         return frozenset()
-    ordered = sorted(candidates)
-    if len(ordered) > MAX_CANDIDATES:
+    if len(candidates) > MAX_CANDIDATES:
         return frozenset(candidates)
-    try:
-        found = repo.run(
-            "grep",
-            "-h",
-            "-o",
-            "-w",
-            "-F",
-            *[a for tok in ordered for a in ("-e", tok)],
-            parent,
-            check=False,
-        ).stdout
-    except Exception:  # cannot read the parent tree: every candidate stays novel (fail closed)
-        return frozenset(candidates)
-    seen = {line.strip() for line in (found or "").splitlines() if line.strip()}
-    return frozenset(c for c in candidates if c not in seen)
+    remaining = set(candidates)
+    for _ in range(MAX_GREP_PASSES):
+        if not remaining:
+            break
+        try:
+            found = repo.run(
+                "grep",
+                "-I",
+                "-h",
+                "-o",
+                "-w",
+                "-F",
+                *[a for tok in sorted(remaining) for a in ("-e", tok)],
+                parent,
+                check=False,
+            ).stdout
+        except Exception:  # cannot read the parent tree: the rest stay novel (fail closed)
+            break
+        # exact lines only, never stripped: a line that is not itself a remaining candidate
+        # (a "Binary file ... matches" notice) proves nothing
+        seen = set((found or "").split("\n")) & remaining
+        if not seen:
+            break
+        remaining -= seen
+    return frozenset(remaining)
 
 
 def names_novel(line: str, novel: frozenset[str]) -> bool:
@@ -409,7 +431,10 @@ class GoldView:
     :func:`novel_tokens` uses; any failure answers ``False``, so a token stays answer-side).
     ``test_after_by_path`` holds each test path's own post-image (``(path, text)``), so a
     language-specific rule reads only its own language's files; left empty, ``test_after``
-    stands for it when every test path is one language's."""
+    stands for it when every test path is one language's. ``product_has`` is the stricter
+    question the ``product`` provenance asks: whether the parent holds the token that way in
+    a file that is not a test file, on a line that is not only a comment; ``None`` reads
+    ``parent_has``."""
 
     novel: frozenset[str]
     parent_has: Callable[[str], bool]
@@ -419,6 +444,14 @@ class GoldView:
     test_added: tuple[str, ...] = ()
     test_paths: tuple[str, ...] = ()
     test_after_by_path: tuple[tuple[str, str], ...] = ()
+    product_has: Callable[[str], bool] | None = None
+
+
+#: A line that is only a comment (``//``, ``#``, ``/*``, a ``*`` continuation, ``--``): a word
+#: on it is not product code. Its errors go answer-side only: a trailing comment after code is
+#: not caught (the word stays ``product``), and a code line starting ``*`` or ``#`` reads as a
+#: comment (the word ranks by the change instead).
+_COMMENT_LINE_RE = re.compile(r"^\s*(?://|#|/\*|\*|--)")
 
 
 def _added_lines(before: str, after: str) -> list[str]:
@@ -469,11 +502,28 @@ def gold_view(
         except Exception:
             return False
 
+    def product_has(token: str) -> bool:
+        try:
+            out = repo.run("grep", "-I", "-z", "-w", "-F", "-e", token, parent, check=False)
+        except Exception:
+            return False
+        prefix = f"{parent}:"
+        # one record per "\n" ("rev:path\0line"); never str.splitlines, which also splits on
+        # form feeds and other separators inside a source line and could fake a hit
+        for rec in (out.stdout or "").split("\n"):
+            name, sep, line = rec.partition("\0")
+            if not sep or not name.startswith(prefix):
+                continue
+            if not is_test_path(name[len(prefix) :]) and not _COMMENT_LINE_RE.match(line):
+                return True
+        return False
+
     known = frozenset() if novel is None else novel
     novel = known | _absent_from_parent(repo, parent, candidates - known)
     return GoldView(
         novel=novel,
         parent_has=parent_has,
+        product_has=product_has,
         src_after="\n".join(src_afters),
         test_after="\n".join(test_afters),
         src_added=tuple(src_added),
@@ -697,12 +747,19 @@ def _holds(text: str, token: str) -> bool:
 
 
 def _token_provenance(token: str, gold: GoldView) -> str:
-    if gold.parent_has(token):
+    """The token's provenance. ``product`` first only when the parent holds it in product
+    code (``product_has``); a token the parent holds only in a test file or a comment ranks
+    by the change's post-images, and falls back to ``product`` (never lower than the parent
+    rule alone) when neither post-image holds it. The label only ever moves answer-side."""
+    product_has = gold.product_has if gold.product_has is not None else gold.parent_has
+    if product_has(token):
         return _stated.PROV_PRODUCT
     if _holds(gold.src_after, token):
         return _stated.PROV_CHANGE_DETAIL
     if _holds(gold.test_after, token):
         return _stated.PROV_TESTS_ONLY
+    if gold.parent_has(token):
+        return _stated.PROV_PRODUCT
     return _stated.PROV_NOWHERE
 
 

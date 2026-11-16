@@ -89,8 +89,12 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
      on either reading counts, so masking never leaves fewer tokens named.
    - `req_provenance`: an item's declared provenance is not the most answer-side of the tokens
      it discloses or names. The ranking is nowhere < product < change_detail < tests_only, and
-     a token in both the source and the tests counts as change_detail. Every lookup, parent
-     included, is whole-word and case-sensitive, so a token that appears only inside a longer
+     a token in both the source and the tests counts as change_detail. A token is product only
+     when the parent holds it in product code: a file that is not a test path, on a line that
+     is not only a comment (`//`, `#`, `/*`, `*`, `--`). A token the parent holds only in a test
+     file or a comment ranks by the post-images, and is product when neither holds it, so the
+     label never ranks below the plain parent lookup. Every lookup, parent included, is
+     whole-word and case-sensitive, so a token that appears only inside a longer
      word does not lower the provenance. The check is made twice, once on the tokens named
      on either reading and once on those named with the substring mask alone, and the item
      is refused when either disagrees.
@@ -217,7 +221,10 @@ may name a token the commit introduced when an item declares it, with checked pr
   `tests_only` is close to handing over the tests in words, hence the required strata.
 - The novel set ignores short identifiers and single digits, and makes every candidate novel
   on a very large commit. Such tasks lean toward refusal. Report the n of withheld tasks next
-  to any result.
+  to any result. A token counts as held by the parent exactly when the per-token lookup finds
+  it, even when the parent holds it only inside a longer candidate ("Service" inside "Service
+  Unavailable"); the batched read repeats until it agrees, and keeps the rest novel past its
+  pass limit.
 - Each structure needs its own `req-placebo`, length-matched to it, before any claim that
   "the items helped" rather than "more text helped".
 
