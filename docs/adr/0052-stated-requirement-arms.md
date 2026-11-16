@@ -132,20 +132,21 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
    - `req_asserted_literal`: four words in a row of a string literal an added test line may
      assert (case names, `t.Run` and `subTest` titles, pytest ids and test docstrings aside)
      that neither the request nor the parent holds; format verbs are dropped on both sides,
-     the parent lookup included. A `name:`, `desc:` or `description:` field names a case
-     only in a line that opens with `{` (a table row); an `id=` only as an argument of a
-     `pytest.param` (or `param`) call open on the same line; a docstring only when the
-     Python test post-image parses (the standard `ast` module) and the added line lies only
-     inside a module, class or function docstring there (its first statement, a string
-     constant alone on its lines) whose text no other string of the post-image holds — no
-     neighbouring added line or header pattern exempts it, and a post-image that is missing,
-     not Python or does not parse exempts nothing. Known limits: a docstring or comment of a
-     non-Python test file is read as asserted, as is an `id=` on its own line of a wrapped
-     `pytest.param` (false refusals, never a leak); only
-     literals of four or more words are checked; a filler word inside a quote, or a
-     multi-line raw string, evades it; a table row's `desc:` or `description:` field that
-     holds expected text (help text under test) is read as a case name; mechanism statements
-     and mirrored cases rely on human leak review.
+     the parent lookup included. An `id=` names a case only as an argument of a
+     `pytest.param` (or `param`) call open on the same line; an `ids=` list only as an
+     argument of a `parametrize` call open on the same line; a docstring only when the
+     Python test post-image parses (the standard `ast` module) and every `str.splitlines`
+     piece of the added line lies only inside a module, class or function docstring there
+     (its first statement, a string constant alone on its lines, no `>>>` doctest prompt)
+     whose text no other string of the post-image holds — no neighbouring added line or
+     header pattern exempts it, and a post-image that is missing, not Python or does not
+     parse exempts nothing. Known limits: a docstring or comment of a non-Python test file is
+     read as asserted, as is an `id=` or `ids=` on its own line of a wrapped call, a
+     docstring holding a doctest, and every table field — a `name:`, `desc:` or
+     `description:` field of a test-case table included, since a row of an expected list
+     looks the same (false refusals, never a leak); only literals of four or more words are
+     checked; a filler word inside a quote, or a multi-line raw string, evades it; mechanism
+     statements and mirrored cases rely on human leak review.
 
    The limits are fixed in `crb.core.stated`. Changing them needs a new ADR. A CLI lint
    (`crb ctxset lint FILE --clone DIR`) runs the same function against a local clone before a

@@ -909,28 +909,25 @@ _CASE_NAME_BEFORE_RE = re.compile(
 #: belongs to (:func:`_owning_call`) is a pytest ``param`` (:data:`_PARAM_CALL_RE`).
 _ID_BEFORE_RE = re.compile(r"\bid\s*=\s*$")
 _PARAM_CALL_RE = re.compile(r"(?:\bpytest\.|(?<![\w.]))param\s*$")
-#: A ``name:`` / ``desc:`` / ``description:`` field (quoted key or not) ending the text before
-#: a literal. It names a case only in a table row (:data:`_TABLE_ROW_RE`): the same field in
-#: an asserted value (``assert x == {"name": ...}``, ``want := &T{Name: ...}``) is asserted.
-_CASE_FIELD_BEFORE_RE = re.compile(
-    r"\b(?:name|desc|description)[\"']?\s*:\s*$",
-    re.IGNORECASE,
-)
-#: A line that opens a bare table row: ``{`` first, nothing before it.
-_TABLE_ROW_RE = re.compile(r"\s*\{")
-#: A pytest ``ids=`` list or tuple opening: its literals are case names.
+#: An ``ids=`` list or tuple opening: its literals are case names only when the call it
+#: belongs to (:func:`_owning_call`) is a pytest ``parametrize`` (:data:`_PARAMETRIZE_CALL_RE`);
+#: a plain ``ids = [...]`` assignment may hold the expected values.
 _IDS_OPEN_RE = re.compile(r"\bids\s*=\s*[\[(]")
+_PARAMETRIZE_CALL_RE = re.compile(r"\bparametrize\s*$")
 #: The line breaks :mod:`ast` counts lines by, so a row of :func:`_docstring_rows` is a line
-#: here (``str.splitlines`` also breaks on form feeds and other separators).
+#: here. ``str.splitlines`` (which :func:`_added_lines` uses) also breaks on form feeds and
+#: other separators, so :func:`_docstring_lines` compares the ``splitlines`` pieces of each row.
 _AST_LINE_RE = re.compile(r"\r\n|\r|\n")
 _DOC_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 
 
 def _in_ids_list(masked: str, start: int) -> bool:
     """Whether position ``start`` of ``masked`` (a line with literal contents blanked) lies
-    inside a pytest ``ids=[...]`` opened earlier on the same line."""
+    inside a pytest ``parametrize(..., ids=[...])`` opened earlier on the same line."""
     opens = list(_IDS_OPEN_RE.finditer(masked, 0, start))
     if not opens:
+        return False
+    if _PARAMETRIZE_CALL_RE.search(_owning_call(masked, opens[-1].start())) is None:
         return False
     gap = masked[opens[-1].end() : start]
     return 1 + gap.count("[") + gap.count("(") - gap.count("]") - gap.count(")") > 0
@@ -957,7 +954,8 @@ def _docstring_rows(tree: ast.Module, lines: Sequence[str], others: set[str]) ->
     function docstring fills whole — its first statement, an expression statement holding a
     string constant, nothing but whitespace before it on its first row or after it on its last
     — unless its text is also held by another string constant (``others``, the docstring-free
-    string constants of every parsed post-image)."""
+    string constants of every parsed post-image) or holds a doctest prompt (``>>>``), whose
+    expected output is asserted under ``--doctest-modules``."""
     rows: set[int] = set()
     for node in ast.walk(tree):
         if not isinstance(node, _DOC_OWNERS) or not node.body:
@@ -970,6 +968,7 @@ def _docstring_rows(tree: ast.Module, lines: Sequence[str], others: set[str]) ->
             and doc.end_lineno is not None
             and doc.end_col_offset is not None
             and doc.value.value not in others
+            and ">>>" not in doc.value.value
         ):
             continue
         head = lines[doc.lineno - 1].encode()[: doc.col_offset]
@@ -1015,7 +1014,8 @@ def _docstring_lines(gold: GoldView) -> frozenset[str]:
         lines = _AST_LINE_RE.split(text)
         rows = _docstring_rows(tree, lines, others) if tree is not None else set()
         for row, line in enumerate(lines, 1):
-            (inside if row in rows else elsewhere).add(line)
+            # the pieces test_added holds (_added_lines splits with str.splitlines)
+            (inside if row in rows else elsewhere).update(line.splitlines())
     return frozenset(inside - elsewhere)
 
 
@@ -1023,11 +1023,12 @@ def _asserted_literals(
     lines: Sequence[str], docstrings: frozenset[str] = frozenset()
 ) -> Iterator[str]:
     """The contents of the string literals on added test ``lines`` that may be asserted: every
-    literal except a test case's name or description (:data:`_CASE_NAME_BEFORE_RE`, a
-    table row's :data:`_CASE_FIELD_BEFORE_RE` field, a pytest ``ids=`` list, the ``id=`` of a
-    pytest ``param`` on the same line) and a line of ``docstrings`` (:func:`_docstring_lines`:
-    a docstring in the parsed Python test post-image). Conservative: a literal the rule cannot
-    place (a positional table field, a wrapped call, an ``id=`` of any other call) counts."""
+    literal except a test case's name (:data:`_CASE_NAME_BEFORE_RE`, the ``ids=`` list of a
+    pytest ``parametrize`` or the ``id=`` of a pytest ``param`` on the same line) and a line of
+    ``docstrings`` (:func:`_docstring_lines`: a docstring in the parsed Python test post-image).
+    Conservative: a literal the rule cannot place (any table field, ``name:`` included, since a
+    row of an expected list looks the same; a wrapped call; an ``id=`` or ``ids=`` of any other
+    call) counts."""
     for line in lines:
         if line in docstrings:
             continue
@@ -1036,7 +1037,6 @@ def _asserted_literals(
         for m in found:
             masked[m.start() + 1 : m.end() - 1] = " " * (m.end() - m.start() - 2)
         flat = "".join(masked)
-        row = bool(_TABLE_ROW_RE.match(line))
         for m in found:
             if (
                 _CASE_NAME_BEFORE_RE.search(line, 0, m.start())
@@ -1044,7 +1044,6 @@ def _asserted_literals(
                     _ID_BEFORE_RE.search(line, 0, m.start()) is not None
                     and _PARAM_CALL_RE.search(_owning_call(flat, m.start())) is not None
                 )
-                or (row and _CASE_FIELD_BEFORE_RE.search(line, 0, m.start()))
                 or _in_ids_list(flat, m.start())
             ):
                 continue

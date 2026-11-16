@@ -39,6 +39,7 @@ from crb.builders.brief import (
     ContextEntry,
     GoldView,
     Ticket,
+    _added_lines,
     compose,
     gold_view,
     novel_tokens,
@@ -735,8 +736,6 @@ def test_an_asserted_literal_the_parent_tree_holds_is_not_refused(tmp_path: Path
 CASE_NAME = "flush on a hijacked writer"
 CASE_NAME_LINES = (
     (f'\tt.Run("{CASE_NAME}", func(t *testing.T) {{',),
-    (f'\t\t{{name: "{CASE_NAME}", in: 3, want: 4}},',),
-    (f'\t{{"name": "{CASE_NAME}", "in": 3}},',),
     (f'@pytest.mark.parametrize("n", [3, 4], ids=["{CASE_NAME}", "flush twice"])',),
     (f'    pytest.param(3, 4, id="{CASE_NAME}"),',),
     (f'        with self.subTest("{CASE_NAME}"):',),
@@ -744,8 +743,7 @@ CASE_NAME_LINES = (
 
 
 def test_a_case_name_quoted_in_an_item_is_not_refused() -> None:
-    """A literal that names a test case (``t.Run``, ``subTest``, a ``name:`` field, pytest ids,
-    a test docstring) is not asserted, so an item quoting it is not ``req_asserted_literal``."""
+    """A literal that names a test case (``t.Run``, ``subTest``, pytest ids, a test docstring) is not asserted, so an item quoting it is not ``req_asserted_literal``."""
     item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
     for lines in CASE_NAME_LINES:
         view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.go",))
@@ -759,8 +757,8 @@ def test_a_case_name_quoted_in_an_item_is_not_refused() -> None:
 
 def test_an_asserted_message_beside_a_case_name_is_still_refused() -> None:
     """The same words asserted are refused, on their own line or after a case name on one line;
-    a literal the rule cannot place (a positional table field) counts as asserted, and so does
-    a ``name:`` field outside a table row (an asserted value)."""
+    a literal the rule cannot place (any table field, a ``name:`` field included) counts as
+    asserted."""
     item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
     for lines in (
         (f'\tassert.Equal(t, "{CASE_NAME}", err.Error())',),
@@ -772,6 +770,8 @@ def test_an_asserted_message_beside_a_case_name_is_still_refused() -> None:
         (f'    assert resp.json() == {{"name": "{CASE_NAME}"}}',),
         (f'\twant := &Widget{{Name: "{CASE_NAME}"}}',),
         ("\twant := &Widget{", f'\t\tName: "{CASE_NAME}",'),
+        (f'\t\t{{name: "{CASE_NAME}", in: 3, want: 4}},',),
+        (f'\t{{"name": "{CASE_NAME}", "in": 3}},',),
     ):
         view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.go",))
         assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view), lines
@@ -1311,3 +1311,60 @@ def test_a_docstring_is_exempt_only_in_a_parsed_python_post_image() -> None:
         test_after_by_path=(("x_test.py", after), ("y_test.go", f"x := `\n{doc}\n`\n")),
     )
     assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
+
+
+MSG = "cannot divide by zero here"
+MSG_ITEM = StatedItem("i01", "rule", f"It raises: {MSG}.", "nowhere")
+
+
+def _refused_in_py(after: str) -> bool:
+    view = gold(
+        novel=frozenset(),
+        test_added=tuple(_added_lines("", after)),
+        test_after=after,
+        test_paths=("x_test.py",),
+    )
+    return stated.REASON_ASSERTED_LITERAL in guard(MSG_ITEM, view=view)
+
+
+def test_a_doctest_docstring_is_asserted() -> None:
+    """A docstring holding a doctest prompt is not exempt: its expected output is asserted when
+    the module runs under ``--doctest-modules``."""
+    after = (
+        f'def helper():\n    """\n    >>> helper()\n    \'{MSG}\'\n    """\n    return compute()\n'
+    )
+    assert _refused_in_py(after)
+    assert not _refused_in_py(after.replace(">>> helper()", "Helper text."))
+
+
+@pytest.mark.parametrize("sep", ["\u2028", "\x0c", "\x1c", "\x85"])
+def test_a_line_separator_inside_a_literal_does_not_borrow_a_docstring_row(sep: str) -> None:
+    """``test_added`` splits with ``str.splitlines``; a piece of a non-docstring row that equals
+    a docstring row is still not exempt."""
+    piece = f"    '{MSG}' is the text\""
+    after = f'def test_a():\n    """\n{piece}\n    """\n    assert f() == "x{sep}{piece}\n'
+    assert _refused_in_py(after)
+
+
+def test_an_ids_assignment_is_asserted() -> None:
+    """``ids=`` names cases only inside an open ``parametrize`` call; a plain ``ids = [...]``
+    assignment (or ``ids=`` of any other call) may hold the expected values."""
+    item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
+    for lines in (
+        (f'    ids = ["{CASE_NAME}"]',),
+        (f'    assert make(ids=["{CASE_NAME}"]) == want',),
+    ):
+        view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.py",))
+        assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view), lines
+    assert _refused_in_py(f"def test_a():\n    ids = ['{MSG}']\n    assert sorted(get()) == ids\n")
+
+
+def test_a_name_field_of_an_expected_list_is_asserted() -> None:
+    """A ``name:`` field on a line opening with ``{`` may be an element of an expected list,
+    so no table field is exempt."""
+    assert _refused_in_py(
+        f"def test_a():\n    assert result == [\n        {{'name': '{MSG}'}},\n    ]\n"
+    )
+    lines = ("\twant := []Item{", f'\t\t{{Name: "{MSG}"}},', "\t}")
+    view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.go",))
+    assert stated.REASON_ASSERTED_LITERAL in guard(MSG_ITEM, view=view)
