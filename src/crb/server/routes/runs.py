@@ -139,6 +139,7 @@ from crb.core.ctxset import (
     CtxSet,
     CtxSetRefused,
     verify_coverage,
+    verify_open_gaps,
     verify_placebo,
 )
 from crb.core.ctxset import parse as parse_ctxset
@@ -792,6 +793,9 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         # ADR-0050: without these the worker would replay the pool as plain A0
         params["context_set"] = body.context_set
         params["context_role"] = body.context_role or ROLE_ENTRIES
+        if body.measure_open_gaps:
+            # ADR-0053: the recorded opt-in; the worker stamps each open-gap task's rows
+            params["measure_open_gaps"] = True
     if body.arm is not None:
         # set before the refusals: the credential check names the S1 test author's builder
         params["arm"] = body.arm
@@ -1270,8 +1274,11 @@ def ctxset_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
     (``ctxset_digest``, ``ctxset_repo``, ``ctxset_coverage``…) unless the stored body is the
     named digest and covers gold-clean tasks of the run's repository, one change each, and,
     for a placebo, unless its treatment is stored and it still matches it
-    (``ctxset_placebo_unmatched`` / ``ctxset_placebo_overlap``, via :func:`stored_ctxset`).
-    Nothing is queued on any refusal; the worker re-checks all of it at claim."""
+    (``ctxset_placebo_unmatched`` / ``ctxset_placebo_overlap``, via :func:`stored_ctxset`);
+    409 ``ctx_open_gaps`` (ADR-0053) when role ``entries`` would deliver a set whose entries
+    record open requirement gaps and the run did not opt in with ``measure_open_gaps``, its
+    ``detail.gaps`` listing each task's questions. Nothing is queued on any refusal; the
+    worker re-checks all of it at claim."""
     name = body.context_set
     if name is None:
         return
@@ -1302,6 +1309,21 @@ def ctxset_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
             e.reason,
             f"context set {name}: {e.detail} — nothing was queued",
             detail={"context_set": name, "reason": e.reason},
+        ) from e
+    try:
+        verify_open_gaps(
+            ctxset,
+            body.context_role or ROLE_ENTRIES,
+            measure=bool(body.measure_open_gaps),
+        )
+    except CtxSetRefused as e:
+        # ADR-0053: pushed back to the requester with the questions that would close it
+        raise ApiError(
+            409,
+            e.reason,
+            f"context set {name}: {e.detail} — nothing was queued (measure_open_gaps: true "
+            "runs it anyway, for measurement only)",
+            detail={"context_set": name, "reason": e.reason, "gaps": ctxset.open_gaps},
         ) from e
 
 
@@ -1492,6 +1514,10 @@ def submit_refusals(
       naming ``context_set`` on an unsealed deployment, naming a set not stored, or whose
       stored set fails its digest or does not cover gold-clean tasks of the repository
       (ADR-0050; :func:`ctxset_refusal`; the worker re-checks at claim);
+    * 409 ``ctx_open_gaps`` — a run delivering (role ``entries``) a set any of whose entries
+      records an open requirement gap, unless it opts in with ``measure_open_gaps``; the
+      detail's ``gaps`` lists each task's questions (ADR-0053; :func:`ctxset_refusal`; the
+      worker re-checks at claim);
     * 422 ``builder_login_invalid`` — a builder this run would call (the same list the
       presence check reads, an ``S1`` test author included) has a login whose last
       verification failed; one that is not fresh is verified once first — LAST, after every

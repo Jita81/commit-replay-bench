@@ -7,7 +7,8 @@ entry's text) and ``compare --control RUN --treatment RUN`` prints the paired, f
 comparison. A hindsight treatment's ceiling banner (or a stated set's banner) is printed
 first. ``lint FILE --clone DIR`` is the one offline verb: it parses a document and runs a
 stated set's entries through ``req_guard`` against a local clone's gold view (ADR-0052), so a
-drafter sees what a run would withhold before storing it.
+drafter sees what a run would withhold before storing it, and lists each entry's open
+requirement gaps as the questions a requester must answer (ADR-0053; never a lint failure).
 
 Navigation
 ----------
@@ -229,6 +230,30 @@ def lint_set(doc: object, clone: Path) -> list[tuple[str, list[str]]]:
     return out
 
 
+def open_gaps(doc: object) -> dict[str, list[dict[str, str]]]:
+    """Each task whose entry records open requirement gaps → its gaps as
+    ``{question, decision}`` (ADR-0053). Gaps are honest questions for the requester, not
+    leaks: ``lint`` lists them and never fails on them (a run refuses ``ctx_open_gaps``)."""
+    from crb.core import ctxset
+
+    try:
+        cset = ctxset.parse(doc)
+    except ctxset.CtxSetRefused as refused:
+        raise CliError(f"refused {refused.reason}: {refused.detail}") from refused
+    return {e.task_id: [g.to_doc() for g in e.gaps] for e in cset.entries if e.gaps}
+
+
+def open_gap_lines(gaps: dict[str, list[dict[str, str]]]) -> list[str]:
+    """The questions a requester must answer, one line each, under their task."""
+    lines: list[str] = []
+    for tid, qs in gaps.items():
+        lines.append(
+            f"{tid[:12]}  {len(qs)} open gap(s) — a run refuses ctx_open_gaps until closed"
+        )
+        lines.extend(f"  ? [{g['decision']}] {g['question']}" for g in qs)
+    return lines
+
+
 def cmd_lint(args: argparse.Namespace) -> int:
     from crb.core.stated import ASSERTED_LITERAL_ADVICE, REASON_ASSERTED_LITERAL
 
@@ -238,18 +263,22 @@ def cmd_lint(args: argparse.Namespace) -> int:
     except (OSError, ValueError) as e:
         raise CliError(f"cannot read {path.name}: {e}") from e
     results = lint_set(doc, Path(args.clone))
+    gaps = open_gaps(doc)
     withheld = [(t, r) for t, r in results if r]
     if args.json:
-        print_json({"entries": [{"task_id": t, "reasons": r} for t, r in results]})
+        print_json(
+            {"entries": [{"task_id": t, "reasons": r, "gaps": gaps.get(t, [])} for t, r in results]}
+        )
     else:
         lines = [f"{t[:12]}  {'withheld ' + ','.join(r) if r else 'ok'}" for t, r in results]
         lines.append(f"{len(results) - len(withheld)}/{len(results)} entries pass the guard")
         if any(REASON_ASSERTED_LITERAL in r for _t, r in withheld):
             lines.append(f"{REASON_ASSERTED_LITERAL}: {ASSERTED_LITERAL_ADVICE}")
+        lines.extend(open_gap_lines(gaps))
         print_lines(lines)
     if withheld:
         raise CliError(f"{len(withheld)} entr{'y' if len(withheld) == 1 else 'ies'} withheld")
     return EXIT_OK
 
 
-__all__ = ["api_factory", "compare_lines", "lint_set", "register"]
+__all__ = ["api_factory", "compare_lines", "lint_set", "open_gap_lines", "open_gaps", "register"]
