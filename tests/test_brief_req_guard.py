@@ -11,7 +11,8 @@ What it does: Pins each guard reason on a minimal ``GoldView``; that a stated en
               naming a novel token is refused on a req arm too; that a guard refusal is
               counted and its reasons stamped; ``gold_view`` over a real two-commit repo; that
               ``novel_tokens`` agrees with ``parent_has`` on a word held only inside a longer
-              match; and that ``product`` needs the word in parent product code.
+              match, and keeps a word held only in a binary file novel; and that ``product``
+              needs the word in parent product code.
 How:          Hand-built ``GoldView`` values (``parent_has`` over a fixed set); one temporary
               git repository for ``gold_view``; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -877,6 +878,30 @@ def test_a_statement_naming_a_parent_word_is_not_refused_as_undeclared(
         ("ValueError",),
     )
     assert req_guard(entry(item).text, (item,), "prose", view) == []
+
+
+def test_a_word_held_only_in_a_parent_binary_file_stays_novel(tmp_path: Path) -> None:
+    """The batched read skips binary files (``-I``), so such a word stays novel although
+    ``parent_has`` finds it: the one place the two differ, and on the refusing side."""
+    root = tmp_path / "bin"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "blob.bin").write_bytes(b"\x00Secretword\x00")
+    (root / "calc.py").write_text("def validate(name):\n    return name\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    parent = _git(root, "rev-parse", "HEAD")
+    (root / "calc.py").write_text("def validate(name):\n    return Secretword(name)\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "change")
+    repo, commit = GitRepo(root), _git(root, "rev-parse", "HEAD")
+    novel = novel_tokens(repo, parent=parent, commit=commit, paths=("calc.py",))
+    view = gold_view(repo, parent=parent, commit=commit, src_paths=("calc.py",), test_paths=())
+    assert view is not None
+    assert view.parent_has("Secretword")
+    assert "Secretword" in novel and "Secretword" in view.novel
 
 
 # -- provenance: product means the parent's product code ---------------------------------------

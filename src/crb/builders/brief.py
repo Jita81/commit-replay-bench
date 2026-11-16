@@ -361,7 +361,9 @@ def _introduced(before: str, after: str) -> set[str]:
 
 def _absent_from_parent(repo: GitRepo, parent: str, candidates: set[str]) -> frozenset[str]:
     """The ``candidates`` the WHOLE parent tree lacks as whole words: the same answer as
-    ``git grep -q -w -F`` per candidate (``GoldView.parent_has``), in few ``git grep`` runs.
+    ``git grep -q -w -F`` per candidate (``GoldView.parent_has``), in few ``git grep`` runs,
+    except that a word the parent holds only in a binary file stays novel (``-I``; fail
+    closed, as the single read always did).
 
     ``git grep -o`` prints only the longest match at a position and resumes after it, so a
     candidate the parent holds only inside a longer candidate's match ("Service" inside the

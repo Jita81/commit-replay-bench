@@ -222,9 +222,9 @@ may name a token the commit introduced when an item declares it, with checked pr
 - The novel set ignores short identifiers and single digits, and makes every candidate novel
   on a very large commit. Such tasks lean toward refusal. Report the n of withheld tasks next
   to any result. A token counts as held by the parent exactly when the per-token lookup finds
-  it, even when the parent holds it only inside a longer candidate ("Service" inside "Service
-  Unavailable"); the batched read repeats until it agrees, and keeps the rest novel past its
-  pass limit.
+  it in a text file, even when the parent holds it only inside a longer candidate ("Service"
+  inside "Service Unavailable"); the batched read repeats until it agrees, and keeps the rest
+  novel past its pass limit. A word held only in a binary file stays novel.
 - Each structure needs its own `req-placebo`, length-matched to it, before any claim that
   "the items helped" rather than "more text helped".
 
