@@ -512,8 +512,9 @@ _PY_SUFFIXES = (".py", ".pyi")
 #: annotations or attributes on the same line (``@Test void x()``, ``[Fact] public async
 #: Task X()``, ``public <T extends C<T>> T x(``, ``void X<T>(``, ``def x[T](``, Kotlin
 #: ``fun x(``, ``fun Foo.x(`` and ``fun `does x`(``, Spock ``def "does x"(``, ``@Nested
-#: class X``): the name it declares is a held-out name, so a method declared on the line after
-#: ``@Test`` is one too. Only those files are read so (a Go or Python test is not).
+#: class X``, C# ``record class X`` and ``record struct X``): the name it declares is a held-out
+#: name, so a method declared on the line after ``@Test`` is one too. Only those files are read
+#: so (a Go or Python test is not).
 _JVM_SUFFIXES = (".java", ".kt", ".kts", ".scala", ".groovy", ".cs")
 _JVM_STR = r'"(?:[^"\\]|\\.)*"'
 _JVM_ARGS = rf"\((?:{_JVM_STR}|[^()\"]|\([^()]*\))*\)"
@@ -526,7 +527,8 @@ _JVM_METHOD_RE = re.compile(
     r"|unsafe|partial|extern|tailrec|external|inner|data|enum|annotation|value|implicit"
     r"|readonly)(?:\[[^\]]*\])?\s+)*"
     rf"(?:{_JVM_GENERIC}\s*)?"
-    r"(?:(?:class|interface|object|record|struct|enum|trait)\s+(?P<cls>[A-Za-z_]\w*)"
+    r"(?:(?:record\s+(?:class|struct)|class|interface|object|record|struct|enum|trait)\s+"
+    r"(?P<cls>[A-Za-z_]\w*)"
     rf"|(?:fun\s+(?:{_JVM_GENERIC}\s*)?(?:\w+(?:{_JVM_GENERIC})?\??\.)*|def\s+"
     r"|(?P<type>[\w.]+(?:<[^()]*?>)?(?:\[\])*\??|\([^()]*\))\s+)"
     rf"(?P<name>[A-Za-z_]\w*|`[^`]+`|\"[^\"]+\")\s*(?:{_JVM_GENERIC}|\[[^\]]*\])?\s*\()"
