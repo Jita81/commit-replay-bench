@@ -469,6 +469,12 @@ def _added_lines(before: str, after: str) -> list[str]:
     return out
 
 
+#: What may stand between two words of a parent run (``parent_has_run``, a POSIX ERE): any
+#: non-alphanumeric character or a :data:`_FORMAT_VERB_RE` format verb or placeholder (a plain
+#: group: ``git grep -E`` has no ``(?:``).
+_RUN_GAP_ERE = r"([^A-Za-z0-9]|%[-+#0-9.*]*[A-Za-z%]|\{[A-Za-z0-9_:.!]*\})+"
+
+
 def gold_view(
     repo: GitRepo,
     *,
@@ -515,19 +521,22 @@ def gold_view(
         except Exception:
             return False
         prefix = f"{parent}:"
+        held_out = frozenset(test_paths)  # a supplied test file is never product evidence
         # one record per "\n" ("rev:path\0line"); never str.splitlines, which also splits on
         # form feeds and other separators inside a source line and could fake a hit
         for rec in (out.stdout or "").split("\n"):
             name, sep, line = rec.partition("\0")
             if not sep or not name.startswith(prefix):
                 continue
-            if not is_test_path(name[len(prefix) :]) and not _COMMENT_LINE_RE.match(line):
+            path = name[len(prefix) :]
+            if path not in held_out and not is_test_path(path) and not _COMMENT_LINE_RE.match(line):
                 return True
         return False
 
     def parent_has_run(run: Sequence[str]) -> bool:
-        # the words are [a-z0-9]+ (``_literal_words``), so the pattern needs no escaping
-        pattern = "[^A-Za-z0-9]+".join(run)
+        # the words are [a-z0-9]+ (``_literal_words``), so the pattern needs no escaping; a
+        # format verb between them is skipped as ``_literal_words`` drops it on the other side
+        pattern = _RUN_GAP_ERE.join(run)
         try:
             return repo.run("grep", "-q", "-I", "-i", "-w", "-E", "-e", pattern, parent).ok
         except Exception:
@@ -889,11 +898,15 @@ _LITERAL_RE = re.compile(r'"((?:[^"\\\n]|\\.)*)"|\'((?:[^\'\\\n]|\\.)*)\'|`([^`\
 _FORMAT_VERB_RE = re.compile(r"%[-+#0-9.*]*[A-Za-z%]|\{[\w:.!]*\}")
 _LITERAL_WORD_RE = re.compile(r"[a-z0-9]+")
 #: What ends the text before a literal that names a test case rather than asserting a value:
-#: a Go ``t.Run(`` or Python ``subTest(`` first argument, or a pytest ``id=``.
+#: a Go ``t.Run(`` or Python ``subTest(`` first argument.
 _CASE_NAME_BEFORE_RE = re.compile(
-    r"(?:\.Run\(|\bsubTest\((?:msg\s*=\s*)?|\bid\s*=)\s*$",
+    r"(?:\.Run\(|\bsubTest\((?:msg\s*=\s*)?)\s*$",
     re.IGNORECASE,
 )
+#: An ``id=`` keyword ending the text before a literal: a case name only when the call it
+#: belongs to (:func:`_owning_call`) is a pytest ``param`` (:data:`_PARAM_CALL_RE`).
+_ID_BEFORE_RE = re.compile(r"\bid\s*=\s*$")
+_PARAM_CALL_RE = re.compile(r"(?:\bpytest\.|(?<![\w.]))param\s*$")
 #: A ``name:`` / ``desc:`` / ``description:`` field (quoted key or not) ending the text before
 #: a literal. It names a case only in a table row (:data:`_TABLE_ROW_RE`): the same field in
 #: an asserted value (``assert x == {"name": ...}``, ``want := &T{Name: ...}``) is asserted.
@@ -921,15 +934,52 @@ def _in_ids_list(masked: str, start: int) -> bool:
     return 1 + gap.count("[") + gap.count("(") - gap.count("]") - gap.count(")") > 0
 
 
-def _asserted_literals(lines: Sequence[str]) -> Iterator[str]:
+def _owning_call(masked: str, start: int) -> str:
+    """The text before the ``(`` still open at position ``start`` of ``masked`` (a line with
+    literal contents blanked): the call an argument there belongs to; empty when none is open
+    on the line."""
+    depth = 0
+    for i in range(start - 1, -1, -1):
+        c = masked[i]
+        if c in ")]}":
+            depth += 1
+        elif c in "([{":
+            if depth == 0:
+                return masked[:i] if c == "(" else ""
+            depth -= 1
+    return ""
+
+
+def _docstring_lines(post_image: str) -> frozenset[str]:
+    """The lines of a test post-image that open a docstring directly under a ``def`` /
+    ``class`` header and appear nowhere else in it: an added line among them is a docstring
+    even when its header is unchanged (so not among the added lines)."""
+    under: set[str] = set()
+    elsewhere: set[str] = set()
+    prev = ""
+    for line in post_image.splitlines():
+        if _DOCSTRING_RE.match(line):
+            (under if _HEADER_END_RE.match(prev) else elsewhere).add(line)
+        else:
+            elsewhere.add(line)
+        prev = line
+    return frozenset(under - elsewhere)
+
+
+def _asserted_literals(
+    lines: Sequence[str], docstrings: frozenset[str] = frozenset()
+) -> Iterator[str]:
     """The contents of the string literals on added test ``lines`` that may be asserted: every
     literal except a test case's name or description (:data:`_CASE_NAME_BEFORE_RE`, a
-    table row's :data:`_CASE_FIELD_BEFORE_RE` field, a pytest ``ids=`` list) and a docstring directly under a ``def`` / ``class`` header. Conservative: a
-    literal the rule cannot place (a positional table field, a wrapped call) counts."""
+    table row's :data:`_CASE_FIELD_BEFORE_RE` field, a pytest ``ids=`` list, the ``id=`` of a
+    pytest ``param`` on the same line) and a docstring directly under a ``def`` / ``class``
+    header, among the added lines or (``docstrings``, :func:`_docstring_lines`) in the test
+    post-image. Conservative: a literal the rule cannot place (a positional table field, a
+    wrapped call, an ``id=`` of any other call) counts."""
     prev = ""
     for line in lines:
         after_header, prev = bool(_HEADER_END_RE.match(prev)), line
-        if after_header and _DOCSTRING_RE.match(line):
+        if (after_header and _DOCSTRING_RE.match(line)) or line in docstrings:
             continue
         found = list(_LITERAL_RE.finditer(line))
         masked = list(line)
@@ -940,6 +990,10 @@ def _asserted_literals(lines: Sequence[str]) -> Iterator[str]:
         for m in found:
             if (
                 _CASE_NAME_BEFORE_RE.search(line, 0, m.start())
+                or (
+                    _ID_BEFORE_RE.search(line, 0, m.start()) is not None
+                    and _PARAM_CALL_RE.search(_owning_call(flat, m.start())) is not None
+                )
                 or (row and _CASE_FIELD_BEFORE_RE.search(line, 0, m.start()))
                 or _in_ids_list(flat, m.start())
             ):
@@ -965,7 +1019,7 @@ def _asserted_literal(statement: str, gold: GoldView, request: str) -> bool:
     asked = _grams(_literal_words(request), n)
     has_run = gold.parent_has_run or (lambda run: gold.parent_has(" ".join(run)))
     runs: set[tuple[str, ...]] = set()
-    for literal in _asserted_literals(gold.test_added):
+    for literal in _asserted_literals(gold.test_added, _docstring_lines(gold.test_after)):
         runs |= _grams(_literal_words(literal), n)
     return any(not has_run(run) for run in sorted((runs & said) - asked))
 

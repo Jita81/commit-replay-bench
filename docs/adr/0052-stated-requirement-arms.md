@@ -90,9 +90,10 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
    - `req_provenance`: an item's declared provenance is not the most answer-side of the tokens
      it discloses or names. The ranking is nowhere < product < change_detail < tests_only, and
      a token in both the source and the tests counts as change_detail. A token is product only
-     when the parent holds it in product code: a file that is not a test path, on a line that
-     is not only a comment (`//`, `#`, `/*`, `*`, `--`). A token the parent holds only in a test
-     file or a comment ranks by the post-images, and is product when neither holds it, so the
+     when the parent holds it in product code: a file that is not a test path (by name, or
+     one of the task's own test paths), on a line that is not only a comment (`//`, `#`,
+     `/*`, `*`, `--`). A token the parent holds only in a test file or a comment ranks by the
+     post-images, and is product when neither holds it, so the
      label never ranks below the plain parent lookup. Every lookup, parent included, is
      whole-word and case-sensitive, so a token that appears only inside a longer
      word does not lower the provenance. The check is made twice, once on the tokens named
@@ -130,8 +131,13 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
      rule still exempts only through the first closing parenthesis.
    - `req_asserted_literal`: four words in a row of a string literal an added test line may
      assert (case names, `t.Run` and `subTest` titles, pytest ids and test docstrings aside)
-     that neither the request nor the parent holds. A `name:`, `desc:` or `description:`
-     field names a case only in a line that opens with `{` (a table row). Known limits: only
+     that neither the request nor the parent holds; format verbs are dropped on both sides,
+     the parent lookup included. A `name:`, `desc:` or `description:` field names a case
+     only in a line that opens with `{` (a table row); an `id=` only as an argument of a
+     `pytest.param` (or `param`) call open on the same line; a docstring only directly under
+     a `def` or `class` header, read in the test post-image when the header is unchanged.
+     Known limits: an `id=` on its own line of a wrapped `pytest.param` is read as asserted
+     (a false refusal, never a leak); only
      literals of four or more words are checked; a filler word inside a quote, or a
      multi-line raw string, evades it; a table row's `desc:` or `description:` field that
      holds expected text (help text under test) is read as a case name; mechanism statements

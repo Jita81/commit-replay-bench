@@ -1149,3 +1149,98 @@ def test_gold_view_product_has_reads_a_non_utf8_parent_file(tmp_path: Path) -> N
     assert view.product_has("Ready")
     item = StatedItem("i01", "name", "Keep Ready", "product", ("Ready",))
     assert req_guard(entry(item).text, (item,), "prose", view) == []
+
+
+def test_gold_view_product_has_skips_a_supplied_test_path_it_cannot_name(
+    tmp_path: Path,
+) -> None:
+    """A token the parent holds only in a supplied test file whose name the path rule does not
+    recognise (``qa/check_calc.py``) is not product evidence."""
+    root = tmp_path / "qa"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    (root / "qa").mkdir()
+    (root / "qa" / "check_calc.py").write_text("def check():\n    assert Clone(1)\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    parent = _git(root, "rev-parse", "HEAD")
+    (root / "calc.py").write_text("def add(a, b):\n    return Clone(a) + b\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "change")
+    repo, commit = GitRepo(root), _git(root, "rev-parse", "HEAD")
+    view = gold_view(
+        repo, parent=parent, commit=commit, src_paths=("calc.py",), test_paths=("qa/check_calc.py",)
+    )
+    assert view is not None and view.product_has is not None
+    assert view.parent_has("Clone")
+    assert not view.product_has("Clone")
+    assert view.product_has("add")
+    item = StatedItem("i01", "name", "Add Clone", "product", ("Clone",))
+    assert stated.REASON_PROVENANCE in req_guard(entry(item).text, (item,), "prose", view)
+
+
+def test_the_parent_wording_lookup_drops_format_verbs(tmp_path: Path) -> None:
+    """A parent string with a format verb between the words (``cannot divide %s by zero``)
+    holds the run the statement reads with the verb dropped, as the statement side does."""
+    root = tmp_path / "fmt"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "calc.py").write_text('MSG = "cannot divide %s by zero here"\n')
+    (root / "tests").mkdir()
+    (root / "tests" / "test_calc.py").write_text("def test_ok():\n    assert True\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    parent = _git(root, "rev-parse", "HEAD")
+    (root / "tests" / "test_calc.py").write_text(
+        "def test_ok():\n    assert str(err) == 'cannot divide {0} by zero here'\n"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "change")
+    repo, commit = GitRepo(root), _git(root, "rev-parse", "HEAD")
+    tests = ("tests/test_calc.py",)
+    view = gold_view(repo, parent=parent, commit=commit, src_paths=(), test_paths=tests)
+    assert view is not None and view.parent_has_run is not None
+    assert view.parent_has_run(("cannot", "divide", "by", "zero"))
+    assert not view.parent_has_run(("cannot", "divide", "zero", "here"))
+    item = StatedItem("i01", "error_text", "It raises: cannot divide by zero here.", "nowhere")
+    assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=view)
+
+
+def test_an_id_keyword_outside_a_pytest_param_is_asserted() -> None:
+    """``id=`` names a case only as a ``pytest.param`` / ``param`` argument; inside any other
+    call (``Error(id=...)`` in an assertion) its literal is asserted."""
+    item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
+    for lines in (
+        (f'    assert result == Error(id="{CASE_NAME}")',),
+        (f'    assert make(id = "{CASE_NAME}", n=3) == want',),
+        (f'    pytest.param(Error(id="{CASE_NAME}"), 3, id="flush twice"),',),
+    ):
+        view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.py",))
+        assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view), lines
+    for lines in (
+        (f'    pytest.param(3, 4, id="{CASE_NAME}"),',),
+        (f'    param(Error(3), 4, id="{CASE_NAME}"),',),
+    ):
+        view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.py",))
+        assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=view), lines
+
+
+def test_a_docstring_under_an_unchanged_test_header_is_not_asserted() -> None:
+    """A docstring added beneath a test header the change left alone is read by the test
+    post-image, where the header sits right above it; the same line anywhere else in the
+    post-image (not under a header) keeps it asserted."""
+    item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
+    doc = f'    """{CASE_NAME}."""'
+    after = f"def test_flush() -> None:\n{doc}\n    assert True\n"
+    view = gold(novel=frozenset(), test_added=(doc,), test_after=after, test_paths=("x_test.py",))
+    assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=view)
+    elsewhere = after + f"x = (\n{doc}\n)\n"
+    view = gold(
+        novel=frozenset(), test_added=(doc,), test_after=elsewhere, test_paths=("x_test.py",)
+    )
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
