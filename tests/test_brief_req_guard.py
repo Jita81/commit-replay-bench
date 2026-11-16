@@ -9,7 +9,10 @@ What it does: Pins each guard reason on a minimal ``GoldView``; that a stated en
               (the ADR-0052 amendment); that the same text is refused on an oracle, mech or
               plain library arm, and that an entry without items, a fact or a learned line
               naming a novel token is refused on a req arm too; that a guard refusal is
-              counted and its reasons stamped; and ``gold_view`` over a real two-commit repo.
+              counted and its reasons stamped; ``gold_view`` over a real two-commit repo; that
+              ``novel_tokens`` agrees with ``parent_has`` on a word held only inside a longer
+              match, and keeps a word held only in a binary file novel; and that ``product``
+              needs the word in parent product code.
 How:          Hand-built ``GoldView`` values (``parent_has`` over a fixed set); one temporary
               git repository for ``gold_view``; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -36,8 +39,10 @@ from crb.builders.brief import (
     ContextEntry,
     GoldView,
     Ticket,
+    _added_lines,
     compose,
     gold_view,
+    novel_tokens,
     refuse_novel,
     req_guard,
 )
@@ -629,6 +634,149 @@ def test_a_go_method_signature_is_a_header_not_a_body() -> None:
         assert stated.REASON_SIGNATURE in guard(item, view=view), body
 
 
+#: A held-out Go assertion on a panic message (the review's flush-panic case).
+PANIC_TEST = (
+    "func TestResponse_FlushPanics(t *testing.T) {",
+    '\tassert.PanicsWithError(t, "echo: response writer *echo.testResponseWriter does not '
+    'support flushing (http.Flusher interface)", func() {',
+)
+PANIC_ITEMS = (
+    "The panic value is an error. Its text is echo: response writer, a space, the writer's Go "
+    "type as printed by fmt, a space, then does not support flushing (http.Flusher interface).",
+    "Flush panics with echo: Response Writer %T DOES NOT support   flushing.",
+)
+
+
+def _panic_view(**kw: Any) -> GoldView:
+    return gold(novel=frozenset(), test_added=PANIC_TEST, test_paths=("response_test.go",), **kw)
+
+
+def test_a_statement_repeating_an_asserted_literal_is_refused() -> None:
+    """Four words in a row of a literal the held-out test asserts, held neither by the request
+    nor by the parent, are refused whatever the case, spacing, punctuation or format verb."""
+    for statement in PANIC_ITEMS:
+        item = StatedItem("i01", "error_text", statement, "change_detail")
+        assert stated.REASON_ASSERTED_LITERAL in guard(item, view=_panic_view()), statement
+    own_words = StatedItem(
+        "i01", "error_text", "Flush panics with an error naming the writer's type", "nowhere"
+    )
+    assert guard(own_words, view=_panic_view()) == []
+
+
+def test_an_asserted_literal_the_request_states_is_not_refused() -> None:
+    item = StatedItem("i01", "error_text", PANIC_ITEMS[0], "change_detail")
+    e = entry(item)
+    request = (
+        "Restore the flush panic: echo: response writer %T does not support flushing "
+        "(http.Flusher interface)"
+    )
+    assert stated.REASON_ASSERTED_LITERAL not in req_guard(
+        e.text, e.items, e.structure, _panic_view(), request=request
+    )
+    # compose reads the request from the ticket the builder is given
+    refused = _compose(REQ_ARM, (e,), gold=_panic_view(), novel=frozenset())
+    assert refused.labels[LABEL_CTX_REQ_REFUSED] == stated.REASON_ASSERTED_LITERAL
+    ticket = Ticket("fix: restore the flush panic", request)
+    delivered = compose(
+        REQ_ARM,
+        ticket,
+        repo="gorepo",
+        language="go",
+        mode="blind",
+        library=(e,),
+        novel=frozenset(),
+        gold=_panic_view(),
+    )
+    assert delivered.labels[LABEL_CTX_DELIVERED] == "1"
+
+
+def test_an_asserted_literal_the_parent_tree_holds_is_not_refused(tmp_path: Path) -> None:
+    item = StatedItem("i01", "error_text", PANIC_ITEMS[0], "change_detail")
+    held = _panic_view(parent_has_run=lambda run: run == ("does", "not", "support", "flushing"))
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=held)  # other runs stay novel
+    every = _panic_view(parent_has_run=lambda run: True)
+    assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=every)
+    # gold_view's own lookup over a real parent tree: case and punctuation between words aside
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "response.go").write_text("package echo\n")
+    (root / "response_test.go").write_text("package echo\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    bare = _git(root, "rev-parse", "HEAD")
+    (root / "legacy.go").write_text(
+        'var msg = "ECHO: Response-Writer %T does not support flushing (http.Flusher interface)"\n'
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent with the message")
+    holding = _git(root, "rev-parse", "HEAD")
+    (root / "response_test.go").write_text("package echo\n" + "\n".join(PANIC_TEST) + "\n")
+    _git(root, "add", "response_test.go")
+    _git(root, "commit", "-q", "-m", "change")
+    commit = _git(root, "rev-parse", "HEAD")
+    repo = GitRepo(root)
+    tests = ("response_test.go",)
+    view = gold_view(repo, parent=holding, commit=commit, src_paths=(), test_paths=tests)
+    assert view is not None
+    assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=view)
+    _git(root, "checkout", "-q", "-b", "without", bare)
+    (root / "response_test.go").write_text("package echo\n" + "\n".join(PANIC_TEST) + "\n")
+    _git(root, "add", "response_test.go")
+    _git(root, "commit", "-q", "-m", "change without the message")
+    commit = _git(root, "rev-parse", "HEAD")
+    view = gold_view(repo, parent=bare, commit=commit, src_paths=(), test_paths=tests)
+    assert view is not None
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
+
+
+#: A case name of four or more words, the same words in each test-naming position.
+CASE_NAME = "flush on a hijacked writer"
+CASE_NAME_LINES = (
+    (f'\tt.Run("{CASE_NAME}", func(t *testing.T) {{',),
+    (f'@pytest.mark.parametrize("n", [3, 4], ids=["{CASE_NAME}", "flush twice"])',),
+    (f'    pytest.param(3, 4, id="{CASE_NAME}"),',),
+    (f'        with self.subTest("{CASE_NAME}"):',),
+)
+
+
+def test_a_case_name_quoted_in_an_item_is_not_refused() -> None:
+    """A literal that names a test case (``t.Run``, ``subTest``, pytest ids, a test docstring) is not asserted, so an item quoting it is not ``req_asserted_literal``."""
+    item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
+    for lines in CASE_NAME_LINES:
+        view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.go",))
+        assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=view), lines
+    # a test docstring, read in the parsed Python post-image
+    added = ("    def test_flush(self) -> None:", f'        """{CASE_NAME}."""')
+    after = "class TestFlush:\n" + "\n".join(added) + "\n        assert True\n"
+    view = gold(novel=frozenset(), test_added=added, test_after=after, test_paths=("x_test.py",))
+    assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=view)
+
+
+def test_an_asserted_message_beside_a_case_name_is_still_refused() -> None:
+    """The same words asserted are refused, on their own line or after a case name on one line;
+    a literal the rule cannot place (any table field, a ``name:`` field included) counts as
+    asserted."""
+    item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
+    for lines in (
+        (f'\tassert.Equal(t, "{CASE_NAME}", err.Error())',),
+        (f'\t{{name: "flush twice", want: "{CASE_NAME}"}},',),
+        (f'\t{{"flush twice", "{CASE_NAME}"}},',),
+        (f'@pytest.mark.parametrize("m", ["{CASE_NAME}"], ids=["one"])',),
+        (f'    assert str(err) == "{CASE_NAME}"',),
+        ("x = run()", f'    """{CASE_NAME}."""'),
+        (f'    assert resp.json() == {{"name": "{CASE_NAME}"}}',),
+        (f'\twant := &Widget{{Name: "{CASE_NAME}"}}',),
+        ("\twant := &Widget{", f'\t\tName: "{CASE_NAME}",'),
+        (f'\t\t{{name: "{CASE_NAME}", in: 3, want: 4}},',),
+        (f'\t{{"name": "{CASE_NAME}", "in": 3}},',),
+    ):
+        view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.go",))
+        assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view), lines
+
+
 # -- compose: the amendment is req-only -------------------------------------------------------
 
 
@@ -824,3 +972,399 @@ def test_gold_view_never_trusts_a_short_novel_set(
     assert view is not None
     assert {"name required", "extra_token_only_passed"} <= view.novel
     assert "validate" not in view.novel
+
+
+# -- the parent-tree read: one rule for novel_tokens and parent_has ----------------------------
+
+
+@pytest.fixture
+def shadowed(tmp_path: Path) -> tuple[GitRepo, str, str]:
+    """The parent holds "Service" and "Unavailable" only inside the phrase "Service
+    Unavailable", in a file the change does not touch; the change adds that phrase as a
+    string literal, so the literal and both words are candidates."""
+    root = tmp_path / "shadow"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "timeout.py").write_text("# returns 503 Service Unavailable to the client\n")
+    (root / "calc.py").write_text("def validate(name):\n    return name\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    parent = _git(root, "rev-parse", "HEAD")
+    (root / "calc.py").write_text(
+        'def validate(name):\n    if not name:\n        raise ValueError("Service Unavailable")\n'
+        "    return name\n"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "change")
+    return GitRepo(root), parent, _git(root, "rev-parse", "HEAD")
+
+
+def _shadow_view(shadowed: tuple[GitRepo, str, str]) -> GoldView:
+    repo, parent, commit = shadowed
+    view = gold_view(repo, parent=parent, commit=commit, src_paths=("calc.py",), test_paths=())
+    assert view is not None
+    return view
+
+
+def test_novel_tokens_sees_a_word_inside_a_longer_parent_match(
+    shadowed: tuple[GitRepo, str, str],
+) -> None:
+    repo, parent, commit = shadowed
+    novel = novel_tokens(repo, parent=parent, commit=commit, paths=("calc.py",))
+    view = _shadow_view(shadowed)
+    assert view.parent_has("Service") and view.parent_has("Unavailable")
+    assert "Service" not in novel and "Unavailable" not in novel
+    assert "Service" not in view.novel and "Unavailable" not in view.novel
+
+
+def test_novel_tokens_agrees_with_parent_has_on_every_candidate(
+    shadowed: tuple[GitRepo, str, str],
+) -> None:
+    """Both ways: a held word is not novel, and a word the parent lacks (``ValueError``)
+    stays novel — the extra passes never drop an absent token."""
+    repo, parent, commit = shadowed
+    novel = novel_tokens(repo, parent=parent, commit=commit, paths=("calc.py",))
+    view = _shadow_view(shadowed)
+    assert "ValueError" in novel
+    for tok in ("Service", "Unavailable", "Service Unavailable", "ValueError"):
+        assert (tok in novel) == (not view.parent_has(tok)), tok
+
+
+def test_a_statement_naming_a_parent_word_is_not_refused_as_undeclared(
+    shadowed: tuple[GitRepo, str, str],
+) -> None:
+    view = _shadow_view(shadowed)
+    item = StatedItem(
+        "i01",
+        "error_text",
+        "An empty name raises ValueError reporting that the Service is Unavailable",
+        "change_detail",
+        ("ValueError",),
+    )
+    assert req_guard(entry(item).text, (item,), "prose", view) == []
+
+
+def test_a_word_held_only_in_a_parent_binary_file_stays_novel(tmp_path: Path) -> None:
+    """The batched read skips binary files (``-I``), so such a word stays novel although
+    ``parent_has`` finds it: the one place the two differ, and on the refusing side."""
+    root = tmp_path / "bin"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "blob.bin").write_bytes(b"\x00Secretword\x00")
+    (root / "calc.py").write_text("def validate(name):\n    return name\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    parent = _git(root, "rev-parse", "HEAD")
+    (root / "calc.py").write_text("def validate(name):\n    return Secretword(name)\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "change")
+    repo, commit = GitRepo(root), _git(root, "rev-parse", "HEAD")
+    novel = novel_tokens(repo, parent=parent, commit=commit, paths=("calc.py",))
+    view = gold_view(repo, parent=parent, commit=commit, src_paths=("calc.py",), test_paths=())
+    assert view is not None
+    assert view.parent_has("Secretword")
+    assert "Secretword" in novel and "Secretword" in view.novel
+
+
+# -- provenance: product means the parent's product code ---------------------------------------
+
+
+def test_provenance_product_needs_the_token_in_parent_product_code() -> None:
+    """A word the parent holds only in a comment or a test file is not ``product``: it ranks
+    by the change's post-images (here the source: ``change_detail``)."""
+    item = StatedItem("i01", "name", "Add validate", "product", ("validate",))
+    weak = gold(product_has=lambda tok: False)
+    assert stated.REASON_PROVENANCE in req_guard(entry(item).text, (item,), "prose", weak)
+    relabelled = StatedItem("i01", "name", "Add validate", "change_detail", ("validate",))
+    assert req_guard(entry(relabelled).text, (relabelled,), "prose", weak) == []
+
+
+def test_provenance_never_drops_below_product_for_a_parent_word() -> None:
+    """A parent word neither post-image holds stays ``product``, never ``nowhere``, however
+    the parent holds it."""
+    item = StatedItem("i01", "rule", "Keep the Config loader", "product", ("Config",))
+    view = gold(product_has=lambda tok: False)
+    assert req_guard(entry(item).text, (item,), "prose", view) == []
+
+
+@pytest.fixture
+def comment_and_test_only(tmp_path: Path) -> tuple[GitRepo, str, str]:
+    root = tmp_path / "prov"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "encode.py").write_text(
+        "# Marshal is the counterpart of Unmarshal\ndef Unmarshal(b):\n    return b\n"
+    )
+    (root / "tests").mkdir()
+    (root / "tests" / "test_header.py").write_text("def test_h():\n    h = Clone()\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    parent = _git(root, "rev-parse", "HEAD")
+    (root / "encode.py").write_text(
+        "# Marshal is the counterpart of Unmarshal\ndef Unmarshal(b):\n    return b\n"
+        "def Marshal(v):\n    return Clone(v)\n"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "change")
+    return GitRepo(root), parent, _git(root, "rev-parse", "HEAD")
+
+
+def test_gold_view_product_has_skips_comments_and_test_files(
+    comment_and_test_only: tuple[GitRepo, str, str],
+) -> None:
+    repo, parent, commit = comment_and_test_only
+    view = gold_view(repo, parent=parent, commit=commit, src_paths=("encode.py",), test_paths=())
+    assert view is not None
+    assert view.parent_has("Marshal") and view.parent_has("Clone")
+    assert view.product_has is not None
+    assert not view.product_has("Marshal") and not view.product_has("Clone")
+    assert view.product_has("Unmarshal")
+    for tok in ("Marshal", "Clone"):
+        item = StatedItem("i01", "name", f"Add {tok}", "product", (tok,))
+        assert stated.REASON_PROVENANCE in req_guard(entry(item).text, (item,), "prose", view)
+        moved = StatedItem("i01", "name", f"Add {tok}", "change_detail", (tok,))
+        assert req_guard(entry(moved).text, (moved,), "prose", view) == []
+
+
+def test_gold_view_product_has_reads_a_non_utf8_parent_file(tmp_path: Path) -> None:
+    """A latin-1 text file in the parent holding the token does not hide its product hit."""
+    root = tmp_path / "latin"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "legacy.txt").write_bytes(b"caf\xe9 Ready here\n")
+    (root / "widget.py").write_text("def Ready():\n    return 1\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    parent = _git(root, "rev-parse", "HEAD")
+    (root / "widget.py").write_text("def Ready():\n    return 2\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "change")
+    repo, commit = GitRepo(root), _git(root, "rev-parse", "HEAD")
+    view = gold_view(repo, parent=parent, commit=commit, src_paths=("widget.py",), test_paths=())
+    assert view is not None and view.product_has is not None
+    assert view.product_has("Ready")
+    item = StatedItem("i01", "name", "Keep Ready", "product", ("Ready",))
+    assert req_guard(entry(item).text, (item,), "prose", view) == []
+
+
+def test_gold_view_product_has_skips_a_supplied_test_path_it_cannot_name(
+    tmp_path: Path,
+) -> None:
+    """A token the parent holds only in a supplied test file whose name the path rule does not
+    recognise (``qa/check_calc.py``) is not product evidence."""
+    root = tmp_path / "qa"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    (root / "qa").mkdir()
+    (root / "qa" / "check_calc.py").write_text("def check():\n    assert Clone(1)\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    parent = _git(root, "rev-parse", "HEAD")
+    (root / "calc.py").write_text("def add(a, b):\n    return Clone(a) + b\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "change")
+    repo, commit = GitRepo(root), _git(root, "rev-parse", "HEAD")
+    view = gold_view(
+        repo, parent=parent, commit=commit, src_paths=("calc.py",), test_paths=("qa/check_calc.py",)
+    )
+    assert view is not None and view.product_has is not None
+    assert view.parent_has("Clone")
+    assert not view.product_has("Clone")
+    assert view.product_has("add")
+    item = StatedItem("i01", "name", "Add Clone", "product", ("Clone",))
+    assert stated.REASON_PROVENANCE in req_guard(entry(item).text, (item,), "prose", view)
+
+
+def test_the_parent_wording_lookup_drops_format_verbs(tmp_path: Path) -> None:
+    """A parent string with a format verb between the words (``cannot divide %s by zero``)
+    holds the run the statement reads with the verb dropped, as the statement side does."""
+    root = tmp_path / "fmt"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    _git(root, "config", "user.name", "fixture")
+    (root / "calc.py").write_text('MSG = "cannot divide %s by zero here"\n')
+    (root / "tests").mkdir()
+    (root / "tests" / "test_calc.py").write_text("def test_ok():\n    assert True\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "parent")
+    parent = _git(root, "rev-parse", "HEAD")
+    (root / "tests" / "test_calc.py").write_text(
+        "def test_ok():\n    assert str(err) == 'cannot divide {0} by zero here'\n"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "change")
+    repo, commit = GitRepo(root), _git(root, "rev-parse", "HEAD")
+    tests = ("tests/test_calc.py",)
+    view = gold_view(repo, parent=parent, commit=commit, src_paths=(), test_paths=tests)
+    assert view is not None and view.parent_has_run is not None
+    assert view.parent_has_run(("cannot", "divide", "by", "zero"))
+    assert not view.parent_has_run(("cannot", "divide", "zero", "here"))
+    item = StatedItem("i01", "error_text", "It raises: cannot divide by zero here.", "nowhere")
+    assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=view)
+
+
+def test_an_id_keyword_outside_a_pytest_param_is_asserted() -> None:
+    """``id=`` names a case only as a ``pytest.param`` / ``param`` argument; inside any other
+    call (``Error(id=...)`` in an assertion) its literal is asserted."""
+    item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
+    for lines in (
+        (f'    assert result == Error(id="{CASE_NAME}")',),
+        (f'    assert make(id = "{CASE_NAME}", n=3) == want',),
+        (f'    pytest.param(Error(id="{CASE_NAME}"), 3, id="flush twice"),',),
+    ):
+        view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.py",))
+        assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view), lines
+    for lines in (
+        (f'    pytest.param(3, 4, id="{CASE_NAME}"),',),
+        (f'    param(Error(3), 4, id="{CASE_NAME}"),',),
+    ):
+        view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.py",))
+        assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=view), lines
+
+
+def test_a_docstring_under_an_unchanged_test_header_is_not_asserted() -> None:
+    """A docstring added beneath a test header the change left alone is read in the parsed
+    test post-image, where it is the function's docstring; the same line anywhere else in the
+    post-image (not a docstring) keeps it asserted."""
+    item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
+    doc = f'    """{CASE_NAME}."""'
+    after = f"def test_flush() -> None:\n{doc}\n    assert True\n"
+    view = gold(novel=frozenset(), test_added=(doc,), test_after=after, test_paths=("x_test.py",))
+    assert stated.REASON_ASSERTED_LITERAL not in guard(item, view=view)
+    elsewhere = after + f"x = (\n{doc}\n)\n"
+    view = gold(
+        novel=frozenset(), test_added=(doc,), test_after=elsewhere, test_paths=("x_test.py",)
+    )
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
+    # A colon inside a trailing comment does not make the line above a header: the expected
+    # value of an assertion stays asserted when only that value changed.
+    msg = "cannot divide by zero here"
+    value = f'        """{msg}"""'
+    after = (
+        f"def test_div():\n    assert render(\n        x\n    ) == (  # expected:\n{value}\n    )\n"
+    )
+    item = StatedItem("i02", "rule", f"It raises: {msg}.", "nowhere")
+    view = gold(novel=frozenset(), test_added=(value,), test_after=after, test_paths=("x_test.py",))
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
+
+
+def test_a_triple_quoted_value_under_a_parenthesised_key_is_asserted() -> None:
+    """A line ending ``):`` inside an expected dictionary is no header: the triple-quoted
+    value under it is not a docstring in the parsed post-image, so it stays asserted."""
+    msg = "cannot divide by zero here"
+    value = f'        """{msg}"""'
+    added = ("    assert result == {", "        (", "            key", "        ):", value, "    }")
+    after = "def test_div():\n" + "\n".join(added) + "\n"
+    item = StatedItem("i01", "rule", f"It raises: {msg}.", "nowhere")
+    view = gold(novel=frozenset(), test_added=added, test_after=after, test_paths=("x_test.py",))
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
+
+
+def test_a_renamed_header_does_not_make_a_later_expected_string_a_docstring() -> None:
+    """A change that renames a test and replaces an expected string further down leaves the
+    two added lines adjacent in ``test_added``; the post-image shows the string is not a
+    docstring, so it stays asserted."""
+    msg = "cannot divide by zero here"
+    value = f'        """{msg}"""'
+    header = "def test_div_renamed():"
+    after = f"{header}\n    result = run()\n    assert result == (\n{value}\n    )\n"
+    item = StatedItem("i01", "rule", f"It raises: {msg}.", "nowhere")
+    view = gold(
+        novel=frozenset(), test_added=(header, value), test_after=after, test_paths=("x_test.py",)
+    )
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
+
+
+def test_a_docstring_is_exempt_only_in_a_parsed_python_post_image() -> None:
+    """Fail closed: a docstring-shaped line in a non-Python test file, a post-image that does
+    not parse, or a docstring whose text the post-image also holds as another string, is
+    asserted; the same docstring in a parsed Python file is not."""
+    item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
+    doc = f'    """{CASE_NAME}."""'
+    after = f"def test_flush() -> None:\n{doc}\n    assert True\n"
+    cases = (
+        (after, ("x_test.py",), False),
+        (after, ("x_test.go",), True),
+        (after + "def broken(:\n", ("x_test.py",), True),
+        (after + f'WANT = "{CASE_NAME}."\n', ("x_test.py",), True),
+    )
+    for text, paths, refused in cases:
+        view = gold(novel=frozenset(), test_added=(doc,), test_after=text, test_paths=paths)
+        assert (stated.REASON_ASSERTED_LITERAL in guard(item, view=view)) is refused, (text, paths)
+    # per-path post-images: the line counts when any non-Python file also holds it
+    view = gold(
+        novel=frozenset(),
+        test_added=(doc,),
+        test_paths=("x_test.py", "y_test.go"),
+        test_after_by_path=(("x_test.py", after), ("y_test.go", f"x := `\n{doc}\n`\n")),
+    )
+    assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view)
+
+
+MSG = "cannot divide by zero here"
+MSG_ITEM = StatedItem("i01", "rule", f"It raises: {MSG}.", "nowhere")
+
+
+def _refused_in_py(after: str) -> bool:
+    view = gold(
+        novel=frozenset(),
+        test_added=tuple(_added_lines("", after)),
+        test_after=after,
+        test_paths=("x_test.py",),
+    )
+    return stated.REASON_ASSERTED_LITERAL in guard(MSG_ITEM, view=view)
+
+
+def test_a_doctest_docstring_is_asserted() -> None:
+    """A docstring holding a doctest prompt is not exempt: its expected output is asserted when
+    the module runs under ``--doctest-modules``."""
+    after = (
+        f'def helper():\n    """\n    >>> helper()\n    \'{MSG}\'\n    """\n    return compute()\n'
+    )
+    assert _refused_in_py(after)
+    assert not _refused_in_py(after.replace(">>> helper()", "Helper text."))
+
+
+@pytest.mark.parametrize("sep", ["\u2028", "\x0c", "\x1c", "\x85"])
+def test_a_line_separator_inside_a_literal_does_not_borrow_a_docstring_row(sep: str) -> None:
+    """``test_added`` splits with ``str.splitlines``; a piece of a non-docstring row that equals
+    a docstring row is still not exempt."""
+    piece = f"    '{MSG}' is the text\""
+    after = f'def test_a():\n    """\n{piece}\n    """\n    assert f() == "x{sep}{piece}\n'
+    assert _refused_in_py(after)
+
+
+def test_an_ids_assignment_is_asserted() -> None:
+    """``ids=`` names cases only inside an open ``parametrize`` call; a plain ``ids = [...]``
+    assignment (or ``ids=`` of any other call) may hold the expected values."""
+    item = StatedItem("i01", "rule", f"Cover the case {CASE_NAME}.", "nowhere")
+    for lines in (
+        (f'    ids = ["{CASE_NAME}"]',),
+        (f'    assert make(ids=["{CASE_NAME}"]) == want',),
+    ):
+        view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.py",))
+        assert stated.REASON_ASSERTED_LITERAL in guard(item, view=view), lines
+    assert _refused_in_py(f"def test_a():\n    ids = ['{MSG}']\n    assert sorted(get()) == ids\n")
+
+
+def test_a_name_field_of_an_expected_list_is_asserted() -> None:
+    """A ``name:`` field on a line opening with ``{`` may be an element of an expected list,
+    so no table field is exempt."""
+    assert _refused_in_py(
+        f"def test_a():\n    assert result == [\n        {{'name': '{MSG}'}},\n    ]\n"
+    )
+    lines = ("\twant := []Item{", f'\t\t{{Name: "{MSG}"}},', "\t}")
+    view = gold(novel=frozenset(), test_added=lines, test_paths=("x_test.go",))
+    assert stated.REASON_ASSERTED_LITERAL in guard(MSG_ITEM, view=view)

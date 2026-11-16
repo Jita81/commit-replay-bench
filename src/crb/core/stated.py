@@ -104,6 +104,9 @@ MAX_STATEMENT_CHARS = 240
 MAX_ENTRY_CHARS = 1600
 #: The shared-span length the copy rule refuses (ADR-0052 item 3.6), in code tokens.
 SPAN_TOKENS = 8
+#: The word run the asserted-literal rule refuses: this many words in a row of a string
+#: literal the held-out test lines add.
+LITERAL_RUN_WORDS = 4
 
 #: The one header both renderers open with.
 #: Who wrote a stated set's items: a person (an opaque id, never a name or address) or a
@@ -128,6 +131,7 @@ REASON_TEST_NAME = "req_test_name"
 REASON_TEST_PATH = "req_test_path"
 REASON_TEST_SPAN = "req_test_span"
 REASON_SIGNATURE = "req_signature"
+REASON_ASSERTED_LITERAL = "req_asserted_literal"
 REASON_NO_GOLD = "req_no_gold"
 REASONS: tuple[str, ...] = (
     REASON_RENDER,
@@ -140,7 +144,13 @@ REASONS: tuple[str, ...] = (
     REASON_TEST_PATH,
     REASON_TEST_SPAN,
     REASON_SIGNATURE,
+    REASON_ASSERTED_LITERAL,
     REASON_NO_GOLD,
+)
+#: What the author of an entry withheld as ``req_asserted_literal`` is told to do.
+ASSERTED_LITERAL_ADVICE = (
+    "an item copies text from a string literal a held-out test adds or asserts; state the "
+    "requirement in your own words instead of quoting the expected text"
 )
 
 
@@ -263,6 +273,7 @@ def any_tests_only(items: Iterable[StatedItem]) -> bool:
 
 
 __all__ = [
+    "ASSERTED_LITERAL_ADVICE",
     "HEADER",
     "KINDS",
     "KIND_ERROR_TEXT",
@@ -271,6 +282,7 @@ __all__ = [
     "KIND_RULE",
     "KIND_SIGNATURE",
     "KIND_VALUE",
+    "LITERAL_RUN_WORDS",
     "MAX_ENTRY_CHARS",
     "MAX_ITEMS",
     "MAX_STATEMENT_CHARS",
@@ -283,6 +295,7 @@ __all__ = [
     "PROV_RANK",
     "PROV_TESTS_ONLY",
     "REASONS",
+    "REASON_ASSERTED_LITERAL",
     "REASON_CODE_BLOCK",
     "REASON_DISCLOSE",
     "REASON_LENGTH",

@@ -91,11 +91,12 @@ Claims:       an arm names what the brief carried, never how good it was; only a
 
 from __future__ import annotations
 
+import ast
 import difflib
 import hashlib
 import json
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -105,7 +106,7 @@ from crb.core import context_arm as _arms
 from crb.core import stated as _stated
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_BLIND
-from crb.core.spec import RepoConfig
+from crb.core.spec import RepoConfig, is_test_path
 
 #: The arm grammar is the core's, ONE vocabulary (``crb.core.context_arm``, ADR-0026 item 1):
 #: the composer names its bases and labels through it, so a brief and a ledger row can never
@@ -334,6 +335,10 @@ def _show_strict(repo: GitRepo, rev: str, path: str) -> str:
 #: More candidates than this and the parent-tree read is skipped: every candidate stays
 #: novel (the guard fails closed rather than build an unbounded command line).
 MAX_CANDIDATES = 2000
+#: How many ``git grep -o`` passes :func:`_absent_from_parent` makes. ``-o`` prints one match
+#: per position (the longest), so a candidate inside a longer candidate's match is only seen
+#: on a later pass without that longer one. Past this many passes the rest stay novel.
+MAX_GREP_PASSES = 8
 
 
 def novel_tokens(
@@ -356,27 +361,47 @@ def _introduced(before: str, after: str) -> set[str]:
 
 
 def _absent_from_parent(repo: GitRepo, parent: str, candidates: set[str]) -> frozenset[str]:
-    """The ``candidates`` the WHOLE parent tree lacks as whole words (one ``git grep``)."""
+    """The ``candidates`` the WHOLE parent tree lacks as whole words: the same answer as
+    ``git grep -q -w -F`` per candidate (``GoldView.parent_has``), in few ``git grep`` runs,
+    except that a word the parent holds only in a binary file stays novel (``-I``; fail
+    closed, as the single read always did).
+
+    ``git grep -o`` prints only the longest match at a position and resumes after it, so a
+    candidate the parent holds only inside a longer candidate's match ("Service" inside the
+    literal "Service Unavailable") is not printed. Every printed line that equals a remaining
+    candidate is one the parent holds; drop those and grep again for the rest, until a pass
+    sees nothing new. A printed line is only ever an exact pattern found as a whole word, so a
+    pass can drop a held token but never an absent one; past :data:`MAX_GREP_PASSES`, or on
+    any failure, the rest stay novel (fail closed)."""
     if not candidates:
         return frozenset()
-    ordered = sorted(candidates)
-    if len(ordered) > MAX_CANDIDATES:
+    if len(candidates) > MAX_CANDIDATES:
         return frozenset(candidates)
-    try:
-        found = repo.run(
-            "grep",
-            "-h",
-            "-o",
-            "-w",
-            "-F",
-            *[a for tok in ordered for a in ("-e", tok)],
-            parent,
-            check=False,
-        ).stdout
-    except Exception:  # cannot read the parent tree: every candidate stays novel (fail closed)
-        return frozenset(candidates)
-    seen = {line.strip() for line in (found or "").splitlines() if line.strip()}
-    return frozenset(c for c in candidates if c not in seen)
+    remaining = set(candidates)
+    for _ in range(MAX_GREP_PASSES):
+        if not remaining:
+            break
+        try:
+            found = repo.run(
+                "grep",
+                "-I",
+                "-h",
+                "-o",
+                "-w",
+                "-F",
+                *[a for tok in sorted(remaining) for a in ("-e", tok)],
+                parent,
+                check=False,
+            ).stdout
+        except Exception:  # cannot read the parent tree: the rest stay novel (fail closed)
+            break
+        # exact lines only, never stripped: a line that is not itself a remaining candidate
+        # (a "Binary file ... matches" notice) proves nothing
+        seen = set((found or "").split("\n")) & remaining
+        if not seen:
+            break
+        remaining -= seen
+    return frozenset(remaining)
 
 
 def names_novel(line: str, novel: frozenset[str]) -> bool:
@@ -409,7 +434,13 @@ class GoldView:
     :func:`novel_tokens` uses; any failure answers ``False``, so a token stays answer-side).
     ``test_after_by_path`` holds each test path's own post-image (``(path, text)``), so a
     language-specific rule reads only its own language's files; left empty, ``test_after``
-    stands for it when every test path is one language's."""
+    stands for it when every test path is one language's. ``product_has`` is the stricter
+    question the ``product`` provenance asks: whether the parent holds the token that way in
+    a file that is not a test file, on a line that is not only a comment; ``None`` reads
+    ``parent_has``. ``parent_has_run`` asks whether the parent holds a run of words in order,
+    case-insensitively, with only non-alphanumeric characters or a format verb or placeholder
+    (:data:`_RUN_GAP_ERE`) between them; ``None`` asks ``parent_has`` for the words joined by
+    single spaces."""
 
     novel: frozenset[str]
     parent_has: Callable[[str], bool]
@@ -419,6 +450,15 @@ class GoldView:
     test_added: tuple[str, ...] = ()
     test_paths: tuple[str, ...] = ()
     test_after_by_path: tuple[tuple[str, str], ...] = ()
+    product_has: Callable[[str], bool] | None = None
+    parent_has_run: Callable[[Sequence[str]], bool] | None = None
+
+
+#: A line that is only a comment (``//``, ``#``, ``/*``, a ``*`` continuation, ``--``): a word
+#: on it is not product code. Its errors go answer-side only: a trailing comment after code is
+#: not caught (the word stays ``product``), and a code line starting ``*`` or ``#`` reads as a
+#: comment (the word ranks by the change instead).
+_COMMENT_LINE_RE = re.compile(r"^\s*(?://|#|/\*|\*|--)")
 
 
 def _added_lines(before: str, after: str) -> list[str]:
@@ -429,6 +469,12 @@ def _added_lines(before: str, after: str) -> list[str]:
         if tag in ("replace", "insert"):
             out.extend(after_lines[j1:j2])
     return out
+
+
+#: What may stand between two words of a parent run (``parent_has_run``, a POSIX ERE): any
+#: non-alphanumeric character or a :data:`_FORMAT_VERB_RE` format verb or placeholder (a plain
+#: group: ``git grep -E`` has no ``(?:``).
+_RUN_GAP_ERE = r"([^A-Za-z0-9]|%[-+#0-9.*]*[A-Za-z%]|\{[A-Za-z0-9_:.!]*\})+"
 
 
 def gold_view(
@@ -469,11 +515,42 @@ def gold_view(
         except Exception:
             return False
 
+    def product_has(token: str) -> bool:
+        try:
+            out = repo.run(
+                "grep", "-I", "-z", "-w", "-F", "-e", token, parent, check=False, raw=True
+            )
+        except Exception:
+            return False
+        prefix = f"{parent}:"
+        held_out = frozenset(test_paths)  # a supplied test file is never product evidence
+        # one record per "\n" ("rev:path\0line"); never str.splitlines, which also splits on
+        # form feeds and other separators inside a source line and could fake a hit
+        for rec in (out.stdout or "").split("\n"):
+            name, sep, line = rec.partition("\0")
+            if not sep or not name.startswith(prefix):
+                continue
+            path = name[len(prefix) :]
+            if path not in held_out and not is_test_path(path) and not _COMMENT_LINE_RE.match(line):
+                return True
+        return False
+
+    def parent_has_run(run: Sequence[str]) -> bool:
+        # the words are [a-z0-9]+ (``_literal_words``), so the pattern needs no escaping; a
+        # format verb between them is skipped as ``_literal_words`` drops it on the other side
+        pattern = _RUN_GAP_ERE.join(run)
+        try:
+            return repo.run("grep", "-q", "-I", "-i", "-w", "-E", "-e", pattern, parent).ok
+        except Exception:
+            return False
+
     known = frozenset() if novel is None else novel
     novel = known | _absent_from_parent(repo, parent, candidates - known)
     return GoldView(
         novel=novel,
         parent_has=parent_has,
+        product_has=product_has,
+        parent_has_run=parent_has_run,
         src_after="\n".join(src_afters),
         test_after="\n".join(test_afters),
         src_added=tuple(src_added),
@@ -699,12 +776,19 @@ def _holds(text: str, token: str) -> bool:
 
 
 def _token_provenance(token: str, gold: GoldView) -> str:
-    if gold.parent_has(token):
+    """The token's provenance. ``product`` first only when the parent holds it in product
+    code (``product_has``); a token the parent holds only in a test file or a comment ranks
+    by the change's post-images, and falls back to ``product`` (never lower than the parent
+    rule alone) when neither post-image holds it. The label only ever moves answer-side."""
+    product_has = gold.product_has if gold.product_has is not None else gold.parent_has
+    if product_has(token):
         return _stated.PROV_PRODUCT
     if _holds(gold.src_after, token):
         return _stated.PROV_CHANGE_DETAIL
     if _holds(gold.test_after, token):
         return _stated.PROV_TESTS_ONLY
+    if gold.parent_has(token):
+        return _stated.PROV_PRODUCT
     return _stated.PROV_NOWHERE
 
 
@@ -809,11 +893,192 @@ def _names_test_path(text: str, gold: GoldView) -> bool:
     return False
 
 
+#: A string literal of a test line: double-quoted, single-quoted or a Go raw string.
+_LITERAL_RE = re.compile(r'"((?:[^"\\\n]|\\.)*)"|\'((?:[^\'\\\n]|\\.)*)\'|`([^`\n]*)`')
+#: A format verb or placeholder (``%T``, ``%-5.2f``, ``%%``, ``{}``, ``{0}``, ``{name}``),
+#: dropped before words are read on both sides, so ``writer %T does`` reads ``writer does``.
+_FORMAT_VERB_RE = re.compile(r"%[-+#0-9.*]*[A-Za-z%]|\{[\w:.!]*\}")
+_LITERAL_WORD_RE = re.compile(r"[a-z0-9]+")
+#: What ends the text before a literal that names a test case rather than asserting a value:
+#: a Go ``t.Run(`` or Python ``subTest(`` first argument.
+_CASE_NAME_BEFORE_RE = re.compile(
+    r"(?:\.Run\(|\bsubTest\((?:msg\s*=\s*)?)\s*$",
+    re.IGNORECASE,
+)
+#: An ``id=`` keyword ending the text before a literal: a case name only when the call it
+#: belongs to (:func:`_owning_call`) is a pytest ``param`` (:data:`_PARAM_CALL_RE`).
+_ID_BEFORE_RE = re.compile(r"\bid\s*=\s*$")
+_PARAM_CALL_RE = re.compile(r"(?:\bpytest\.|(?<![\w.]))param\s*$")
+#: An ``ids=`` list or tuple opening: its literals are case names only when the call it
+#: belongs to (:func:`_owning_call`) is a pytest ``parametrize`` (:data:`_PARAMETRIZE_CALL_RE`);
+#: a plain ``ids = [...]`` assignment may hold the expected values.
+_IDS_OPEN_RE = re.compile(r"\bids\s*=\s*[\[(]")
+_PARAMETRIZE_CALL_RE = re.compile(r"\bparametrize\s*$")
+#: The line breaks :mod:`ast` counts lines by, so a row of :func:`_docstring_rows` is a line
+#: here. ``str.splitlines`` (which :func:`_added_lines` uses) also breaks on form feeds and
+#: other separators, so :func:`_docstring_lines` compares the ``splitlines`` pieces of each row.
+_AST_LINE_RE = re.compile(r"\r\n|\r|\n")
+_DOC_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _in_ids_list(masked: str, start: int) -> bool:
+    """Whether position ``start`` of ``masked`` (a line with literal contents blanked) lies
+    inside a pytest ``parametrize(..., ids=[...])`` opened earlier on the same line."""
+    opens = list(_IDS_OPEN_RE.finditer(masked, 0, start))
+    if not opens:
+        return False
+    if _PARAMETRIZE_CALL_RE.search(_owning_call(masked, opens[-1].start())) is None:
+        return False
+    gap = masked[opens[-1].end() : start]
+    return 1 + gap.count("[") + gap.count("(") - gap.count("]") - gap.count(")") > 0
+
+
+def _owning_call(masked: str, start: int) -> str:
+    """The text before the ``(`` still open at position ``start`` of ``masked`` (a line with
+    literal contents blanked): the call an argument there belongs to; empty when none is open
+    on the line."""
+    depth = 0
+    for i in range(start - 1, -1, -1):
+        c = masked[i]
+        if c in ")]}":
+            depth += 1
+        elif c in "([{":
+            if depth == 0:
+                return masked[:i] if c == "(" else ""
+            depth -= 1
+    return ""
+
+
+def _docstring_rows(tree: ast.Module, lines: Sequence[str], others: set[str]) -> set[int]:
+    """The 1-based rows of ``lines`` (the source ``tree`` parsed) that a module, class or
+    function docstring fills whole — its first statement, an expression statement holding a
+    string constant, nothing but whitespace before it on its first row or after it on its last
+    — unless its text is also held by another string constant (``others``, the docstring-free
+    string constants of every parsed post-image) or holds a doctest prompt (``>>>``), whose
+    expected output is asserted under ``--doctest-modules``."""
+    rows: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, _DOC_OWNERS) or not node.body:
+            continue
+        doc = node.body[0]
+        if not (
+            isinstance(doc, ast.Expr)
+            and isinstance(doc.value, ast.Constant)
+            and isinstance(doc.value.value, str)
+            and doc.end_lineno is not None
+            and doc.end_col_offset is not None
+            and doc.value.value not in others
+            and ">>>" not in doc.value.value
+        ):
+            continue
+        head = lines[doc.lineno - 1].encode()[: doc.col_offset]
+        tail = lines[doc.end_lineno - 1].encode()[doc.end_col_offset :]
+        if not head.strip() and not tail.strip():
+            rows.update(range(doc.lineno, doc.end_lineno + 1))
+    return rows
+
+
+def _docstring_lines(gold: GoldView) -> frozenset[str]:
+    """The test post-image lines that lie only inside docstrings (:func:`_docstring_rows`) of
+    Python test files that parse: an added line among them is a docstring, never asserted.
+    A line any other row of any test post-image also holds — a non-Python file, a Python file
+    that does not parse, or a non-docstring row — is not among them (fails closed)."""
+    if gold.test_after_by_path:
+        posts = [(p.endswith(_PY_SUFFIXES), t) for p, t in gold.test_after_by_path]
+    else:
+        python = bool(gold.test_paths) and all(p.endswith(_PY_SUFFIXES) for p in gold.test_paths)
+        posts = [(python, gold.test_after)]
+    trees: list[ast.Module | None] = []
+    docs: set[int] = set()  # the ids of docstring constants
+    others: set[str] = set()
+    for python, text in posts:
+        try:
+            tree = ast.parse(text) if python else None
+        except (SyntaxError, ValueError, RecursionError):  # ValueError: a null byte
+            tree = None
+        trees.append(tree)
+        nodes = list(ast.walk(tree)) if tree is not None else []
+        for node in nodes:
+            if isinstance(node, _DOC_OWNERS) and node.body and isinstance(node.body[0], ast.Expr):
+                docs.add(id(node.body[0].value))
+        for node in nodes:
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in docs
+            ):
+                others.add(node.value)
+    inside: set[str] = set()
+    elsewhere: set[str] = set()
+    for (_python, text), tree in zip(posts, trees, strict=True):
+        lines = _AST_LINE_RE.split(text)
+        rows = _docstring_rows(tree, lines, others) if tree is not None else set()
+        for row, line in enumerate(lines, 1):
+            # the pieces test_added holds (_added_lines splits with str.splitlines)
+            (inside if row in rows else elsewhere).update(line.splitlines())
+    return frozenset(inside - elsewhere)
+
+
+def _asserted_literals(
+    lines: Sequence[str], docstrings: frozenset[str] = frozenset()
+) -> Iterator[str]:
+    """The contents of the string literals on added test ``lines`` that may be asserted: every
+    literal except a test case's name (:data:`_CASE_NAME_BEFORE_RE`, the ``ids=`` list of a
+    pytest ``parametrize`` or the ``id=`` of a pytest ``param`` on the same line) and a line of
+    ``docstrings`` (:func:`_docstring_lines`: a docstring in the parsed Python test post-image).
+    Conservative: a literal the rule cannot place (any table field, ``name:`` included, since a
+    row of an expected list looks the same; a wrapped call; an ``id=`` or ``ids=`` of any other
+    call) counts."""
+    for line in lines:
+        if line in docstrings:
+            continue
+        found = list(_LITERAL_RE.finditer(line))
+        masked = list(line)
+        for m in found:
+            masked[m.start() + 1 : m.end() - 1] = " " * (m.end() - m.start() - 2)
+        flat = "".join(masked)
+        for m in found:
+            if (
+                _CASE_NAME_BEFORE_RE.search(line, 0, m.start())
+                or (
+                    _ID_BEFORE_RE.search(line, 0, m.start()) is not None
+                    and _PARAM_CALL_RE.search(_owning_call(flat, m.start())) is not None
+                )
+                or _in_ids_list(flat, m.start())
+            ):
+                continue
+            yield next(g for g in m.groups() if g is not None)
+
+
+def _literal_words(text: str) -> list[str]:
+    """``text``'s words for the asserted-literal rule: lower-case alphanumeric runs, with
+    format verbs dropped (so case, whitespace and punctuation never break a run)."""
+    return _LITERAL_WORD_RE.findall(_FORMAT_VERB_RE.sub(" ", text).lower())
+
+
+def _asserted_literal(statement: str, gold: GoldView, request: str) -> bool:
+    """Whether ``statement`` repeats :data:`~crb.core.stated.LITERAL_RUN_WORDS` words in a
+    row of a string literal an added held-out test line may assert (:func:`_asserted_literals`;
+    a whole literal of that many words or more included) that neither ``request`` nor the
+    parent tree holds as a run."""
+    n = _stated.LITERAL_RUN_WORDS
+    said = _grams(_literal_words(statement), n)
+    if not said:
+        return False
+    asked = _grams(_literal_words(request), n)
+    has_run = gold.parent_has_run or (lambda run: gold.parent_has(" ".join(run)))
+    runs: set[tuple[str, ...]] = set()
+    for literal in _asserted_literals(gold.test_added, _docstring_lines(gold)):
+        runs |= _grams(_literal_words(literal), n)
+    return any(not has_run(run) for run in sorted((runs & said) - asked))
+
+
 def req_guard(
     text: str,
     items: Sequence[_stated.StatedItem],
     structure: str,
     gold: GoldView | None,
+    request: str = "",
 ) -> list[str]:
     """The reasons a stated-requirement entry is withheld (ADR-0052 item 3), sorted; empty
     when it may reach the brief. Fails closed: no ``gold`` view is ``req_no_gold``.
@@ -836,7 +1101,12 @@ def req_guard(
     within sixteen with only copies of one token inserted inside it. ``req_signature``: a
     signature item carries a body (a brace, ``;``, ``=>``, ``return``, or executable Python
     before its name or past its header; a Go method's header runs through its parameter
-    list and one result)."""
+    list and one result). ``req_asserted_literal``: an item's statement repeats four words in
+    a row of a string literal an added held-out test line may assert (a case name, ``t.Run``
+    or ``subTest`` title, pytest id or a docstring of a parsed Python test post-image aside;
+    format verbs dropped, case,
+    whitespace and punctuation ignored) that neither ``request`` — the text the builder is
+    given — nor the parent tree holds; the author restates it in their own words."""
     if gold is None:
         return [_stated.REASON_NO_GOLD]
     reasons: set[str] = set()
@@ -890,6 +1160,8 @@ def req_guard(
             or _SIGNATURE_CODE_RE.search(item.statement.split("(", 1)[0])
         ):
             reasons.add(_stated.REASON_SIGNATURE)
+        if _asserted_literal(item.statement, gold, request):
+            reasons.add(_stated.REASON_ASSERTED_LITERAL)
     for tok in _test_def_tokens(gold):
         if _names_ci(text, tok) and not _holds(gold.src_after, tok) and not gold.parent_has(tok):
             reasons.add(_stated.REASON_TEST_NAME)
@@ -1000,7 +1272,9 @@ def compose(
     req_reasons: set[str] = set()
     req_kept: list[ContextEntry] = []
     for e in req_entries:
-        why = req_guard(e.text, e.items, e.structure, gold)
+        why = req_guard(
+            e.text, e.items, e.structure, gold, request=f"{ticket.subject}\n{ticket.message}"
+        )
         if why:
             req_reasons.update(why)
             refused_lib.append(e.text)
