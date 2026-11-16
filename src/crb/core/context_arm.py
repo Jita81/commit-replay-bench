@@ -30,7 +30,8 @@ What it is:   The context-arm vocabulary: the grammar (``parse_arm`` / ``Context
               (``context_arm_for``), the provenance label names, the pooling refusal
               (``ContextArmsPooled``), the read filter (``rows_for_context_arm``) and the
               context-set predicates (``ctx_set_name``, ``hindsight_arm``,
-              ``measurement_only``, ADR-0050).
+              ``stated_arm``, ``measurement_only``, ADR-0050 and ADR-0052) over one
+              source-to-kind table (``CTX_SOURCE_KIND``).
 What it does: Refuses an arm id outside the grammar; names an arm's role (descriptive,
               ceiling, certifies retrospectively or prospectively); decides ``A0`` / ``S3`` /
               ``S1@<author>`` / ``S2`` (with ``+L`` when the brief carried the loop) for a
@@ -42,7 +43,8 @@ How:          A regular expression per part; ``context_arm_for`` reads the proce
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (item 1),
               docs/adr/0025-routing-v2.md (the one bump the stamp rides),
-              docs/adr/0050-context-set-arms.md (the reserved ``ctx.`` library names)
+              docs/adr/0050-context-set-arms.md (the reserved ``ctx.`` library names),
+              docs/adr/0052-stated-requirement-arms.md (the ``req`` sources and their stamps)
 Works with:   src/crb/core/ledger.py (the label, ``GradeRow.context_arm``, the refusal in
               ``cell_stats``), src/crb/core/reading.py (a reading's hierarchy names arms),
               src/crb/core/routing.py (routes one arm), src/crb/core/capability.py (the map
@@ -88,10 +90,29 @@ MOD_LOOP = "+L"
 #: A ``+library@`` NAME that starts with this prefix is reserved for a context set (ADR-0050
 #: item 2): ``ctx.<source>.<digest[:12]>``, and only on base ``A0`` without ``+facts`` or ``+L``.
 CTX_PREFIX = "ctx."
-#: The four context-set sources; ``oracle`` and ``oracle-placebo`` are hindsight sets.
-CTX_SOURCES: tuple[str, ...] = ("oracle", "oracle-placebo", "mech", "mech-placebo")
+#: The kind of each context-set source: ``hindsight`` (written with sight of the answer, read
+#: as a ceiling, under the novel-token guard), ``mechanical`` (drafted at the parent commit by a
+#: pinned drafter) and ``stated`` (ADR-0052: stated requirements, written with hindsight, whose
+#: new names are declared item by item and checked by ``req_guard``). THE one table every
+#: predicate below and ``crb.core.ctxset`` derives a source's kind from (ADR-0052 item 4).
+CTX_KIND_HINDSIGHT = "hindsight"
+CTX_KIND_MECHANICAL = "mechanical"
+CTX_KIND_STATED = "stated"
+CTX_KINDS: tuple[str, ...] = (CTX_KIND_HINDSIGHT, CTX_KIND_MECHANICAL, CTX_KIND_STATED)
+CTX_SOURCE_KIND: dict[str, str] = {
+    "oracle": CTX_KIND_HINDSIGHT,
+    "oracle-placebo": CTX_KIND_HINDSIGHT,
+    "mech": CTX_KIND_MECHANICAL,
+    "mech-placebo": CTX_KIND_MECHANICAL,
+    "req": CTX_KIND_STATED,
+    "req-placebo": CTX_KIND_STATED,
+}
+#: The context-set sources, in table order.
+CTX_SOURCES: tuple[str, ...] = tuple(CTX_SOURCE_KIND)
 CTX_HINDSIGHT_PREFIX = "ctx.oracle"
-CTX_NAME_RE = re.compile(r"^ctx\.(oracle|oracle-placebo|mech|mech-placebo)\.[0-9a-f]{12}$")
+CTX_NAME_RE = re.compile(
+    r"^ctx\.(" + "|".join(re.escape(s) for s in CTX_SOURCES) + r")\.[0-9a-f]{12}$"
+)
 
 #: Provenance stamps (ADR-0026 item 1): shown and filterable, never a pooling key.
 LABEL_CTX_TICKET = "ctx_ticket"
@@ -111,6 +132,23 @@ LABEL_CTX_DELIVERED = "ctx_delivered"
 LABEL_CTX_CHARS = "ctx_chars"
 LABEL_CTX_CEILING = "ctx_ceiling"
 LABEL_CTX_DRAFTER = "ctx_drafter"
+#: Stated-requirement stamps (ADR-0052 item 2), on an entries row of a ``ctx.req*`` arm only:
+#: ``ctx_stated`` = ``1``; ``ctx_items`` the set's items digest; ``ctx_structure`` the
+#: renderer; ``ctx_author_saw`` what the items' writer saw; ``ctx_prov`` the task's declared
+#: item provenance counts; ``ctx_req_drafter`` who wrote the items (never ``ctx_drafter``,
+#: which means a mechanical drafter); ``ctx_req_refused`` the guard's reasons when it withheld
+#: the entry.
+LABEL_CTX_STATED = "ctx_stated"
+LABEL_CTX_ITEMS = "ctx_items"
+LABEL_CTX_STRUCTURE = "ctx_structure"
+LABEL_CTX_AUTHOR_SAW = "ctx_author_saw"
+LABEL_CTX_PROV = "ctx_prov"
+LABEL_CTX_REQ_DRAFTER = "ctx_req_drafter"
+LABEL_CTX_REQ_REFUSED = "ctx_req_refused"
+#: The builder's turns on a row of a context-set run (ADR-0052 item 5). Deliberately NOT in
+#: :data:`PROVENANCE_LABELS`: a per-row count is not a stamp to list or filter by, and the
+#: control rows that carry it are plain ``A0`` rows (ADR-0052 review note 13).
+LABEL_CTX_TURNS = "ctx_turns"
 #: ``ctx_source`` on a plain ``A0`` row of a context-set control run.
 CTX_SOURCE_CONTROL = "control"
 PROVENANCE_LABELS: tuple[str, ...] = (
@@ -136,6 +174,14 @@ PROVENANCE_LABELS: tuple[str, ...] = (
     LABEL_CTX_CHARS,
     LABEL_CTX_CEILING,
     LABEL_CTX_DRAFTER,
+    # the stated-requirement stamps (ADR-0052 item 2)
+    LABEL_CTX_STATED,
+    LABEL_CTX_ITEMS,
+    LABEL_CTX_STRUCTURE,
+    LABEL_CTX_AUTHOR_SAW,
+    LABEL_CTX_PROV,
+    LABEL_CTX_REQ_DRAFTER,
+    LABEL_CTX_REQ_REFUSED,
 )
 
 #: The ``learn`` label value that means the loop was off for the run (ADR-0020 §8).
@@ -284,11 +330,34 @@ def ctx_set_name(arm: str) -> str:
     return name if CTX_NAME_RE.match(name) else ""
 
 
+def ctx_source_of(arm: str) -> str:
+    """The context-set source an arm names (``oracle``, ``req-placebo`` ...), or ``""``."""
+    name = ctx_set_name(arm)
+    return name.split(".")[1] if name else ""
+
+
+def ctx_kind(source: str) -> str:
+    """A context-set source's kind from :data:`CTX_SOURCE_KIND`; refuses an unknown source."""
+    try:
+        return CTX_SOURCE_KIND[source]
+    except KeyError:
+        raise ValueError(f"context-set source {source!r} is not one of {CTX_SOURCES}") from None
+
+
 def hindsight_arm(arm: str) -> bool:
-    """``True`` for a hindsight context-set arm (``ctx.oracle.*`` and its placebo
-    ``ctx.oracle-placebo.*``): written with hindsight of the answer, exempt from the
-    retrospective time rule only, and read as a ceiling (ADR-0050 items 2 and 4)."""
-    return ctx_set_name(arm).startswith(CTX_HINDSIGHT_PREFIX)
+    """``True`` for a context-set arm written with hindsight of the answer: the ``hindsight``
+    kind (``ctx.oracle*``, ADR-0050 items 2 and 4) and the ``stated`` kind (``ctx.req*``,
+    ADR-0052). Both skip the retrospective time rule and are read as a ceiling."""
+    source = ctx_source_of(arm)
+    return bool(source) and ctx_kind(source) in (CTX_KIND_HINDSIGHT, CTX_KIND_STATED)
+
+
+def stated_arm(arm: str) -> bool:
+    """``True`` for a stated-requirement arm (``ctx.req*``, ADR-0052): its entries are
+    rendered from declared items and checked by ``req_guard`` instead of the novel-token
+    guard; every other line of its brief keeps the novel-token guard."""
+    source = ctx_source_of(arm)
+    return bool(source) and ctx_kind(source) == CTX_KIND_STATED
 
 
 def measurement_only(arm: str) -> bool:
@@ -372,19 +441,32 @@ __all__ = [
     "BASE_S2",
     "BASE_S3",
     "CTX_HINDSIGHT_PREFIX",
+    "CTX_KINDS",
+    "CTX_KIND_HINDSIGHT",
+    "CTX_KIND_MECHANICAL",
+    "CTX_KIND_STATED",
     "CTX_NAME_RE",
     "CTX_PREFIX",
     "CTX_SOURCES",
     "CTX_SOURCE_CONTROL",
+    "CTX_SOURCE_KIND",
     "LABEL_CONTEXT_ARM",
+    "LABEL_CTX_AUTHOR_SAW",
     "LABEL_CTX_CEILING",
     "LABEL_CTX_CHARS",
     "LABEL_CTX_DELIVERED",
     "LABEL_CTX_DRAFTER",
     "LABEL_CTX_GAP",
     "LABEL_CTX_GAP_RULE",
+    "LABEL_CTX_ITEMS",
+    "LABEL_CTX_PROV",
+    "LABEL_CTX_REQ_DRAFTER",
+    "LABEL_CTX_REQ_REFUSED",
     "LABEL_CTX_SET",
     "LABEL_CTX_SOURCE",
+    "LABEL_CTX_STATED",
+    "LABEL_CTX_STRUCTURE",
+    "LABEL_CTX_TURNS",
     "PROVENANCE_LABELS",
     "REPLAY_MODE",
     "TEST_AUTHORED",
@@ -393,7 +475,9 @@ __all__ = [
     "ContextArmsPooled",
     "arms_present",
     "context_arm_for",
+    "ctx_kind",
     "ctx_set_name",
+    "ctx_source_of",
     "hindsight_arm",
     "is_arm",
     "loop_on",
@@ -401,4 +485,5 @@ __all__ = [
     "mode_admits",
     "parse_arm",
     "rows_for_context_arm",
+    "stated_arm",
 ]

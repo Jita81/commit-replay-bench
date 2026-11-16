@@ -2,7 +2,8 @@
 
 Navigation
 ----------
-What it is:   Builders for a ``crb.ctxset.v1`` document, its parsed ``CtxSet`` and the grade
+What it is:   Builders for a ``crb.ctxset.v1`` document (and a ``crb.ctxset.v2``
+              stated-requirement one, ADR-0052), its parsed ``CtxSet`` and the grade
               rows a context-set run or its control writes, each stamped as
               ``crb.core.ctxset.run_stamps`` stamps it.
 What it does: Keeps every ctx test's rows valid under ``ctx_label_violation`` (the ledger's
@@ -74,6 +75,54 @@ def ctx_set(source: str = ctxset.SOURCE_ORACLE, **kw: Any) -> ctxset.CtxSet:
     return ctxset.parse(ctx_doc(source, **kw))
 
 
+def req_doc(
+    source: str = ctxset.SOURCE_REQ,
+    *,
+    structure: str = "prose",
+    tasks: Sequence[str] = TASKS,
+    statement: str = "The command keeps its existing flags working unchanged",
+    provenance: str = "nowhere",
+    statements: Mapping[str, str] | None = None,
+    matched_to: str = "",
+    repo: str = REPO,
+) -> dict[str, Any]:
+    """A valid ``crb.ctxset.v2`` stated-requirement document (ADR-0052): one item per task."""
+    doc: dict[str, Any] = {
+        "schema": ctxset.SCHEMA_V2,
+        "source": source,
+        "repo": repo,
+        "method": "fixture",
+        "structure": structure,
+        "drafter": "human:fixture-01",
+        "saw": ["diff", "tests"],
+        "entries": [
+            {
+                "task_id": t,
+                "entry_id": f"req/{t[-6:]}",
+                "version": "1",
+                "produced_at": "2026-11-01T00:00:00Z",
+                "items": [
+                    {
+                        "item_id": "i01",
+                        "kind": "rule",
+                        "statement": (statements or {}).get(t, statement),
+                        "provenance": provenance,
+                        "discloses": [],
+                    }
+                ],
+            }
+            for t in sorted(tasks)
+        ],
+    }
+    if matched_to:
+        doc["matched_to"] = matched_to
+    return doc
+
+
+def req_set(source: str = ctxset.SOURCE_REQ, **kw: Any) -> ctxset.CtxSet:
+    return ctxset.parse(req_doc(source, **kw))
+
+
 def ctx_row(
     cset: ctxset.CtxSet,
     task_id: str,
@@ -138,4 +187,14 @@ def side(
     return [ctx_row(cset, t, clean=c, role=role, **kw) for t, c in outcomes.items()]
 
 
-__all__ = ["PACK", "REPO", "TASKS", "ctx_doc", "ctx_row", "ctx_set", "side"]
+__all__ = [
+    "PACK",
+    "REPO",
+    "TASKS",
+    "ctx_doc",
+    "ctx_row",
+    "ctx_set",
+    "req_doc",
+    "req_set",
+    "side",
+]

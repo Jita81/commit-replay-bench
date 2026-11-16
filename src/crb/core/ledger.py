@@ -119,6 +119,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from crb.core import stated as _stated
 from crb.core import version as _version
 from crb.core.acceptance import held_out_graded, held_out_passes
 from crb.core.checks import ARM_OFF, ARMS, LABEL_CHECKS, arm_from_label
@@ -128,14 +129,22 @@ from crb.core.context_arm import (
     BASE_S2,
     CTX_SOURCE_CONTROL,
     LABEL_CONTEXT_ARM,
+    LABEL_CTX_AUTHOR_SAW,
     LABEL_CTX_CEILING,
     LABEL_CTX_CHARS,
     LABEL_CTX_DELIVERED,
     LABEL_CTX_DRAFTER,
     LABEL_CTX_GAP,
     LABEL_CTX_GAP_RULE,
+    LABEL_CTX_ITEMS,
+    LABEL_CTX_PROV,
+    LABEL_CTX_REQ_DRAFTER,
+    LABEL_CTX_REQ_REFUSED,
     LABEL_CTX_SET,
     LABEL_CTX_SOURCE,
+    LABEL_CTX_STATED,
+    LABEL_CTX_STRUCTURE,
+    LABEL_CTX_TURNS,
     TEST_AUTHORED,
     TEST_PERSON,
     ContextArmsPooled,
@@ -145,6 +154,7 @@ from crb.core.context_arm import (
     is_arm,
     loop_on,
     parse_arm,
+    stated_arm,
 )
 from crb.core.evidence import BuilderRef, canonical_json, sha256_text, utc_now_iso
 from crb.core.grade import (
@@ -519,7 +529,47 @@ CTX_ARM_LABELS: tuple[str, ...] = (
     LABEL_CTX_CEILING,
     LABEL_CTX_DRAFTER,
 )
+#: The stated-requirement stamps (ADR-0052 item 2): exactly on an entries row of a
+#: ``ctx.req*`` arm, never on a control row or any other arm. ``ctx_req_refused`` is the
+#: composer's own (only when ``req_guard`` refused an entry) and is allowed there only.
+CTX_STATED_LABELS: tuple[str, ...] = (
+    LABEL_CTX_STATED,
+    LABEL_CTX_ITEMS,
+    LABEL_CTX_STRUCTURE,
+    LABEL_CTX_AUTHOR_SAW,
+    LABEL_CTX_PROV,
+    LABEL_CTX_REQ_DRAFTER,
+)
 _CTX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _stated_violation(arm: str, labels: Mapping[str, str]) -> str:
+    """Why a context-set arm row's stated stamps disagree with its arm (ADR-0052), or ``""``."""
+    if not stated_arm(arm):
+        stray = [k for k in (*CTX_STATED_LABELS, LABEL_CTX_REQ_REFUSED) if k in labels]
+        return f"stated-requirement stamps {stray} on a non-req arm {arm!r}" if stray else ""
+    missing = [k for k in CTX_STATED_LABELS if not labels.get(k)]
+    if missing:
+        return f"a stated-requirement row lacks {missing} (ADR-0052 item 2)"
+    if labels[LABEL_CTX_STATED] != "1":
+        return f"ctx_stated {labels[LABEL_CTX_STATED]!r} is not '1' (ADR-0052)"
+    if not _CTX_DIGEST_RE.match(labels[LABEL_CTX_ITEMS]):
+        return "ctx_items is not a full items digest (ADR-0052)"
+    if labels[LABEL_CTX_STRUCTURE] not in _stated.STRUCTURES:
+        return f"ctx_structure {labels[LABEL_CTX_STRUCTURE]!r} is not a known structure"
+    saw = labels[LABEL_CTX_AUTHOR_SAW].split(",")
+    if saw != sorted(set(saw)) or not set(saw) <= set(_stated.SAW_VALUES):
+        return f"ctx_author_saw {labels[LABEL_CTX_AUTHOR_SAW]!r} is not a sorted known subset"
+    if not _stated.PROV_LABEL_RE.match(labels[LABEL_CTX_PROV]):
+        return f"ctx_prov {labels[LABEL_CTX_PROV]!r} is not a provenance count line"
+    if not _stated.REQ_DRAFTER_RE.match(labels[LABEL_CTX_REQ_DRAFTER]):
+        return "ctx_req_drafter is not human:<id> or model:<id>@<sha256> (ADR-0052)"
+    refused = labels.get(LABEL_CTX_REQ_REFUSED)
+    if refused is not None:
+        why = refused.split(",")
+        if why != sorted(set(why)) or not set(why) <= set(_stated.REASONS):
+            return f"ctx_req_refused {refused!r} is not a sorted set of req_guard reasons"
+    return ""
 
 
 def ctx_label_violation(arm: str, labels: Mapping[str, str]) -> str:
@@ -532,11 +582,22 @@ def ctx_label_violation(arm: str, labels: Mapping[str, str]) -> str:
     ``ctx_drafter`` exactly on a ``mech*`` arm and ``ctx_ceiling`` = ``1`` exactly on a
     hindsight arm. A control row (``ctx_set`` on any other arm) is plain ``A0`` with
     ``ctx_source`` = ``control``, ``ctx_gap`` and ``ctx_gap_rule``, and none of the arm's
-    own stamps. A row of neither kind carries no ctx stamp at all."""
+    own stamps. A row of neither kind carries no ctx stamp at all.
+
+    ADR-0052: a ``ctx.req*`` arm row also carries every :data:`CTX_STATED_LABELS` stamp
+    (and ``ctx_req_refused`` only when the guard refused); no other row carries any of
+    them. ``ctx_turns`` is optional, decimal, and only on a context-set run's row."""
     name = ctx_set_name(arm)
     present = [k for k in (*CTX_RUN_LABELS, *CTX_ARM_LABELS) if k in labels]
+    stated_present = [k for k in (*CTX_STATED_LABELS, LABEL_CTX_REQ_REFUSED) if k in labels]
     if not name and not present:
+        orphan = [*stated_present, *([LABEL_CTX_TURNS] if LABEL_CTX_TURNS in labels else [])]
+        if orphan:
+            return f"context-set stamps {orphan} on arm {arm!r} without a ctx_set (ADR-0052)"
         return ""
+    turns = labels.get(LABEL_CTX_TURNS)
+    if turns is not None and not turns.isdecimal():
+        return f"ctx_turns {turns!r} is not a count (ADR-0052 item 5)"
     digest = labels.get(LABEL_CTX_SET, "")
     gap = labels.get(LABEL_CTX_GAP, "")
     if not _CTX_DIGEST_RE.match(digest):
@@ -549,7 +610,7 @@ def ctx_label_violation(arm: str, labels: Mapping[str, str]) -> str:
             return f"ctx_set on arm {arm!r}: a context-set control row is plain A0 (ADR-0050)"
         if source != CTX_SOURCE_CONTROL:
             return f"a control row's ctx_source is {CTX_SOURCE_CONTROL!r}, not {source!r}"
-        stray = [k for k in CTX_ARM_LABELS if k in labels]
+        stray = [k for k in (*CTX_ARM_LABELS, *stated_present) if k in labels]
         if stray:
             return f"a control row carries the context-set arm's own stamps {stray}"
         return ""
@@ -573,7 +634,7 @@ def ctx_label_violation(arm: str, labels: Mapping[str, str]) -> str:
         hindsight and LABEL_CTX_DRAFTER in labels
     ):
         return f"ctx_drafter is stamped exactly on a mechanical context-set arm ({arm!r})"
-    return ""
+    return _stated_violation(arm, labels)
 
 
 class ChecksArmsPooled(ValueError):

@@ -9,7 +9,22 @@ A context set is ONE JSON document, schema ``crb.ctxset.v1``::
      "entries": [{"task_id", "entry_id", "version", "text", "produced_at", "mechanical",
                   "source_rev" (mech* only: the task's parent commit)}, ...]}
 
-with exactly one entry per task, sorted by ``task_id``. Its **digest** is the sha256 of its
+with exactly one entry per task, sorted by ``task_id``.
+
+A **stated-requirement** set (``req`` / ``req-placebo``, ADR-0052) is schema
+``crb.ctxset.v2`` — and only those sources are; a v1 ``req*`` document and a v2 document of any
+other source are refused::
+
+    {"schema": "crb.ctxset.v2", "source": "req" | "req-placebo", "repo", "method",
+     "structure": "prose" | "checklist", "drafter": "human:<id>" | "model:<id>@<sha256>",
+     "saw": ["diff", "tests", "ticket"] (a sorted subset), "matched_to" (a placebo only),
+     "entries": [{"task_id", "entry_id", "version", "produced_at",
+                  "items": [{"item_id", "kind", "statement", "provenance", "discloses"}]}]}
+
+A v2 entry stores no text: its text is rendered BY CODE from its items with the set's
+structure (``crb.core.stated.render``), so nothing free-form reaches a brief. Each item's
+``discloses`` tokens appear verbatim in its statement (``ctxset_items_undelivered``) and the
+fixed limits hold (``ctxset_items_length``). Its **digest** is the sha256 of its
 canonical JSON (sorted keys, ``(",", ":")`` separators, UTF-8, no ASCII escaping); its
 **name** is ``ctx.<source>.<digest[:12]>`` and is never stored inside the hashed body, so a
 changed set is a new digest and a new arm (``A0+library@<name>``). Every check here refuses
@@ -39,7 +54,8 @@ What it does: Refuses a malformed set (``ctxset_schema``), a name that disagrees
 How:          Pure functions over JSON values (stdlib only); the parent tree is reached only
               through the ``tree_has`` callable the worker passes.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0026-the-context-standard.md
+ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0052-stated-requirement-arms.md
+              (the v2 schema), docs/adr/0026-the-context-standard.md
               (items 1, 7 and 10, which ADR-0050 amends)
 Works with:   src/crb/core/context_arm.py (the reserved ``ctx.`` names and the ctx labels),
               src/crb/builders/brief.py (``ContextEntry``, the admission the arm derives; it
@@ -67,13 +83,19 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from crb.core import context_arm as _arms
+from crb.core import stated as _stated
 
 SCHEMA = "crb.ctxset.v1"
+#: The stated-requirement schema (ADR-0052): items, a structure and the writer's sight.
+SCHEMA_V2 = "crb.ctxset.v2"
+SCHEMAS: tuple[str, ...] = (SCHEMA, SCHEMA_V2)
 
 SOURCE_ORACLE = "oracle"
 SOURCE_ORACLE_PLACEBO = "oracle-placebo"
 SOURCE_MECH = "mech"
 SOURCE_MECH_PLACEBO = "mech-placebo"
+SOURCE_REQ = "req"
+SOURCE_REQ_PLACEBO = "req-placebo"
 SOURCES: tuple[str, ...] = _arms.CTX_SOURCES
 PLACEBO_SUFFIX = "-placebo"
 
@@ -98,6 +120,10 @@ REASON_PLACEBO_OVERLAP = "ctxset_placebo_overlap"
 REASON_MODE = "ctxset_mode"
 REASON_POSTURE = "ctxset_posture"
 REASON_REPO = "ctxset_repo"
+#: A stated item names a disclosed token its own statement does not carry (ADR-0052 item 3).
+REASON_ITEMS_UNDELIVERED = "ctxset_items_undelivered"
+#: A stated entry breaks the fixed item, statement or entry-length limits (ADR-0052 item 3.7).
+REASON_ITEMS_LENGTH = "ctxset_items_length"
 REASONS: tuple[str, ...] = (
     REASON_SCHEMA,
     REASON_DIGEST,
@@ -108,6 +134,8 @@ REASONS: tuple[str, ...] = (
     REASON_MODE,
     REASON_POSTURE,
     REASON_REPO,
+    REASON_ITEMS_UNDELIVERED,
+    REASON_ITEMS_LENGTH,
 )
 
 #: A placebo entry's length may differ from its treatment's by at most
@@ -147,6 +175,13 @@ _TOP_REQUIRED = ("schema", "source", "repo", "method", "entries")
 _TOP_OPTIONAL = ("matched_to", "drafter")
 _ENTRY_REQUIRED = ("task_id", "entry_id", "version", "text", "produced_at", "mechanical")
 _ENTRY_OPTIONAL = ("source_rev",)
+_V2_TOP_REQUIRED = ("schema", "source", "repo", "method", "structure", "drafter", "saw", "entries")
+_V2_TOP_OPTIONAL = ("matched_to",)
+_V2_ENTRY_REQUIRED = ("task_id", "entry_id", "version", "produced_at", "items")
+_ITEM_REQUIRED = ("item_id", "kind", "statement", "provenance", "discloses")
+_ITEM_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
+#: who wrote a stated set's items (ADR-0052): ``stated.REQ_DRAFTER_RE``
+_REQ_DRAFTER_RE = _stated.REQ_DRAFTER_RE
 _SHA_RE = re.compile(r"^[0-9a-f]{7,64}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _DRAFTER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*@[0-9a-f]{64}$")
@@ -179,8 +214,18 @@ class CtxEntryRecord:
     produced_at: str
     mechanical: bool
     source_rev: str = ""
+    #: A stated (v2) entry's items, in ``item_id`` order; ``text`` is their rendering.
+    items: tuple[_stated.StatedItem, ...] = ()
 
     def to_doc(self) -> dict[str, Any]:
+        if self.items:
+            return {
+                "task_id": self.task_id,
+                "entry_id": self.entry_id,
+                "version": self.version,
+                "produced_at": self.produced_at,
+                "items": [i.to_doc() for i in self.items],
+            }
         out: dict[str, Any] = {
             "task_id": self.task_id,
             "entry_id": self.entry_id,
@@ -205,6 +250,10 @@ class CtxSet:
     digest: str
     matched_to: str = ""
     drafter: str = ""
+    schema: str = SCHEMA
+    #: A stated set's renderer and what its items' writer saw (``crb.ctxset.v2`` only).
+    structure: str = ""
+    saw: tuple[str, ...] = ()
 
     @property
     def name(self) -> str:
@@ -217,14 +266,34 @@ class CtxSet:
         return _arms.ContextArm(_arms.BASE_A0, library=self.name).id
 
     @property
+    def kind(self) -> str:
+        """The source's kind, from the one table (``context_arm.CTX_SOURCE_KIND``)."""
+        return _arms.ctx_kind(self.source)
+
+    @property
     def hindsight(self) -> bool:
-        """``ctx.oracle*``: written with hindsight of the answer — a measurement-only ceiling."""
-        return self.source in (SOURCE_ORACLE, SOURCE_ORACLE_PLACEBO)
+        """``ctx.oracle*`` and ``ctx.req*``: written with hindsight of the answer — a
+        measurement-only ceiling (ADR-0050 item 4, ADR-0052 item 1)."""
+        return self.kind in (_arms.CTX_KIND_HINDSIGHT, _arms.CTX_KIND_STATED)
 
     @property
     def mechanical(self) -> bool:
         """``ctx.mech*``: admitted at the task's parent commit under a pinned drafter."""
-        return self.source in (SOURCE_MECH, SOURCE_MECH_PLACEBO)
+        return self.kind == _arms.CTX_KIND_MECHANICAL
+
+    @property
+    def stated(self) -> bool:
+        """``ctx.req*``: entries rendered from declared items (ADR-0052)."""
+        return self.kind == _arms.CTX_KIND_STATED
+
+    @property
+    def items_digest(self) -> str:
+        """A stated set's items digest (``crb.core.stated.items_digest``), ``""`` otherwise.
+        Text and structure are outside it: a prose and a checklist set over the same items
+        share it."""
+        if not self.stated:
+            return ""
+        return _stated.items_digest({e.task_id: e.items for e in self.entries})
 
     @property
     def placebo(self) -> bool:
@@ -244,7 +313,7 @@ class CtxSet:
     def to_doc(self) -> dict[str, Any]:
         """The hashed body, exactly as :func:`canonical_digest` reads it (no name inside)."""
         out: dict[str, Any] = {
-            "schema": SCHEMA,
+            "schema": self.schema,
             "source": self.source,
             "repo": self.repo,
             "method": self.method,
@@ -254,6 +323,9 @@ class CtxSet:
             out["matched_to"] = self.matched_to
         if self.drafter:
             out["drafter"] = self.drafter
+        if self.schema == SCHEMA_V2:
+            out["structure"] = self.structure
+            out["saw"] = list(self.saw)
         return out
 
 
@@ -323,29 +395,58 @@ def parse(doc: object, *, name: str | None = None) -> CtxSet:
             raise _schema(f"not JSON: {e}") from e
     if not isinstance(doc, Mapping):
         raise _schema("a context set is a JSON object")
-    _keys(doc, _TOP_REQUIRED, _TOP_OPTIONAL, "set")
-    if doc["schema"] != SCHEMA:
-        raise _schema(f"schema {doc['schema']!r} is not {SCHEMA!r}")
-    source = _text(doc, "source", "set")
-    if source not in SOURCES:
+    schema = doc.get("schema")
+    if schema not in SCHEMAS:
+        raise _schema(f"schema {schema!r} is not one of {SCHEMAS}")
+    source = doc.get("source")
+    if not isinstance(source, str) or source not in SOURCES:
         raise _schema(f"source {source!r} is not one of {SOURCES}")
-    repo = _text(doc, "repo", "set")
-    if not _REPO_RE.match(repo):
-        raise _schema(f"repo {repo!r} is not a repository id")
-    method = _text(doc, "method", "set")
-    hindsight = source in (SOURCE_ORACLE, SOURCE_ORACLE_PLACEBO)
-    mech = not hindsight
-    placebo = source.endswith(PLACEBO_SUFFIX)
+    stated = _arms.ctx_kind(source) == _arms.CTX_KIND_STATED
+    if stated != (schema == SCHEMA_V2):
+        raise _schema(
+            f"a {source!r} set is {SCHEMA_V2 if stated else SCHEMA!r}, not {schema!r} "
+            "(stated-requirement sources only are v2, ADR-0052)"
+        )
+    out = _parse_v2(doc, source) if stated else _parse_v1(doc, source)
+    if canonical_digest(out.to_doc()) != out.digest:  # pragma: no cover - parse round-trips
+        raise _schema("the parsed set does not round-trip to its document")
+    if name is not None and name != out.name:
+        raise CtxSetRefused(REASON_DIGEST, f"name {name!r} is not the set's {out.name!r}")
+    return out
 
-    matched_to = ""
+
+def _matched_to(doc: Mapping[str, Any], source: str) -> str:
+    placebo = source.endswith(PLACEBO_SUFFIX)
     if "matched_to" in doc:
         if not placebo:
             raise _schema(f"matched_to is a placebo's field; source is {source!r}")
         matched_to = doc["matched_to"]
         if not isinstance(matched_to, str) or not _DIGEST_RE.match(matched_to):
             raise _schema("matched_to is not a full sha256 digest")
-    elif placebo:
+        return matched_to
+    if placebo:
         raise CtxSetRefused(REASON_PLACEBO_UNMATCHED, "a placebo names its treatment's digest")
+    return ""
+
+
+def _check_entry_order(entries: list[CtxEntryRecord]) -> None:
+    ids = [e.task_id for e in entries]
+    dupes = sorted({t for t in ids if ids.count(t) > 1})
+    if dupes:
+        raise CtxSetRefused(REASON_COVERAGE, f"tasks with several entries: {dupes}")
+    if ids != sorted(ids):
+        raise _schema("entries are not sorted by task_id")
+
+
+def _parse_v1(doc: Mapping[str, Any], source: str) -> CtxSet:
+    _keys(doc, _TOP_REQUIRED, _TOP_OPTIONAL, "set")
+    repo = _text(doc, "repo", "set")
+    if not _REPO_RE.match(repo):
+        raise _schema(f"repo {repo!r} is not a repository id")
+    method = _text(doc, "method", "set")
+    hindsight = _arms.ctx_kind(source) == _arms.CTX_KIND_HINDSIGHT
+    mech = _arms.ctx_kind(source) == _arms.CTX_KIND_MECHANICAL
+    matched_to = _matched_to(doc, source)
 
     drafter = ""
     if "drafter" in doc:
@@ -404,14 +505,8 @@ def parse(doc: object, *, name: str | None = None) -> CtxSet:
                 source_rev=source_rev,
             )
         )
-    ids = [e.task_id for e in entries]
-    dupes = sorted({t for t in ids if ids.count(t) > 1})
-    if dupes:
-        raise CtxSetRefused(REASON_COVERAGE, f"tasks with several entries: {dupes}")
-    if ids != sorted(ids):
-        raise _schema("entries are not sorted by task_id")
-
-    out = CtxSet(
+    _check_entry_order(entries)
+    return CtxSet(
         source=source,
         repo=repo,
         method=method,
@@ -420,11 +515,116 @@ def parse(doc: object, *, name: str | None = None) -> CtxSet:
         matched_to=matched_to,
         drafter=drafter,
     )
-    if canonical_digest(out.to_doc()) != out.digest:  # pragma: no cover - parse round-trips
-        raise _schema("the parsed set does not round-trip to its document")
-    if name is not None and name != out.name:
-        raise CtxSetRefused(REASON_DIGEST, f"name {name!r} is not the set's {out.name!r}")
-    return out
+
+
+def _sorted_unique(values: list[str], where: str) -> None:
+    if values != sorted(set(values)):
+        raise _schema(f"{where} is not sorted and unique")
+
+
+def _parse_item(raw: object, where: str) -> _stated.StatedItem:
+    if not isinstance(raw, Mapping):
+        raise _schema(f"{where} is not an object")
+    _keys(raw, _ITEM_REQUIRED, (), where)
+    item_id = _text(raw, "item_id", where)
+    if not _ITEM_ID_RE.match(item_id):
+        raise _schema(f"{where}.item_id {item_id!r} is not a short id")
+    kind = _text(raw, "kind", where)
+    if kind not in _stated.KINDS:
+        raise _schema(f"{where}.kind {kind!r} is not one of {_stated.KINDS}")
+    provenance = _text(raw, "provenance", where)
+    if provenance not in _stated.PROVENANCES:
+        raise _schema(f"{where}.provenance {provenance!r} is not one of {_stated.PROVENANCES}")
+    statement = _text(raw, "statement", where)
+    if "\n" in statement or "\r" in statement:
+        raise _schema(f"{where}.statement spans several lines")
+    discloses = raw["discloses"]
+    if not isinstance(discloses, list) or not all(
+        isinstance(t, str) and t.strip() == t and t for t in discloses
+    ):
+        raise _schema(f"{where}.discloses is not a list of non-empty trimmed strings")
+    _sorted_unique(discloses, f"{where}.discloses")
+    missing = [t for t in discloses if t not in statement]
+    if missing:
+        raise CtxSetRefused(
+            REASON_ITEMS_UNDELIVERED, f"{where}: discloses {missing}, its statement does not"
+        )
+    return _stated.StatedItem(
+        item_id=item_id,
+        kind=kind,
+        statement=statement,
+        provenance=provenance,
+        discloses=tuple(discloses),
+    )
+
+
+def _parse_v2(doc: Mapping[str, Any], source: str) -> CtxSet:
+    _keys(doc, _V2_TOP_REQUIRED, _V2_TOP_OPTIONAL, "set")
+    repo = _text(doc, "repo", "set")
+    if not _REPO_RE.match(repo):
+        raise _schema(f"repo {repo!r} is not a repository id")
+    method = _text(doc, "method", "set")
+    structure = _text(doc, "structure", "set")
+    if structure not in _stated.STRUCTURES:
+        raise _schema(f"structure {structure!r} is not one of {_stated.STRUCTURES}")
+    drafter = _text(doc, "drafter", "set")
+    if not _REQ_DRAFTER_RE.match(drafter):
+        raise _schema("drafter is not 'human:<id>' or 'model:<pinned id>@<sha256 of the prompt>'")
+    saw = doc["saw"]
+    if not isinstance(saw, list) or not saw or not all(s in _stated.SAW_VALUES for s in saw):
+        raise _schema(f"saw is not a non-empty list of {_stated.SAW_VALUES}")
+    _sorted_unique(saw, "set.saw")
+    matched_to = _matched_to(doc, source)
+
+    raw = doc["entries"]
+    if not isinstance(raw, list):
+        raise _schema("entries is not a list")
+    if not raw:
+        raise CtxSetRefused(REASON_COVERAGE, "a context set covers at least one task")
+    entries: list[CtxEntryRecord] = []
+    for i, entry in enumerate(raw):
+        where = f"entries[{i}]"
+        if not isinstance(entry, Mapping):
+            raise _schema(f"{where} is not an object")
+        _keys(entry, _V2_ENTRY_REQUIRED, (), where)
+        task_id = _text(entry, "task_id", where)
+        if not _SHA_RE.match(task_id):
+            raise _schema(f"{where}.task_id {task_id!r} is not a git sha")
+        produced_at = _text(entry, "produced_at", where)
+        _utc(produced_at, where)
+        raw_items = entry["items"]
+        if not isinstance(raw_items, list) or not raw_items:
+            raise _schema(f"{where}.items is not a non-empty list")
+        items = [_parse_item(it, f"{where}.items[{j}]") for j, it in enumerate(raw_items)]
+        _sorted_unique([it.item_id for it in items], f"{where}.items item_id")
+        text = _stated.render(structure, items)
+        over = _stated.length_violation(items, text)
+        if over:
+            raise CtxSetRefused(REASON_ITEMS_LENGTH, f"{where}: {over}")
+        entries.append(
+            CtxEntryRecord(
+                task_id=task_id,
+                entry_id=_text(entry, "entry_id", where),
+                version=_text(entry, "version", where),
+                text=text,
+                produced_at=produced_at,
+                mechanical=False,
+                items=tuple(items),
+            )
+        )
+    _check_entry_order(entries)
+    return CtxSet(
+        source=source,
+        repo=repo,
+        method=method,
+        entries=tuple(entries),
+        digest=canonical_digest(doc),
+        matched_to=matched_to,
+        drafter=drafter,
+        schema=SCHEMA_V2,
+        structure=structure,
+        saw=tuple(saw),
+    )
 
 
 class TaskLike(Protocol):
@@ -535,6 +735,10 @@ def verify_placebo(treatment: CtxSet, placebo: CtxSet) -> None:
         raise unmatched(f"the placebo is {placebo.repo!r}'s, the treatment {treatment.repo!r}'s")
     if set(placebo.task_ids) != set(treatment.task_ids):
         raise unmatched("the placebo and its treatment cover different tasks")
+    if placebo.structure != treatment.structure:
+        raise unmatched(
+            f"the placebo is {placebo.structure!r}, its treatment {treatment.structure!r}"
+        )
     for t in treatment.entries:
         p = placebo.entry_for(t.task_id)
         if abs(len(p.text) - len(t.text)) > placebo_tolerance(len(t.text)):
@@ -570,12 +774,16 @@ def run_stamps(ctxset: CtxSet, role: str, gaps: Mapping[str, str]) -> dict[str, 
     before any step that can fail. ``entries``: ``ctx_set`` (the full digest), ``ctx_source``,
     ``ctx_gap``, ``ctx_gap_rule``, ``ctx_delivered`` = ``ctx_chars`` = ``"0"`` (the composer's
     own counts replace them when it runs), ``ctx_drafter`` on a ``mech*`` set and
-    ``ctx_ceiling`` = ``"1"`` on a hindsight set. ``control``: ``ctx_set``, ``ctx_source`` =
+    ``ctx_ceiling`` = ``"1"`` on a hindsight set, and on a stated set (ADR-0052 item 2)
+    ``ctx_stated`` = ``"1"``, ``ctx_items``, ``ctx_structure``, ``ctx_author_saw``, the task's
+    ``ctx_prov`` and ``ctx_req_drafter``. ``control``: ``ctx_set``, ``ctx_source`` =
     ``control``, ``ctx_gap`` and ``ctx_gap_rule``. ``gaps`` holds every task's
     :func:`ctx_gap_anchor` value."""
     if role not in ROLES:
         raise ValueError(f"role {role!r} is not one of {ROLES}")
     out: dict[str, dict[str, str]] = {}
+    # The items digest hashes every task's items: once per call, not once per task.
+    items_digest = ctxset.items_digest if role != ROLE_CONTROL and ctxset.stated else ""
     for tid in ctxset.task_ids:
         gap = gaps.get(tid)
         if gap not in (GAP_NO, GAP_YES):
@@ -595,6 +803,14 @@ def run_stamps(ctxset: CtxSet, role: str, gaps: Mapping[str, str]) -> dict[str, 
                 stamps[_arms.LABEL_CTX_DRAFTER] = ctxset.drafter
             if ctxset.hindsight:
                 stamps[_arms.LABEL_CTX_CEILING] = "1"
+            if ctxset.stated:
+                entry = ctxset.entry_for(tid)
+                stamps[_arms.LABEL_CTX_STATED] = "1"
+                stamps[_arms.LABEL_CTX_ITEMS] = items_digest
+                stamps[_arms.LABEL_CTX_STRUCTURE] = ctxset.structure
+                stamps[_arms.LABEL_CTX_AUTHOR_SAW] = ",".join(ctxset.saw)
+                stamps[_arms.LABEL_CTX_PROV] = _stated.prov_label(entry.items)
+                stamps[_arms.LABEL_CTX_REQ_DRAFTER] = ctxset.drafter
         out[tid] = stamps
     return out
 
@@ -609,6 +825,8 @@ __all__ = [
     "REASONS",
     "REASON_COVERAGE",
     "REASON_DIGEST",
+    "REASON_ITEMS_LENGTH",
+    "REASON_ITEMS_UNDELIVERED",
     "REASON_MECHANICAL",
     "REASON_MODE",
     "REASON_PLACEBO_OVERLAP",
@@ -620,11 +838,15 @@ __all__ = [
     "ROLE_CONTROL",
     "ROLE_ENTRIES",
     "SCHEMA",
+    "SCHEMAS",
+    "SCHEMA_V2",
     "SOURCES",
     "SOURCE_MECH",
     "SOURCE_MECH_PLACEBO",
     "SOURCE_ORACLE",
     "SOURCE_ORACLE_PLACEBO",
+    "SOURCE_REQ",
+    "SOURCE_REQ_PLACEBO",
     "STOPWORDS",
     "CtxEntryRecord",
     "CtxSet",

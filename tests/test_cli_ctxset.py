@@ -39,7 +39,7 @@ from crb.mcp.client import CrbApi
 from crb.server.app import API_PREFIX
 from crb.store.ledger import DbLedger
 from crb.store.models import Run
-from fixtures.ctx_rows import ctx_doc, side
+from fixtures.ctx_rows import TASKS, ctx_doc, req_set, side
 from fixtures.server_seed import ALPHA, USER_PW, USERS, Env, make_env
 
 SECRET = "The handler reads the flag before parsing; the fix moves the read."
@@ -155,6 +155,24 @@ def test_compare_lines_without_a_banner() -> None:
     assert lines[0].startswith("control")
     assert any(line.startswith("PENDING 1") for line in lines)
     assert any(line.startswith("dose_imbalance") for line in lines)
+
+
+def test_compare_lines_print_a_stated_pairs_provenance_strata() -> None:
+    """ADR-0052 item 6: a stated pair's text carries one line per provenance stratum."""
+    prose = req_set()
+    control = dict.fromkeys(TASKS, False)
+    treat = {t: i < 4 for i, t in enumerate(TASKS)}
+    pair = cc.ctx_pair(
+        side(prose, control, role=ctxset.ROLE_CONTROL),
+        side(prose, treat),
+        task_ids=prose.task_ids,
+        sets={prose.digest: prose},
+    )
+    lines = cmd.compare_lines(pair.to_dict())
+    assert lines[0] == cc.STATED_BANNER
+    strata = [ln for ln in lines if ln.startswith("stratum ")]
+    assert [ln.split()[1] for ln in strata] == ["tests_only", "no_tests_only"]
+    assert strata == cc.prov_strata_lines(pair.to_dict()["prov_strata"])
 
 
 def test_cli_loads_and_runs_without_the_mcp_extra() -> None:

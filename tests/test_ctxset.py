@@ -427,7 +427,7 @@ def test_stamps_refuse_a_missing_gap_or_an_unknown_role() -> None:
 
 
 def test_every_refusal_reason_is_named_and_an_unknown_one_is_refused() -> None:
-    assert len(set(ctxset.REASONS)) == len(ctxset.REASONS) == 9
+    assert len(set(ctxset.REASONS)) == len(ctxset.REASONS) == 11  # +2 for v2 items (ADR-0052)
     assert all(r.startswith("ctxset_") for r in ctxset.REASONS)
     with pytest.raises(ValueError, match="unknown"):
         CtxSetRefused("ctxset_other", "x")

@@ -45,7 +45,6 @@ tests/test_core_is_stdlib_only.py
 tests/test_factory_backlog.py
 tests/test_factory_readiness.py
 tests/test_factory_review.py
-tests/test_git.py
 tests/test_intake_client.py
 tests/test_intake_fake.py
 tests/test_legacy.py

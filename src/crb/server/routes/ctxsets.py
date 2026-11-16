@@ -31,7 +31,7 @@ How:          ``ctxset.parse`` → ``verify_coverage`` (+ ``verify_placebo``) �
               per-request temporary file, hard-linked into place) → ``append_system_event``
               → commit; ``rows_of_runs`` → ``ctx_pair``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0050-context-set-arms.md
+ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0052-stated-requirement-arms.md
 Works with:   src/crb/core/ctxset.py (the record and its verifiers), src/crb/core/ctx_compare.py
               (the paired reader), src/crb/store/ledger.py (``rows_of_runs``),
               src/crb/cli/commands/ctxset.py (the CLI over these routes), docs/API.md (the
@@ -129,12 +129,20 @@ def _refused(exc: CtxSetRefused | CtxPairRefused) -> ApiError:
 
 
 def _meta(ctxset: CtxSet) -> dict[str, Any]:
-    """What a viewer may read of a set: never an entry's text."""
+    """What a viewer may read of a set: never an entry's text (nor a stated item's statement).
+    A stated set (ADR-0052) also names its structure, what its author saw and its items
+    digest (the key a structure contrast links by); those fields are empty on a v1 set."""
     return {
         "name": ctxset.name,
         "digest": ctxset.digest,
+        "schema": ctxset.schema,
         "arm": ctxset.arm,
         "source": ctxset.source,
+        "kind": ctxset.kind,
+        "stated": ctxset.stated,
+        "structure": ctxset.structure,
+        "saw": list(ctxset.saw),
+        "items_digest": ctxset.items_digest,
         "repo": ctxset.repo,
         "method": ctxset.method,
         "matched_to": ctxset.matched_to,

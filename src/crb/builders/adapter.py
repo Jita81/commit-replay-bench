@@ -153,6 +153,7 @@ from crb.builders.brief import (
     Ticket,
     compose,
     context_arm_for,
+    gold_view,
     novel_tokens,
 )
 from crb.builders.budget import (
@@ -180,6 +181,7 @@ from crb.core.context_arm import (
     CTX_SOURCE_CONTROL,
     LABEL_CTX_SET,
     LABEL_CTX_SOURCE,
+    LABEL_CTX_TURNS,
 )
 from crb.core.deps import DepsBinding, TaskDeps
 from crb.core.evidence import BuilderRef
@@ -1670,6 +1672,12 @@ def build_fn_for(
             stamps.update(
                 {k: v for k, v in stamps_of[task.task_id].items() if k not in attempt.labels}
             )
+            if LABEL_CTX_TURNS not in attempt.labels and attempt.builder.turns > 0:
+                # the builder's turn count on a ctx row whose builder ran (ADR-0052 item 2):
+                # the cost block of a compare reads it beside tokens and cost; not
+                # provenance. A refusal before the builder ran records none, so it counts
+                # as missing, never as a zero that pulls the median down
+                stamps[LABEL_CTX_TURNS] = str(attempt.builder.turns)
         if LABEL_CONTEXT_ARM not in attempt.labels:
             # a refusal before compose is still this run's attempt: the arm's row, never
             # an unstamped one a per-arm reading drops (P-295)
@@ -1781,6 +1789,20 @@ def build_fn_for(
                 root=str(ws.root),
             )
         else:  # no S1 author here, so run_arm is the run's own A0 / S3 arm
+            # a stated-requirement entry (ADR-0052) is guarded against the gold diff and
+            # tests: the harness-side view the builder never sees (ADR-0026 item 7)
+            gold = (
+                gold_view(
+                    ws.repo,
+                    parent=ws.parent,
+                    commit=task.task_id,
+                    src_paths=task.src_files,
+                    test_paths=task.test_files,
+                    novel=novel,
+                )
+                if ctx_entry is not None and ctx_entry.items
+                else None
+            )
             composed = compose(
                 run_arm(mode),
                 ticket,
@@ -1799,6 +1821,7 @@ def build_fn_for(
                 root=str(ws.root),
                 library=(ctx_entry,) if ctx_entry is not None else (),
                 parent_rev=ws.parent if ctx_entry is not None else "",
+                gold=gold,
             )
         brief = composed.brief
         kept_ids = [id_of[t] for t in brief.playbook if t in id_of]
