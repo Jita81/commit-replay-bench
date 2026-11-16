@@ -102,9 +102,11 @@ ADR-0050 for that arm only. Every other source keeps the guard unchanged.
      binds, such as `LIMIT = 10`, `A, B = 1, 2` or `self.LIMIT = 10`) count as test names
      too. The assignment rule reads only Python test files, so a Go `x := f()` defines nothing.
      In a JVM or .NET test file (`.java`, `.kt`, `.kts`, `.scala`, `.groovy`, `.cs`) every
-     method name it declares counts, after any annotation or attribute on the same line, so
-     the method on the line after `@Test` or `[Fact]` is one. Not read: Kotlin backtick
-     names, extension functions, Scala type parameters and JVM or .NET fields.
+     method or class name it declares counts, after any block comment, annotation or
+     attribute on the same line, so the method on the line after `@Test` or `[Fact]` is one,
+     as is a Kotlin backtick or Spock string name. Not read: fields and constants, a
+     declaration split over lines, a return type in lower case other than a primitive, and
+     annotation arguments nested more than one level.
    - `req_test_path`: a held-out test's path, file name or specific stem.
    - `req_test_span`: eight tokens in a row shared with the change's added test lines, read
      over the whole entry, so a run split across items is still found. The change's added

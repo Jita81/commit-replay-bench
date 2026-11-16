@@ -427,6 +427,72 @@ def test_an_annotated_jvm_or_dotnet_test_method_is_a_held_out_name() -> None:
     assert stated.REASON_TEST_NAME not in guard(item, view=view)
 
 
+@pytest.mark.parametrize(
+    ("path", "line", "name"),
+    [
+        (
+            "WidgetTest.java",
+            "    public <T extends Comparable<T>> void boundedWidget(T t) {",
+            "boundedWidget",
+        ),
+        (
+            "WidgetTest.java",
+            '    @DisplayName("a (b) c") void parenArgWidget() {',
+            "parenArgWidget",
+        ),
+        (
+            "WidgetTest.java",
+            "    /** doc */ public native void commentedWidget();",
+            "commentedWidget",
+        ),
+        (
+            "WidgetTest.java",
+            "    @Nested public static class WhenWidgetIsEmpty {",
+            "WhenWidgetIsEmpty",
+        ),
+        ("WidgetTests.cs", "    public void GenericWidget<T>() {", "GenericWidget"),
+        (
+            "WidgetTests.cs",
+            '    [InlineData("a]b")] public void BracketWidget(string s) {',
+            "BracketWidget",
+        ),
+        ("WidgetSpec.scala", "  private[this] def scalaWidget[T](t: T): Unit = {", "scalaWidget"),
+        ("WidgetTest.kt", "    fun List<String>.extensionWidget(): String {", "extensionWidget"),
+        ("WidgetTest.kt", "    fun `rejects blank widget names`() {", "rejects blank widget names"),
+        ("WidgetSpec.groovy", '    def "rejects a blank widget"() {', "rejects a blank widget"),
+    ],
+)
+def test_jvm_and_dotnet_declaration_forms_are_held_out_names(
+    path: str, line: str, name: str
+) -> None:
+    """Review 4580935910 (verify round): the declaration forms around the annotated method —
+    a bounded generic, an annotation argument holding ``)``, a block comment, a nested class,
+    a C# generic method, a Scala type parameter, a Kotlin extension, a Kotlin backtick or a
+    Spock string name — each define a held-out name."""
+    view = gold(
+        test_after=f"class X {{\n    @Test\n{line}\n}}\n", test_paths=(path,), test_added=()
+    )
+    item = StatedItem("i01", "rule", f"Cover {name}", "nowhere")
+    assert stated.REASON_TEST_NAME in guard(item, view=view), (path, name)
+
+
+def test_a_jvm_statement_line_defines_no_name_and_a_long_line_stays_linear() -> None:
+    """A Groovy command call or an infix assertion is a statement, not a declaration; a line
+    of thousands of block comments or annotations is read in linear time."""
+    body = (
+        "    @Test\n    void ok() {\n        println makeWidget(x)\n        r shouldBe(y)\n    }\n"
+    )
+    view = gold(test_after=body, test_paths=("WidgetTest.groovy",), test_added=())
+    for word in ("makeWidget", "shouldBe"):
+        item = StatedItem("i01", "rule", f"Keep {word}", "nowhere")
+        assert stated.REASON_TEST_NAME not in guard(item, view=view), word
+    long_line = "/* a */ " * 5000 + "@a " * 5000 + "void x"
+    view = gold(test_after=long_line, test_paths=("WidgetTest.java",), test_added=())
+    assert stated.REASON_TEST_NAME not in guard(
+        StatedItem("i01", "rule", "Keep it", "nowhere"), view=view
+    )
+
+
 def test_a_disclosure_masks_only_whole_tokens() -> None:
     """Review 4580636571: a disclosed ``load`` (the parent's) must not mask ``load`` inside
     the distinct novel token ``payload``, nor a literal ``10`` inside ``1000``."""

@@ -508,31 +508,50 @@ _PY_ASSIGN_RE = re.compile(
 )
 _PY_RECEIVERS = frozenset({"self", "cls"})
 _PY_SUFFIXES = (".py", ".pyi")
-#: A method declaration of a JVM or .NET test file, after any annotations or attributes on
-#: the same line (``@Test void x()``, ``[Fact] public async Task X()``, ``public <T> T x(``,
-#: Kotlin ``fun x(``): the name it declares is a held-out name, so a method declared on the
-#: line after ``@Test`` is one too. Only those files are read so (a Go or Python test is not).
+#: A method or class declaration of a JVM or .NET test file, after any block comment,
+#: annotations or attributes on the same line (``@Test void x()``, ``[Fact] public async
+#: Task X()``, ``public <T extends C<T>> T x(``, ``void X<T>(``, ``def x[T](``, Kotlin
+#: ``fun x(``, ``fun Foo.x(`` and ``fun `does x`(``, Spock ``def "does x"(``, ``@Nested
+#: class X``): the name it declares is a held-out name, so a method declared on the line after
+#: ``@Test`` is one too. Only those files are read so (a Go or Python test is not).
 _JVM_SUFFIXES = (".java", ".kt", ".kts", ".scala", ".groovy", ".cs")
+_JVM_STR = r'"(?:[^"\\]|\\.)*"'
+_JVM_ARGS = rf"\((?:{_JVM_STR}|[^()\"]|\([^()]*\))*\)"
+_JVM_GENERIC = r"<(?:[^<>()]|<[^<>()]*>)*>"
 _JVM_METHOD_RE = re.compile(
-    r"^\s*(?:(?:@[\w.]+(?:\([^)]*\))?|\[[^\]]*\])\s*)*"
+    r"^\s*(?:/\*(?:[^*]|\*(?!/))*\*/\s*)*"
+    rf"(?:(?:@[\w.]+(?:\s*{_JVM_ARGS})?|\[(?:{_JVM_STR}|[^\]\"])*\])\s*)*"
     r"(?:(?:public|private|protected|internal|static|final|abstract|override|open|suspend"
-    r"|async|virtual|sealed|synchronized|default|inline|operator|infix)\s+)*"
-    r"(?:<[^<>()]*>\s*)?"
-    r"(?:fun\s+(?:<[^<>()]*>\s*)?|def\s+|(?P<type>[\w.]+(?:<[^()]*?>)?(?:\[\])*\??)\s+)"
-    r"(?P<name>[A-Za-z_]\w*)\s*\("
+    r"|async|virtual|sealed|synchronized|default|inline|operator|infix|native|strictfp"
+    r"|unsafe|partial|extern|tailrec|external|inner|data|enum|annotation|value|implicit"
+    r"|readonly)(?:\[[^\]]*\])?\s+)*"
+    rf"(?:{_JVM_GENERIC}\s*)?"
+    r"(?:(?:class|interface|object|record|struct|enum|trait)\s+(?P<cls>[A-Za-z_]\w*)"
+    rf"|(?:fun\s+(?:{_JVM_GENERIC}\s*)?(?:\w+(?:{_JVM_GENERIC})?\??\.)*|def\s+"
+    r"|(?P<type>[\w.]+(?:<[^()]*?>)?(?:\[\])*\??|\([^()]*\))\s+)"
+    rf"(?P<name>[A-Za-z_]\w*|`[^`]+`|\"[^\"]+\")\s*(?:{_JVM_GENERIC}|\[[^\]]*\])?\s*\()"
 )
-#: Words a statement line starts with that :data:`_JVM_METHOD_RE` would read as a type.
-_JVM_NOT_TYPES = frozenset(
-    {"return", "new", "throw", "throws", "else", "case", "await", "yield", "assert", "goto"}
+#: Lower-case return types a declaration may name; any other plain lower-case word before
+#: a call (``return f(``, ``println f(``, ``result shouldBe(``) starts a statement.
+_JVM_PRIMITIVES = frozenset(
+    {"void", "boolean", "byte", "char", "short", "int", "long", "float", "double", "string"}
+    | {"bool", "object", "decimal", "dynamic", "sbyte", "uint", "ulong", "ushort", "nint"}
+    | {"nuint"}
 )
 
 
 def _jvm_declared(line: str) -> str | None:
-    """The method name a JVM or .NET declaration line declares (``None`` when it is not one)."""
+    """The method or class name a JVM or .NET declaration line declares (``None`` when it is
+    not one); a Kotlin backtick or Spock string name is returned without its quotes."""
     m = _JVM_METHOD_RE.match(line)
-    if not m or (m.group("type") or "") in _JVM_NOT_TYPES:
+    if not m:
         return None
-    return m.group("name")
+    if m.group("cls"):
+        return m.group("cls")
+    kind = m.group("type") or ""
+    if kind.isidentifier() and kind[0].islower() and kind not in _JVM_PRIMITIVES:
+        return None
+    return m.group("name").strip('`"')
 
 
 def _py_assigned(line: str) -> list[str]:
