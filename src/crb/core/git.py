@@ -126,7 +126,8 @@ class GitResult:
     @property
     def paths(self) -> list[str]:
         """The non-empty NUL-separated fields of ``-z`` output: each path exactly as the tree
-        holds it, never git's display quoting (``"caf\\303\\251.py"``)."""
+        holds it, never git's display quoting (``"caf\\303\\251.py"``); exact only for a
+        ``run(..., raw=True)`` result."""
         return [p for p in self.stdout.split("\0") if p]
 
 
@@ -167,26 +168,34 @@ class GitRepo:
         check: bool = False,
         cwd: str | Path | None = None,
         env: Mapping[str, str] | None = None,
+        raw: bool = False,
     ) -> GitResult:
         """``git -C <cwd or path> <args>``. A timeout is a ``GitError`` (rc 124) always;
         a non-zero exit is one only with ``check=True``. ``env`` is layered over the
         process environment — the channel for a one-shot credential
         (:func:`git_config_env`), which must never be an argument: an argv is readable by
-        every user on the host."""
+        every user on the host. ``raw=True`` (for ``-z`` path output) decodes stdout
+        byte-exactly: no newline translation (a ``\\r`` in a name stays one) and a byte that
+        is not UTF-8 kept as a surrogate escape, as :func:`os.fsdecode` names the file."""
         argv = [self.git_binary, "-C", str(cwd or self.path), *args]
         full_env = None if env is None else {**os.environ, **dict(env)}
         try:
             p = subprocess.run(
                 argv,
                 capture_output=True,
-                text=True,
+                text=not raw,
                 timeout=self.timeout,
                 check=False,
                 env=full_env,
             )
         except subprocess.TimeoutExpired as e:
             raise GitError(argv, 124, f"timed out after {self.timeout}s") from e
-        res = GitResult(p.returncode, p.stdout or "", p.stderr or "")
+        if raw:
+            out = (p.stdout or b"").decode("utf-8", "surrogateescape")
+            err = (p.stderr or b"").decode("utf-8", "replace")
+            res = GitResult(p.returncode, out, err)
+        else:
+            res = GitResult(p.returncode, p.stdout or "", p.stderr or "")
         if check and not res.ok:
             raise GitError(argv, res.returncode, res.stderr)
         return res
@@ -211,7 +220,9 @@ class GitRepo:
 
     def changed_files(self, sha: str) -> list[str]:
         """Files touched by ``sha`` (relative to its first parent), each path raw (``-z``)."""
-        return self.run("show", "--name-only", "-z", "--pretty=format:", sha, check=True).paths
+        return self.run(
+            "show", "--name-only", "-z", "--pretty=format:", sha, check=True, raw=True
+        ).paths
 
     def numstat_churn(self, base: str, head: str, paths: list[str]) -> int:
         """Added + deleted lines between ``base`` and ``head`` restricted to ``paths``."""
@@ -251,7 +262,7 @@ class GitRepo:
     def diff_names(self, ref: str, *, cwd: str | Path | None = None) -> list[str]:
         """``git diff --name-only -z <ref>`` in the worktree (working tree vs ``ref``), each
         path raw, as the filesystem walk that compares against it names it."""
-        return self.run("diff", "--name-only", "-z", ref, cwd=cwd, check=True).paths
+        return self.run("diff", "--name-only", "-z", ref, cwd=cwd, check=True, raw=True).paths
 
     def diff_paths_against(
         self, ref: str, paths: list[str], *, cwd: str | Path | None = None

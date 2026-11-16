@@ -317,7 +317,7 @@ def _show_strict(repo: GitRepo, rev: str, path: str) -> str:
     if text is not None:
         return text
     try:
-        listed = repo.run("--literal-pathspecs", "ls-tree", "-z", rev, "--", path)
+        listed = repo.run("--literal-pathspecs", "ls-tree", "-z", rev, "--", path, raw=True)
     except Exception as err:
         raise GoldReadError(f"{rev[:12]}:{path}") from err
     if not listed.ok:
