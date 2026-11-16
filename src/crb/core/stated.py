@@ -28,7 +28,8 @@ Navigation
 What it is:   The stated-requirement vocabulary: item kinds, provenance values and their
               rank, the structures and their renderers (``render``), the item and items
               digests (``item_hash``, ``items_digest``), the fixed length limits and the
-              ``ctx_prov`` stamp (``prov_label``), and the ``req_guard`` reason names.
+              ``ctx_prov`` stamp (``prov_label``), the ``req_guard`` reason names, and an
+              entry's open requirement gaps (``OpenGap``, ADR-0053; never rendered).
 What it does: Renders an entry's text from its items, deterministically; hashes items;
               names the reasons ``crb.builders.brief.req_guard`` refuses with.
 How:          Pure functions over frozen dataclasses (stdlib only), so the set parser
@@ -186,6 +187,31 @@ class StatedItem:
         }
 
 
+#: An open requirement gap's fixed limits: a question is one line, a statement's length.
+MAX_GAPS = MAX_ITEMS
+MAX_GAP_QUESTION_CHARS = MAX_STATEMENT_CHARS
+#: What an open gap leaves undecided: the item kinds a requester's answer would become.
+GAP_DECISIONS: tuple[str, ...] = KINDS
+
+
+@dataclass(frozen=True)
+class OpenGap:
+    """One open requirement gap: a question the requester must answer before the entry can
+    state a decision the change needs (an exact message, a constant, an equality rule…).
+    It is a question to the requester, never an answer: no renderer reads it, so it never
+    reaches a builder's prompt."""
+
+    question: str
+    decision: str
+
+    def __post_init__(self) -> None:
+        if self.decision not in GAP_DECISIONS:
+            raise ValueError(f"gap decision {self.decision!r} is not one of {GAP_DECISIONS}")
+
+    def to_doc(self) -> dict[str, Any]:
+        return {"question": self.question, "decision": self.decision}
+
+
 def _sentence(statement: str) -> str:
     s = statement.strip()
     return s if s.endswith((".", "!", "?")) else s + "."
@@ -274,6 +300,7 @@ def any_tests_only(items: Iterable[StatedItem]) -> bool:
 
 __all__ = [
     "ASSERTED_LITERAL_ADVICE",
+    "GAP_DECISIONS",
     "HEADER",
     "KINDS",
     "KIND_ERROR_TEXT",
@@ -284,6 +311,8 @@ __all__ = [
     "KIND_VALUE",
     "LITERAL_RUN_WORDS",
     "MAX_ENTRY_CHARS",
+    "MAX_GAPS",
+    "MAX_GAP_QUESTION_CHARS",
     "MAX_ITEMS",
     "MAX_STATEMENT_CHARS",
     "PROVENANCES",
@@ -316,6 +345,7 @@ __all__ = [
     "STRUCTURES",
     "STRUCTURE_CHECKLIST",
     "STRUCTURE_PROSE",
+    "OpenGap",
     "StatedItem",
     "any_tests_only",
     "item_hash",

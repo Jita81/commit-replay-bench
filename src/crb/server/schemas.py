@@ -840,6 +840,11 @@ class RunCreateRequest(BaseModel):
     #: arm ``A0+library@<context_set>``; ``control`` is the paired plain ``A0`` run over the
     #: same tasks, its rows stamped ``ctx_source=control``. Stored as ``params.context_role``.
     context_role: Literal["entries", "control"] | None = None
+    #: ADR-0053, measurement only: with ``context_set`` on role ``entries``, run a set whose
+    #: entries record open requirement gaps instead of being refused 409 ``ctx_open_gaps``.
+    #: Every row of a task with open gaps is stamped ``ctx_open_gaps`` (the count). Absent or
+    #: ``false`` (the default) refuses. Stored as ``params.measure_open_gaps`` only when true.
+    measure_open_gaps: bool | None = None
 
     @field_validator("context_set")
     @classmethod
@@ -995,6 +1000,8 @@ class RunCreateRequest(BaseModel):
         if self.context_set is None:
             if self.context_role is not None:
                 raise ValueError("context_role applies only with context_set")
+            if self.measure_open_gaps is not None:
+                raise ValueError("measure_open_gaps applies only with context_set")
             return
         if self.kind != "blind":
             # a replay runs sighted (the worker's KIND_REPLAY): a context set is read blind
@@ -1007,6 +1014,8 @@ class RunCreateRequest(BaseModel):
             raise ValueError("context_set replays exactly the set's tasks: no task_ids or limit")
         if self.context_role is None:
             self.context_role = "entries"
+        if self.measure_open_gaps and self.context_role != "entries":
+            raise ValueError("measure_open_gaps applies only to context_role 'entries'")
 
     @property
     def object_rungs_only(self) -> bool:

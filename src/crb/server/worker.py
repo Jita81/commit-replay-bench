@@ -296,6 +296,7 @@ from crb.core.ctxset import (
     ctx_gap_anchor,
     run_stamps,
     verify_coverage,
+    verify_open_gaps,
     verify_source_revs,
 )
 from crb.core.deps import DepsProvider, ProvisionRefused
@@ -3496,7 +3497,9 @@ class Worker:
         the loop off, or an unknown role), ``ctxset_posture`` (the run's sandbox or the
         deployment's builder is not ``docker``), a set not stored, its digest, repository or
         coverage, a placebo whose treatment is not stored or no longer matches it
-        (``ctxset_placebo_*``, re-verified by ``stored_ctxset``), and ``ctxset_mechanical`` (a ``mech*`` entry not drafted at its task's
+        (``ctxset_placebo_*``, re-verified by ``stored_ctxset``), ``ctx_open_gaps`` (an
+        entries run of a set recording open requirement gaps without ``measure_open_gaps``,
+        ADR-0053) and ``ctxset_mechanical`` (a ``mech*`` entry not drafted at its task's
         parent); a git read failing raises :class:`GitError`. The gap label (``anchor.v1``)
         reads each task's commit message and its parent tree, nothing else."""
         p = ctx.params
@@ -3522,6 +3525,10 @@ class Worker:
             rows = s.execute(select(Task).where(Task.repo == ctx.run.repo)).scalars().all()
         specs = {r.task_id: TaskSpec.from_dict(r.spec_json) for r in rows}
         verify_coverage(ctxset, specs.values(), repo=ctx.run.repo)
+        # ADR-0053: an entries run of a set with open requirement gaps is pushed back unless
+        # it opted in to measuring them (re-checked here exactly as ``POST /runs`` checked it)
+        measure_open_gaps = p.get("measure_open_gaps") is True
+        verify_open_gaps(ctxset, role, measure=measure_open_gaps)
         parents = {tid: ctx.git.parent(tid) for tid in ctxset.task_ids}
         verify_source_revs(ctxset, parents)
         gaps = {
@@ -3546,7 +3553,7 @@ class Worker:
             ctxset=ctxset,
             role=role,
             tasks=tuple(specs[tid] for tid in ctxset.task_ids),
-            stamps=run_stamps(ctxset, role, gaps),
+            stamps=run_stamps(ctxset, role, gaps, measure_open_gaps=measure_open_gaps),
             entries=entries,
             arm_set=ctxset.name if role == ROLE_CTX_ENTRIES else "",
         )

@@ -145,6 +145,10 @@ LABEL_CTX_AUTHOR_SAW = "ctx_author_saw"
 LABEL_CTX_PROV = "ctx_prov"
 LABEL_CTX_REQ_DRAFTER = "ctx_req_drafter"
 LABEL_CTX_REQ_REFUSED = "ctx_req_refused"
+#: ADR-0053: on an entries row of a ``ctx.req*`` arm whose run opted in to
+#: ``measure_open_gaps``, the count of the task's open requirement gaps (absent otherwise):
+#: the row was measured with a requirement the requester had not yet stated.
+LABEL_CTX_OPEN_GAPS = "ctx_open_gaps"
 #: The builder's turns on a row of a context-set run (ADR-0052 item 5). Deliberately NOT in
 #: :data:`PROVENANCE_LABELS`: a per-row count is not a stamp to list or filter by, and the
 #: control rows that carry it are plain ``A0`` rows (ADR-0052 review note 13).
@@ -182,6 +186,7 @@ PROVENANCE_LABELS: tuple[str, ...] = (
     LABEL_CTX_PROV,
     LABEL_CTX_REQ_DRAFTER,
     LABEL_CTX_REQ_REFUSED,
+    LABEL_CTX_OPEN_GAPS,
 )
 
 #: The ``learn`` label value that means the loop was off for the run (ADR-0020 §8).
@@ -459,6 +464,7 @@ __all__ = [
     "LABEL_CTX_GAP",
     "LABEL_CTX_GAP_RULE",
     "LABEL_CTX_ITEMS",
+    "LABEL_CTX_OPEN_GAPS",
     "LABEL_CTX_PROV",
     "LABEL_CTX_REQ_DRAFTER",
     "LABEL_CTX_REQ_REFUSED",

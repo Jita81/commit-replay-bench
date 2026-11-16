@@ -124,6 +124,9 @@ REASON_REPO = "ctxset_repo"
 REASON_ITEMS_UNDELIVERED = "ctxset_items_undelivered"
 #: A stated entry breaks the fixed item, statement or entry-length limits (ADR-0052 item 3.7).
 REASON_ITEMS_LENGTH = "ctxset_items_length"
+#: A stated entry records open requirement gaps and the run would deliver it (ADR-0053): the
+#: request is pushed back, its questions listed, until the requester closes them.
+REASON_OPEN_GAPS = "ctx_open_gaps"
 REASONS: tuple[str, ...] = (
     REASON_SCHEMA,
     REASON_DIGEST,
@@ -136,6 +139,7 @@ REASONS: tuple[str, ...] = (
     REASON_REPO,
     REASON_ITEMS_UNDELIVERED,
     REASON_ITEMS_LENGTH,
+    REASON_OPEN_GAPS,
 )
 
 #: A placebo entry's length may differ from its treatment's by at most
@@ -178,6 +182,9 @@ _ENTRY_OPTIONAL = ("source_rev",)
 _V2_TOP_REQUIRED = ("schema", "source", "repo", "method", "structure", "drafter", "saw", "entries")
 _V2_TOP_OPTIONAL = ("matched_to",)
 _V2_ENTRY_REQUIRED = ("task_id", "entry_id", "version", "produced_at", "items")
+#: ``gaps`` (ADR-0053): absent or ``[]`` is no known gap; a digest reads it only when non-empty.
+_V2_ENTRY_OPTIONAL = ("gaps",)
+_GAP_REQUIRED = ("question", "decision")
 _ITEM_REQUIRED = ("item_id", "kind", "statement", "provenance", "discloses")
 _ITEM_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
 #: who wrote a stated set's items (ADR-0052): ``stated.REQ_DRAFTER_RE``
@@ -216,16 +223,22 @@ class CtxEntryRecord:
     source_rev: str = ""
     #: A stated (v2) entry's items, in ``item_id`` order; ``text`` is their rendering.
     items: tuple[_stated.StatedItem, ...] = ()
+    #: A stated (v2) entry's open requirement gaps (ADR-0053): questions for the requester,
+    #: never rendered into ``text``.
+    gaps: tuple[_stated.OpenGap, ...] = ()
 
     def to_doc(self) -> dict[str, Any]:
         if self.items:
-            return {
+            doc: dict[str, Any] = {
                 "task_id": self.task_id,
                 "entry_id": self.entry_id,
                 "version": self.version,
                 "produced_at": self.produced_at,
                 "items": [i.to_doc() for i in self.items],
             }
+            if self.gaps:
+                doc["gaps"] = [g.to_doc() for g in self.gaps]
+            return doc
         out: dict[str, Any] = {
             "task_id": self.task_id,
             "entry_id": self.entry_id,
@@ -294,6 +307,12 @@ class CtxSet:
         if not self.stated:
             return ""
         return _stated.items_digest({e.task_id: e.items for e in self.entries})
+
+    @property
+    def open_gaps(self) -> dict[str, list[str]]:
+        """Each task whose entry records an open requirement gap → its questions, in order
+        (ADR-0053); ``{}`` when no entry has one."""
+        return {e.task_id: [g.question for g in e.gaps] for e in self.entries if e.gaps}
 
     @property
     def placebo(self) -> bool:
@@ -558,6 +577,54 @@ def _parse_item(raw: object, where: str) -> _stated.StatedItem:
     )
 
 
+def _parse_gap(raw: object, where: str) -> _stated.OpenGap:
+    if not isinstance(raw, Mapping):
+        raise _schema(f"{where} is not an object")
+    _keys(raw, _GAP_REQUIRED, (), where)
+    question = _text(raw, "question", where)
+    if question.strip() != question or "\n" in question or "\r" in question:
+        raise _schema(f"{where}.question is not one trimmed line")
+    if "```" in question:
+        raise _schema(f"{where}.question carries a code block")
+    if len(question) > _stated.MAX_GAP_QUESTION_CHARS:
+        raise CtxSetRefused(
+            REASON_ITEMS_LENGTH,
+            f"{where}.question is {len(question)} chars (max {_stated.MAX_GAP_QUESTION_CHARS})",
+        )
+    decision = _text(raw, "decision", where)
+    if decision not in _stated.GAP_DECISIONS:
+        raise _schema(f"{where}.decision {decision!r} is not one of {_stated.GAP_DECISIONS}")
+    return _stated.OpenGap(question=question, decision=decision)
+
+
+def _parse_gaps(entry: Mapping[str, Any], where: str) -> list[_stated.OpenGap]:
+    raw = entry.get("gaps", [])
+    if not isinstance(raw, list):
+        raise _schema(f"{where}.gaps is not a list")
+    if len(raw) > _stated.MAX_GAPS:
+        raise CtxSetRefused(
+            REASON_ITEMS_LENGTH, f"{where}: {len(raw)} gaps (max {_stated.MAX_GAPS})"
+        )
+    gaps = [_parse_gap(g, f"{where}.gaps[{j}]") for j, g in enumerate(raw)]
+    questions = [g.question for g in gaps]
+    if len(set(questions)) != len(questions):
+        raise _schema(f"{where}.gaps repeats a question")
+    return gaps
+
+
+def _hashed_body(doc: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The v2 document a digest reads: an entry's empty ``gaps`` is no gap, so it is dropped
+    and a set's digest moves only when an entry records an open gap (ADR-0053)."""
+    entries = doc["entries"]
+    if not any(isinstance(e, Mapping) and e.get("gaps") == [] for e in entries):
+        return doc
+    out = dict(doc)
+    out["entries"] = [
+        {k: v for k, v in e.items() if not (k == "gaps" and v == [])} for e in entries
+    ]
+    return out
+
+
 def _parse_v2(doc: Mapping[str, Any], source: str) -> CtxSet:
     _keys(doc, _V2_TOP_REQUIRED, _V2_TOP_OPTIONAL, "set")
     repo = _text(doc, "repo", "set")
@@ -586,7 +653,7 @@ def _parse_v2(doc: Mapping[str, Any], source: str) -> CtxSet:
         where = f"entries[{i}]"
         if not isinstance(entry, Mapping):
             raise _schema(f"{where} is not an object")
-        _keys(entry, _V2_ENTRY_REQUIRED, (), where)
+        _keys(entry, _V2_ENTRY_REQUIRED, _V2_ENTRY_OPTIONAL, where)
         task_id = _text(entry, "task_id", where)
         if not _SHA_RE.match(task_id):
             raise _schema(f"{where}.task_id {task_id!r} is not a git sha")
@@ -601,6 +668,7 @@ def _parse_v2(doc: Mapping[str, Any], source: str) -> CtxSet:
         over = _stated.length_violation(items, text)
         if over:
             raise CtxSetRefused(REASON_ITEMS_LENGTH, f"{where}: {over}")
+        gaps = _parse_gaps(entry, where)
         entries.append(
             CtxEntryRecord(
                 task_id=task_id,
@@ -610,6 +678,7 @@ def _parse_v2(doc: Mapping[str, Any], source: str) -> CtxSet:
                 produced_at=produced_at,
                 mechanical=False,
                 items=tuple(items),
+                gaps=tuple(gaps),
             )
         )
     _check_entry_order(entries)
@@ -618,7 +687,7 @@ def _parse_v2(doc: Mapping[str, Any], source: str) -> CtxSet:
         repo=repo,
         method=method,
         entries=tuple(entries),
-        digest=canonical_digest(doc),
+        digest=canonical_digest(_hashed_body(doc)),
         matched_to=matched_to,
         drafter=drafter,
         schema=SCHEMA_V2,
@@ -769,14 +838,37 @@ def ctx_gap_anchor(ticket_text: str, tree_has: Callable[[str], bool]) -> str:
     return GAP_YES
 
 
-def run_stamps(ctxset: CtxSet, role: str, gaps: Mapping[str, str]) -> dict[str, dict[str, str]]:
+def verify_open_gaps(ctxset: CtxSet, role: str, *, measure: bool = False) -> None:
+    """ADR-0053, before any spend: refuse ``ctx_open_gaps`` when a run would DELIVER (role
+    ``entries``) a set any of whose entries records an open requirement gap, unless the run
+    opted in to measuring it (``measure``). ``control`` delivers nothing and is never
+    refused here. The detail lists each task's questions, so the requester sees what to
+    answer."""
+    if role != ROLE_ENTRIES or measure:
+        return
+    open_gaps = ctxset.open_gaps
+    if not open_gaps:
+        return
+    listed = "; ".join(f"{tid[:12]}: " + " | ".join(qs) for tid, qs in open_gaps.items())
+    raise CtxSetRefused(
+        REASON_OPEN_GAPS,
+        f"{len(open_gaps)} task(s) have open requirement gaps — answer them and store a "
+        f"closed set: {listed}",
+    )
+
+
+def run_stamps(
+    ctxset: CtxSet, role: str, gaps: Mapping[str, str], *, measure_open_gaps: bool = False
+) -> dict[str, dict[str, str]]:
     """Each set task → the ctx labels every row of that task carries (ADR-0050 item 5), set
     before any step that can fail. ``entries``: ``ctx_set`` (the full digest), ``ctx_source``,
     ``ctx_gap``, ``ctx_gap_rule``, ``ctx_delivered`` = ``ctx_chars`` = ``"0"`` (the composer's
     own counts replace them when it runs), ``ctx_drafter`` on a ``mech*`` set and
     ``ctx_ceiling`` = ``"1"`` on a hindsight set, and on a stated set (ADR-0052 item 2)
     ``ctx_stated`` = ``"1"``, ``ctx_items``, ``ctx_structure``, ``ctx_author_saw``, the task's
-    ``ctx_prov`` and ``ctx_req_drafter``. ``control``: ``ctx_set``, ``ctx_source`` =
+    ``ctx_prov`` and ``ctx_req_drafter`` — and, on a run that opted in to
+    ``measure_open_gaps`` (ADR-0053), ``ctx_open_gaps`` = the count of the task's open gaps
+    when it has any. ``control``: ``ctx_set``, ``ctx_source`` =
     ``control``, ``ctx_gap`` and ``ctx_gap_rule``. ``gaps`` holds every task's
     :func:`ctx_gap_anchor` value."""
     if role not in ROLES:
@@ -811,6 +903,8 @@ def run_stamps(ctxset: CtxSet, role: str, gaps: Mapping[str, str]) -> dict[str, 
                 stamps[_arms.LABEL_CTX_AUTHOR_SAW] = ",".join(ctxset.saw)
                 stamps[_arms.LABEL_CTX_PROV] = _stated.prov_label(entry.items)
                 stamps[_arms.LABEL_CTX_REQ_DRAFTER] = ctxset.drafter
+                if measure_open_gaps and entry.gaps:
+                    stamps[_arms.LABEL_CTX_OPEN_GAPS] = str(len(entry.gaps))
         out[tid] = stamps
     return out
 
@@ -829,6 +923,7 @@ __all__ = [
     "REASON_ITEMS_UNDELIVERED",
     "REASON_MECHANICAL",
     "REASON_MODE",
+    "REASON_OPEN_GAPS",
     "REASON_PLACEBO_OVERLAP",
     "REASON_PLACEBO_UNMATCHED",
     "REASON_POSTURE",
@@ -861,6 +956,7 @@ __all__ = [
     "placebo_tolerance",
     "run_stamps",
     "verify_coverage",
+    "verify_open_gaps",
     "verify_placebo",
     "verify_source_revs",
 ]
