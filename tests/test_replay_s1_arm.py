@@ -21,7 +21,10 @@ What it does: Pins that the author works in a checkout holding one commit and no
               env probe is red under that binding (P-800); and that a refused author's test and
               the parent run it was judged on are kept and served as the row's transcript when
               the run retains transcripts, kept nowhere when it does not, bounded, and that
-              the refusal itself is byte-identical either way.
+              the refusal itself is byte-identical either way; and that every S1 attempt the
+              builder did not error records the arm's own verdict on the built tree
+              (``s1_self_verdict``, ``s1_self_path``) under the grade's binding, never the
+              parent's, with the authored test removed on every exit (P-832).
 How:          ``pyrepo``'s feat commit replayed blind through ``crb.core.run.run`` with a
               recording builder that applies the commit's own patch and a scripted author;
               the binding cases drive the Go fixture's feat commit through the run's own
@@ -51,10 +54,18 @@ import crb.builders as builders_pkg
 from crb.builders import adapter
 from crb.builders.base import STOP_DONE, Budget, BuildOutcome, EscalationLadder, Rung
 from crb.builders.brief import LABEL_CONTEXT_ARM, LABEL_CTX_AUTHOR, S1Arm
+from crb.builders.container import BuilderContainerSettings
 from crb.core.deps import SCHEME_GO, BundleMount, DepsBinding, TaskDeps, register_store_root
-from crb.core.execution import Command, ExecResult, LocalExecutor
+from crb.core.execution import Command, ExecResult, LocalExecutor, SandboxUnavailable
 from crb.core.git import GitRepo
-from crb.core.ledger import FAILURE_AUTHORING, FAILURE_HARNESS, cell_stats, derive_failure_kind
+from crb.core.ledger import (
+    FAILURE_AUTHORING,
+    FAILURE_HARNESS,
+    LABEL_S1_SELF_PATH,
+    LABEL_S1_SELF_VERDICT,
+    cell_stats,
+    derive_failure_kind,
+)
 from crb.core.prevention import AUTO_CONTEXT, LearningSnapshot
 from crb.core.runners.go_runner import GoRunner
 from crb.core.runners.pytest_runner import PytestRunner
@@ -62,6 +73,7 @@ from crb.core.spec import TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
 from fixtures.server_seed import ALPHA, envelope, login, make_env
+from fixtures.tool_check import passing_check
 from test_builders_brief import Recorder, _replay
 
 try:
@@ -556,15 +568,18 @@ def _s1_on_go(
     src: str = GO_AUTHORED_SRC,
     baseline: tuple[str, ...] = (),
     parent: dict[str, str] | None = None,
+    deps: Any = None,
+    **build_kw: Any,
 ) -> tuple[Any, Any]:
     """One S1 attempt on the Go fixture's feat commit through the run's own ``BuildFn``,
-    under the sealed binding (``parent`` = more files at the parent); returns the attempt
-    and the task's deps."""
+    under the sealed binding (``parent`` = more files at the parent; ``deps`` = another
+    ``TaskDeps``; ``build_kw`` = more ``build_fn_for`` arguments); returns the attempt and
+    the task's deps."""
     monkeypatch.setitem(builders_pkg._REGISTRY, "idle", _Idle)
     monkeypatch.setattr(_Idle, "calls", 0)
     root, feat = gorepo.build(tmp_path, extra=parent)
     repo, cfg = GitRepo(root), gorepo.config()
-    deps = _sealed_go_deps(tmp_path)
+    deps = deps if deps is not None else _sealed_go_deps(tmp_path)
     task = TaskSpec(
         task_id=feat,
         repo=cfg.name,
@@ -590,10 +605,14 @@ def _s1_on_go(
         config=cfg,
         s1=S1Arm(author=author, author_model="t1"),
         deps_for=lambda t: deps,
+        **build_kw,
     )
     with Workspace.create(repo, feat, tmp_path / "ws", config=cfg) as ws:
-        attempt = fn(ws, task, "blind", adapter.ladder_labels(ladder)[0])
-        assert not (ws.root / GO_AUTHORED).exists()
+        try:
+            attempt = fn(ws, task, "blind", adapter.ladder_labels(ladder)[0])
+        finally:
+            # on every exit, a raise included: the authored test never reaches the grade
+            assert not (ws.root / GO_AUTHORED).exists()
     return attempt, deps
 
 
@@ -618,7 +637,8 @@ def test_s1_red_runs_under_the_parent_binding(
     red = ExecResult(1, _go_events(("run", "TestNew"), ("fail", "TestNew")), "")
     executor = _Docker(red)
     attempt, deps = _s1_on_go(tmp_path, monkeypatch, executor)
-    ((cmd, present),) = executor.ran("test")
+    # the RED, then the arm's own verdict on the built tree (S1 self verdict)
+    (cmd, present), _self = executor.ran("test")
     assert present, "the RED ran without the authored test on disk"
     assert "/tmp/gomod" not in cmd.env.values(), cmd.env
     assert _bound_to(cmd, deps), (cmd.env, cmd.ro_mounts)
@@ -1228,3 +1248,251 @@ def test_a_credential_in_the_error_path_or_failing_ids_is_not_kept_raw(
     assert body["error"].startswith("authoring: the key ")
     assert body["authored_test"]["path"].startswith("tests/")
     assert len(body["parent_run"]["failing"]) == 1
+
+
+# --- the S1 arm's own verdict on the built tree (s1_self_verdict) -------------------------
+
+#: An authored test RED at the parent and GREEN once the commit's own change is built.
+AUTHORED_GREEN = "tests/test_s1_subtract.py"
+AUTHORED_GREEN_SRC = (
+    "from calc import subtract\n\n\ndef test_subtract():\n    assert subtract(5, 3) == 2\n"
+)
+
+
+def test_an_s1_row_records_the_arms_own_verdict_and_an_a0_row_none(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """The authored test was removed before the grade and its result on the BUILT tree was
+    never recorded, so the factory's own verdict could not be read against the held-out
+    one. Every S1 row the builder did not error now carries ``s1_self_verdict`` and
+    ``s1_self_path`` into its ledger row (hashed, stored as ``labels_json`` unfiltered);
+    an ``A0`` row carries neither."""
+    from crb.store.ledger import _from_model, _to_model
+
+    def author_for(path: str, src: str) -> Any:
+        return lambda ws, subject, message: (path, src)
+
+    green, _ = _replay(
+        pyrepo,
+        tmp_path / "green",
+        s1=S1Arm(author=author_for(AUTHORED_GREEN, AUTHORED_GREEN_SRC), author_model="t1"),
+    )
+    (row,) = green
+    assert row.labels[LABEL_S1_SELF_VERDICT] == "pass"
+    assert row.labels[LABEL_S1_SELF_PATH] == AUTHORED_GREEN
+    stored = _from_model(_to_model(row))
+    assert stored.labels[LABEL_S1_SELF_VERDICT] == "pass" and stored.row_hash == row.row_hash
+    # a test the change does not satisfy reads fail on the arm's side; the held-out grade
+    # (clean) is the row's verdict, untouched by it
+    red, _ = _replay(
+        pyrepo,
+        tmp_path / "red",
+        s1=S1Arm(author=author_for(AUTHORED, AUTHORED_SRC), author_model="t1"),
+    )
+    (row,) = red
+    assert row.clean and row.labels[LABEL_S1_SELF_VERDICT] == "fail"
+    assert row.labels[LABEL_S1_SELF_PATH] == AUTHORED
+    a0, _ = _replay(pyrepo, tmp_path / "a0")
+    (row,) = a0
+    assert LABEL_S1_SELF_VERDICT not in row.labels and LABEL_S1_SELF_PATH not in row.labels
+
+
+class _Seq(_Docker):
+    """``_Docker`` whose ``go test`` answers come in order: the RED first, then the self
+    verdict's run — an ``ExecResult`` or an exception to raise."""
+
+    def __init__(self, *answers: ExecResult | BaseException) -> None:
+        super().__init__(
+            answers[0] if isinstance(answers[0], ExecResult) else ExecResult(0, "", "")
+        )
+        self.answers = list(answers)
+
+    def run(self, cmd: Command) -> ExecResult:
+        if cmd.argv[1:2] == ("test",):
+            self.cmds.append((cmd, (Path(cmd.root) / GO_AUTHORED).exists()))
+            answer = self.answers.pop(0)
+            if isinstance(answer, BaseException):
+                raise answer
+            return answer
+        return super().run(cmd)
+
+
+_RED = ExecResult(1, _go_events(("run", "TestNew"), ("fail", "TestNew")), "")
+_GREEN = ExecResult(0, _go_events(("run", "TestNew"), ("pass", "TestNew")), "")
+
+
+def test_the_self_verdict_runs_under_the_grades_binding_never_the_parents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The built tree is not the parent: the self verdict reads it under the set the grade
+    reads it with (the gold's here, no builder container), never the parent's (F87-1)."""
+    base = _sealed_go_deps(tmp_path)
+    store = register_store_root(tmp_path / "store")
+    key = "dep_" + "c" * 64
+    host = store / "go" / key / "gomod"
+    host.mkdir(parents=True)
+    gold = DepsBinding(
+        role="gold",
+        lang="go",
+        scheme=SCHEME_GO,
+        key=key,
+        digest="sha256:" + "c" * 64,
+        mounts=(BundleMount(host, "/deps/gomod", key),),
+        env={"GOMODCACHE": "/deps/gomod", "GOPROXY": "off", "GOSUMDB": "off"},
+        local_env={"GOMODCACHE": str(host), "GOPROXY": "off"},
+    )
+    deps = TaskDeps("sealed", "go", parent=base.parent, gold=gold, builder=base.builder)
+    executor = _Seq(_RED, _GREEN)
+    attempt, _ = _s1_on_go(tmp_path / "run", monkeypatch, executor, deps=deps)
+    (red_cmd, _), (self_cmd, present) = executor.ran("test")
+    assert present, "the self verdict ran without the authored test on disk"
+    assert deps.parent.mounts[0] in red_cmd.ro_mounts
+    assert gold.mounts[0] in self_cmd.ro_mounts
+    assert deps.parent.mounts[0] not in self_cmd.ro_mounts
+    assert attempt.labels[LABEL_S1_SELF_VERDICT] == "pass"
+    assert attempt.labels[LABEL_S1_SELF_PATH] == GO_AUTHORED
+
+
+#: A sealed builder container that never starts: ``_Session`` stands in for its session.
+_CONTAINER = BuilderContainerSettings(image="crb-builder:test", user="10001:10001")
+
+
+class _Session:
+    """Stands in for :class:`ContainerSession`: no daemon, no overrides."""
+
+    def __init__(self, settings: BuilderContainerSettings, checkout: Any, **kw: Any) -> None:
+        self.checkout = checkout
+
+    def __enter__(self) -> _Session:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def overrides_for(self, builder: str) -> dict[str, Any]:
+        return {}
+
+
+def test_the_self_verdict_runs_under_the_builders_set_when_the_builder_ran_sealed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A builder that ran in the sealed container rendered its own test command under the
+    builder's set: the self verdict reads the built tree under that set, never the
+    parent's and never unbound (F87-1)."""
+    monkeypatch.setattr(adapter, "SEALABLE_BUILDERS", frozenset({"idle"}))
+    executor = _Seq(_RED, _GREEN)
+    attempt, deps = _s1_on_go(
+        tmp_path,
+        monkeypatch,
+        executor,
+        container=_CONTAINER,
+        session_factory=_Session,
+        tool_check_executor=passing_check,
+    )
+    assert attempt.labels["builder_executor"] == "docker"
+    (red_cmd, _), (self_cmd, present) = executor.ran("test")
+    assert present, "the self verdict ran without the authored test on disk"
+    assert _bound_to(red_cmd, deps)
+    assert deps.builder.mounts[0] in self_cmd.ro_mounts, self_cmd.ro_mounts
+    assert deps.parent.mounts[0] not in self_cmd.ro_mounts
+    assert self_cmd.env.get("GOMODCACHE") == "/deps/gomod"
+    assert attempt.labels[LABEL_S1_SELF_VERDICT] == "pass"
+
+
+#: ``go test -json`` for the ``calc`` package with a sibling ``TestOld`` failing beside the
+#: authored ``TestNew`` (``new`` = its action).
+def _with_old(new: str) -> ExecResult:
+    return ExecResult(
+        1,
+        _go_events(("run", "TestOld"), ("fail", "TestOld"), ("run", "TestNew"), (new, "TestNew")),
+        "",
+    )
+
+
+@pytest.mark.parametrize(("new", "verdict"), [("pass", "pass"), ("fail", "fail")])
+def test_a_baseline_failing_sibling_never_decides_the_self_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, new: str, verdict: str
+) -> None:
+    """The Go scope is the whole package: a sibling test that already fails at the parent
+    once read every S1 row there ``fail``, though every test the authored file defines
+    passed. The verdict is read by id, as the RED is (``authored_red``)."""
+    baseline = (f"{gorepo.CALC_PKG}::TestOld",)
+    attempt, _ = _s1_on_go(
+        tmp_path, monkeypatch, _Seq(_with_old("fail"), _with_old(new)), baseline=baseline
+    )
+    assert not attempt.error, attempt.error
+    assert attempt.labels[LABEL_S1_SELF_VERDICT] == verdict
+
+
+@pytest.mark.parametrize(
+    ("answer", "verdict"),
+    [
+        (_RED, "fail"),
+        (ExecResult(124, "", "", timed_out=True), "fail"),
+        (RuntimeError("the harness broke"), "error"),
+        (ExecResult(1, "", "", env_error="the tree could not be copied"), "error"),
+        (
+            ExecResult(1, json.dumps({"Action": "fail", "Package": gorepo.CALC_PKG}) + "\n", ""),
+            "error",
+        ),
+    ],
+    ids=["red", "timeout", "harness-raised", "env-error", "parse-error"],
+)
+def test_the_self_verdict_maps_a_timeout_to_fail_and_a_harness_raise_to_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, answer: Any, verdict: str
+) -> None:
+    """As ``run_held_out`` reads a held-out run (P-693): a timeout is the build's behaviour
+    (``fail``); the harness raising around the run is the instrument's (``error``), never
+    the builder's error — and the authored test is removed all the same (the helper
+    asserts it on every exit)."""
+    attempt, _ = _s1_on_go(tmp_path, monkeypatch, _Seq(_RED, answer))
+    assert not attempt.error, attempt.error
+    assert attempt.labels[LABEL_S1_SELF_VERDICT] == verdict
+
+
+def test_a_sibling_read_that_fails_in_the_self_verdict_is_an_error_not_a_builder_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Attribution reads the sibling test files of the built tree. A read that fails there
+    is the instrument's: the row keeps the builder's record and reads ``error``; it is
+    never turned into an errored attempt."""
+    real = adapter._go_tests_beside
+    calls: list[Path] = []
+
+    def flaky(test_file: Path) -> frozenset[str]:
+        calls.append(test_file)
+        if len(calls) > 1:  # the RED reads first; the self verdict reads second
+            raise OSError("sibling test unreadable")
+        return real(test_file)
+
+    monkeypatch.setattr(adapter, "_go_tests_beside", flaky)
+    attempt, _ = _s1_on_go(tmp_path, monkeypatch, _Seq(_RED, _RED))
+    assert len(calls) == 2
+    assert not attempt.error, attempt.error
+    assert attempt.labels[LABEL_S1_SELF_VERDICT] == "error"
+
+
+def test_sandbox_unavailable_in_the_self_verdict_stops_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sandbox that cannot be provided is never a verdict: it propagates (ADR-0005), and
+    the authored test is still removed first (the helper asserts it in its ``finally``)."""
+    with pytest.raises(SandboxUnavailable):
+        _s1_on_go(tmp_path, monkeypatch, _Seq(_RED, SandboxUnavailable("docker went away")))
+
+
+def test_an_errored_s1_attempt_records_no_self_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An attempt the builder errored leaves no admissible tree: no self verdict is taken
+    (the RED is the only ``go test``), and the authored test is removed all the same."""
+
+    def boom(self: Any, *a: Any, **k: Any) -> BuildOutcome:
+        raise RuntimeError("builder blew up")
+
+    monkeypatch.setattr(_Idle, "build", boom)
+    executor = _Seq(_RED, _GREEN)
+    attempt, _ = _s1_on_go(tmp_path, monkeypatch, executor)
+    assert attempt.error
+    assert LABEL_S1_SELF_VERDICT not in attempt.labels
+    assert len(executor.ran("test")) == 1

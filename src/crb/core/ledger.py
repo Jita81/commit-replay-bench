@@ -510,6 +510,16 @@ LABEL_API_FINDINGS = "api_findings"
 #: The dropped diff itself is kept in the evidence pack (``notes.discarded_patch``), so a
 #: discard is visible in the record; it never changes a verdict or a failure kind.
 LABEL_DISCARDED_FILES = "discarded_files"
+#: The ``S1`` arm's own verdict (ADR-0026 item 1): whether the BUILT tree passes the test the
+#: arm's author wrote — ``pass`` / ``fail`` (red or timed out) / ``error`` (the run could not
+#: be read) — read by id as the arm's RED is (a test the file defines, less the task's
+#: baseline-failing ids), never by a whole Go package's green — taken by the adapter after
+#: the builder finished and before the authored test is removed for the grade. Written only on an ``S1`` attempt the builder did not error;
+#: it never changes a verdict or a failure kind: the held-out grade is the row's verdict,
+#: and this label is what the factory itself would have said.
+LABEL_S1_SELF_VERDICT = "s1_self_verdict"
+#: The authored test that verdict read, relative to the repository root.
+LABEL_S1_SELF_PATH = "s1_self_path"
 
 
 class LedgerIntegrityError(RuntimeError):

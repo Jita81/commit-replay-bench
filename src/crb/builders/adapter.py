@@ -175,6 +175,7 @@ from crb.builders.container import (
 )
 from crb.builders.openai_client import ModelCallError
 from crb.builders.toolcheck import builder_tool_refusal, runner_tool_missing, tool_check_command
+from crb.core.acceptance import RESULT_ERROR, RESULT_FAIL, RESULT_PASS
 from crb.core.checks import LABEL_CHECKS, CheckCommand, ResolvedChecks
 from crb.core.context_arm import (
     CTX_NAME_RE,
@@ -210,6 +211,8 @@ from crb.core.ledger import (
     BUILDER_EXECUTOR_SEALED,
     LABEL_BUILDER_EXECUTOR,
     LABEL_DISCARDED_FILES,
+    LABEL_S1_SELF_PATH,
+    LABEL_S1_SELF_VERDICT,
     GradeRow,
     JsonlLedger,
 )
@@ -1279,8 +1282,9 @@ def build_fn_for(
         )
         return texts, ids, [*late, *dropped], dict(zip(texts, ids, strict=True))
 
-    #: the S1 arm's authored test per worktree: (path, the parent's bytes or None)
-    authored_in: dict[str, tuple[str, bytes | None]] = {}
+    #: the S1 arm's authored test per worktree: (path, the parent's bytes or None, the
+    #: authored text — what the arm's own verdict is read against)
+    authored_in: dict[str, tuple[str, bytes | None, str]] = {}
 
     def remove_authored(ws: Workspace) -> None:
         """Take the authored test out of the worktree (restoring the parent's bytes when
@@ -1288,13 +1292,86 @@ def build_fn_for(
         held = authored_in.pop(str(ws.root), None)
         if held is None:
             return
-        path, original = held
+        path, original, _content = held
         target = ws.root / path
         if original is None:
             target.unlink(missing_ok=True)
         else:
             target.write_bytes(original)
         emit(on_event, BUILDER_EVENT_PREFIX + "author_test.removed", path=path)
+
+    def self_binding(task: TaskSpec, rung_label: str, ws: Workspace) -> DepsBinding | None:
+        """The binding the arm's own verdict runs under: the sealed session's set when the
+        builder ran sealed — the set its sighted test command was rendered under — else the
+        set the grade reads the built tree with (``TaskDeps.binding_for``). Never the
+        parent's: the built tree is not the parent, and a sealed Go posture left unbound
+        resolves nothing (F87-1)."""
+        if executor_of(rung_label) == BUILDER_EXECUTOR_SEALED:
+            return session_set(task)
+        task_deps = deps_for(task) if deps_for is not None else None
+        return task_deps.binding_for(ws.root) if task_deps is not None else None
+
+    def s1_self_verdict(
+        ws: Workspace, task: TaskSpec, rung_label: str, attempt: BuildAttempt
+    ) -> dict[str, str]:
+        """The ``S1`` arm's own verdict on the BUILT tree (``LABEL_S1_SELF_VERDICT``): the
+        authored test, as the author wrote it, run before it is removed for the grade.
+        ``{}`` when this worktree holds no authored test (an ``A0`` row, an authoring miss)
+        or the attempt errored (its edits are discarded; there is no built tree to judge).
+        ``pass`` when no test the authored file defines fails (:func:`self_green`: by id, as
+        the RED is attributed, so a baseline-failing sibling in a Go package never decides
+        it); ``fail`` when one does or the run timed out (P-693, as ``run_held_out``
+        reads it); ``error`` when the environment or the report failed, or the harness
+        raised around the run — an instrument failure, never a miss.
+        ``SandboxUnavailable`` propagates. The caller removes the authored test after."""
+        held = authored_in.get(str(ws.root))
+        if held is None or attempt.error:
+            return {}
+        path, _original, content = held
+        verdict = RESULT_ERROR
+        try:
+            target = ws.root / path
+            # the verdict is on the test the author wrote: an edit the builder made to it
+            # (or its removal) is not what the arm built against
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            run = runner.run_for(
+                executor,
+                ws.root,
+                runner.target_scope([path]),
+                timeout=int(runner.opts.get("timeout", runner.default_timeout)),
+                authored=task.authored,
+                deps=self_binding(task, rung_label, ws),
+            )
+            # read inside the handler: attribution reads sibling test files, and a read
+            # that fails is the instrument's too, never the builder's error
+            if run.env_error or run.parse_error:
+                verdict = RESULT_ERROR
+            elif run.timed_out:
+                verdict = RESULT_FAIL
+            else:
+                verdict = RESULT_PASS if self_green(run, ws, task, path, content) else RESULT_FAIL
+        except SandboxUnavailable:
+            raise
+        except Exception as exc:  # the instrument, not the build: never a miss
+            _LOG.warning("task %s: S1 self verdict: %s: %s", task.task_id, type(exc).__name__, exc)
+        return {LABEL_S1_SELF_VERDICT: verdict, LABEL_S1_SELF_PATH: path}
+
+    def self_green(run: TestRun, ws: Workspace, task: TaskSpec, path: str, content: str) -> bool:
+        """Whether the tests the authored file defines pass on the built tree — attributed
+        by id as the RED is (:func:`authored_red`), so a baseline-failing or broken sibling
+        in the run's scope (a Go package) never decides the arm's verdict. A run with no
+        failing id, or a runner whose ids name neither the file nor its tests, reads the
+        run's own green."""
+        if run.green or not run.failing:
+            return run.green
+        # the names the built tree's other test files there declare: one may share an
+        # authored test's id, so it never decides the verdict (R6A-LASTFIX-R1-2)
+        beside = _go_tests_beside(ws.root / path) if runner.name == "go" else frozenset()
+        own = authored_red(
+            runner.name, path, content, run.failing, task.baseline_failing, beside=beside
+        )
+        return run.green if own is None else not own
 
     def author_s1(
         ws: Workspace,
@@ -1380,7 +1457,7 @@ def build_fn_for(
         original = target.read_bytes() if target.is_file() else None
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
-        authored_in[str(ws.root)] = (path, original)
+        authored_in[str(ws.root)] = (path, original, content)
         # RED under the PARENT's binding, as qualification proves the held-out tests RED
         # (ADR-0019): unbound, a sealed posture's Go runner reads an empty /tmp/gomod with
         # the network off, nothing builds, and every authored test is "not RED" (F87-1)
@@ -1651,6 +1728,8 @@ def build_fn_for(
         if stamps_of and mode == MODE_SIGHTED:
             # before any spend: a context-set run, control included, is blind (ADR-0050)
             raise ValueError("a context-set run is blind; it never builds sighted")
+        attempt: BuildAttempt | None = None
+        stamps: dict[str, str] = {}
         try:
             attempt = attempt_of(ws, task, mode, rung_label)
         except SandboxUnavailable:
@@ -1661,9 +1740,15 @@ def build_fn_for(
                 error=f"{type(exc).__name__}: {exc}"[:500],
             )
         finally:
-            # the S1 arm: the authored test is gone before the held-out grade (ADR-0026)
-            remove_authored(ws)
-        stamps: dict[str, str] = {}
+            try:
+                if attempt is not None:
+                    # the S1 arm's own verdict on the built tree, before the test goes
+                    stamps.update(s1_self_verdict(ws, task, rung_label, attempt))
+            finally:
+                # the S1 arm: the authored test is gone before the held-out grade
+                # (ADR-0026), on every exit, the self verdict's own included
+                remove_authored(ws)
+        assert attempt is not None  # every path that leaves it None has raised
         if stamps_of:
             # a context-set run (ADR-0050 item 5): every row of the task carries the set's
             # stamps, a refusal before compose too; the composer's own counts win
