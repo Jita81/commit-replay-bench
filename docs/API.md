@@ -324,8 +324,9 @@ Entries may carry ADR-0053 `gaps`, and a run over a plan set with open gaps meet
   headings), `plan_test_span` (an eight-token run shared with the change's added test lines),
   `plan_gold_span` (the same with its added source lines), `plan_gold_line` (a whole added
   line of code, however short in tokens: 10 or more characters with a bracket, `=`, `<` or
-  `>`, or any complete executable line, brackets inside string literals aside, never a lone
-  brace, a bare keyword, a bare string literal or a comment), `plan_asserted_literal` (on the plan's lines read
+  `>`, or any complete executable line, brackets inside string literals aside and lines led
+  by `*`, `--` or `#` read as code, never a lone brace, a bare keyword, a bare string literal
+  or a `//` or `/*` comment), `plan_asserted_literal` (on the plan's lines read
   together) or `plan_no_gold`. A kept plan reaches the brief's own plan block.
 - **Stamps.** Each entries row carries `ctx_plan_drafter`, `ctx_plan_saw` (comma-joined) and
   `ctx_plan_accepted`; `ctx_plan_refused` (the sorted reasons) when the plan was withheld;

@@ -316,15 +316,18 @@ def test_a_short_executable_gold_line_copied_whole_is_refused(added: str, step: 
         "pass",
         "limit",
         "// g()",
-        "# x = f(y)",
         "/* i++ */",
         "foo(",
         "default:",
+        "#endif",
+        "# Usage",
+        "Return value",
     ],
 )
 def test_a_trivial_gold_line_never_withholds_a_plan(added: str) -> None:
     """A line that carries no answer — blank, a lone bracket, a bare keyword or literal, a
-    comment, a single identifier, an unbalanced fragment — never withholds a plan that says
+    ``//`` or ``/*`` comment, a single identifier, an unbalanced fragment, a ``#`` heading or a
+    capitalised prose line — never withholds a plan that says
     the same words."""
     step = f"Write {added} then foo(bar) and limit once" if added else "Write nothing"
     assert p.REASON_GOLD_LINE not in plan_guard(plan(step), _one_line(added)), added
@@ -366,6 +369,14 @@ def test_a_short_executable_line_the_request_or_the_parent_holds_is_not_a_copy()
         ("PR 156 review: pointer assignment", "--count;", "Then --count once"),
         ("PR 156 review: string-literal only", 'return "ok"', 'Return "ok" on success'),
         ("PR 156 review: open quote", "y = g(x')", "Set y = g(x') first"),  # a prime, no literal
+        ("PR 156 review: lines read as comments", "* p = 1;", "Set * p = 1"),
+        ("PR 156 review: lines read as comments", "#define N 4", "Add #define N 4 on top"),
+        ("PR 156 review: lines read as comments", "#[derive(Debug)]", "Add #[derive(Debug)]"),
+        ("PR 156 review: lines read as comments", "@Override", "Mark it @Override"),
+        ("PR 156 review: lines read as comments", "#[test]", "Add #[test] above it"),
+        ("PR 156 review: keyword and identifier", "raise ValueError", "Then raise ValueError"),
+        ("PR 156 review: keyword and identifier", "return total", "Then return total"),
+        ("PR 156 review: keyword and identifier", "lambda: x", "Pass lambda: x in"),
     ],
 )
 def test_plan_guard_regression_a_short_line_copy_is_withheld(
@@ -374,23 +385,22 @@ def test_plan_guard_regression_a_short_line_copy_is_withheld(
     assert plan_guard(plan(step), _one_line(added)) == (p.REASON_GOLD_LINE,), incident
 
 
+@pytest.mark.parametrize("added", ["// x = f()", "/* x = f() */", "*/"])
+def test_plan_guard_regression_a_comment_line_is_not_executable(added: str) -> None:
+    """PR 156 review: only a sure comment opener (``//``, ``/*``, ``*/``) exempts a line from
+    the whole-line rule (a long comment is still the fragment rule's to judge)."""
+    assert not _executable_line(added.strip())
+
+
 @pytest.mark.parametrize(
     "added",
-    [
-        "// x = f()",
-        "# x = f()",
-        " * returns f(x)",
-        "*/",
-        "-- select f(x)",
-        # left open: a pointer line written with a space reads as a comment continuation
-        "* p = f(x)",
-    ],
+    ["* p = 1", "* p = f(x)", " * returns f(x)", "-- select f(x)", "# x = f()", "#define N 4"],
 )
-def test_plan_guard_regression_a_comment_line_is_not_executable(added: str) -> None:
-    """PR 156 review: the whole-line rule has its own comment test, so ``*p = 1`` and
-    ``--count`` are code while these comment lines stay prose (a long one is still the
-    fragment rule's to judge)."""
-    assert not _executable_line(added.strip())
+def test_plan_guard_regression_a_star_dash_or_hash_line_is_read_as_code(added: str) -> None:
+    """PR 156 review: a line led by ``*``, ``--`` or ``#`` may be code (a pointer, a decrement,
+    a directive, an attribute), so it is read like any other line; a short comment written
+    that way that a plan quotes, lead included, withholds the plan."""
+    assert _executable_line(added.strip())
 
 
 @pytest.mark.parametrize(
@@ -399,6 +409,7 @@ def test_plan_guard_regression_a_comment_line_is_not_executable(added: str) -> N
         ("PR 156 review: string-literal only", '"name",'),
         ("PR 156 review: string-literal only", 'return ""'),
         ("PR 156 review: open quote", "don't stop"),
+        ("PR 156 review: string-literal brackets", '"ok)",'),
     ],
 )
 def test_plan_guard_regression_a_bare_literal_is_never_a_copy(incident: str, added: str) -> None:

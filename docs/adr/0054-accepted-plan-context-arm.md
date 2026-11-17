@@ -66,18 +66,25 @@ tests would hand the builder the answer under another name.
      nor the parent holds (`plan_gold_line`), on either of two rules. Each rule reads the
      line trimmed, without trailing `;`, `,`, `:` or `{`. (a) The line, or its body past one
      leading word, whitespace and case aside: at least 10 characters with a bracket, `=`,
-     `<` or `>`. (b) The whole line, however short, when it is executable: it is not a
-     comment line (`//`, `#`, `/*`, `*/`, or `*` or `--` followed by whitespace, so `*p = 1`
-     and `--count` are code; `* p = 1` reads as a comment continuation and is not caught),
-     its brackets balance outside string literals (a quote left open may be an apostrophe
-     or a prime, so then either reading balancing is enough), it holds an operator or
-     bracket (`( ) [ ] { } = < > + - * / % ! & | ^ ~ . ?`) or a closed string literal beside
-     other text (`return "ok"`, never a bare `"name"`), and it holds a word that is not a
-     bare keyword or literal (`return`, `else`, `nil`, `None`, `true` and the like). Rule (b)
-     matches on whole tokens, case aside, so `Use return g()` holds `return g()` and
-     `return limit + 1` is caught, while `x = 1` is not found inside `max = 10`. A blank
-     line, `}`, `)`, `else {`, `return`, `return nil`, `break`, a comment or a lone
-     identifier never withholds a plan. A one-line fix has fewer than eight tokens, so the
+     `<` or `>`. (b) The whole line, however short, when it is executable: it is not led by
+     a sure comment opener (`//`, `/*` or `*/`; a line led by `*`, `--` or `#` may be code,
+     `* p = 1`, `--count`, `#define N 4`, `#[derive(Debug)]`, so it is read like any other
+     line, and a short comment written that way that the plan quotes, lead included,
+     withholds the plan, as rule (a) already does for a longer one), its brackets balance
+     outside string literals (a quote left open may be an apostrophe or a prime, so then
+     either reading balancing is enough), it holds a signal of code — an operator or bracket
+     (`( ) [ ] { } = < > + - * / % ! & | ^ ~ . ? @ :`) outside its string literals, a
+     directive lead (`#` touching a word), a closed string literal beside other text
+     (`return "ok"`, never a bare `"name"` or `"ok)"`), or a lower-case statement keyword
+     and one identifier (`raise ValueError`, `return total`) — and it holds a word, inside
+     a literal or out, that is not a bare keyword or literal (`return`, `else`, `nil`,
+     `None`, `true`, `endif` and the like). Rule (b) matches on whole tokens, case aside,
+     so `Use return g()` holds `return g()` and `return limit + 1` is caught, while `x = 1`
+     is not found inside `max = 10`. A blank line, `}`, `)`, `else {`, `return`,
+     `return nil`, `return 0`, `break`, a `//` or `/*` comment, a `# Heading` or a lone
+     identifier never withholds a plan. Still not caught: a line with no operator that reads
+     as prose (`x if y else z`, `x as u32`, `not x`, SQL's `LIMIT 10` or `ORDER BY x`) and
+     a returned bare number (`return 1`). A one-line fix has fewer than eight tokens, so the
      span rules alone cannot see its copy. The plan guard's regression cases, each naming
      its incident, live in `tests/test_brief_plan_guard.py`, not in the shell guard's corpus
      (`tests/fixtures/shell_corpus*.txt`);

@@ -1231,8 +1231,18 @@ _GOLD_LINE_CODE_CHARS = frozenset("()[]{}=<>")
 #: the line's body past it is looked for too, so ``check clamp(5) == 3`` copies
 #: ``assert clamp(5) == 3``.
 _GOLD_LINE_LEAD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\s+")
-#: An operator or bracket: an executable whole line (:func:`_executable_line`) holds one.
-_EXEC_OP_CHARS = frozenset("()[]{}=<>+-*/%!&|^~.?")
+#: An operator or bracket: an executable whole line (:func:`_executable_line`) holds one
+#: outside its string literals.
+_EXEC_OP_CHARS = frozenset("()[]{}=<>+-*/%!&|^~.?@:")
+#: A directive lead (``#define``, ``#include``): ``#`` touching a word is the line's operator.
+_EXEC_DIRECTIVE_RE = re.compile(r"^#\w")
+#: Statement keywords that, followed by one identifier, make a whole line that carries an
+#: answer (``raise ValueError``, ``return total``, ``yield item``); written lower-case, so a
+#: docstring's ``Return value`` stays prose.
+_EXEC_LEAD_WORDS = frozenset(
+    ["return", "yield", "raise", "throw", "await", "defer", "go", "del", "import"]
+)
+_EXEC_LEAD_PAIR_RE = re.compile(r"^([a-z]+)\s+([A-Za-z_][A-Za-z0-9_]*)$")
 #: Keywords and bare literals that carry no answer on their own: an executable whole line
 #: holds at least one word that is not one of these (lower-cased).
 _TRIVIAL_WORDS = frozenset(
@@ -1304,6 +1314,7 @@ _TRIVIAL_WORDS = frozenset(
         "is",
         "with",
         "as",
+        "endif",
     ]
 )
 _LINE_TOKEN_RE = re.compile(r"\w+|[^\w\s]")
@@ -1312,11 +1323,11 @@ _BRACKET_PAIRS = {")": "(", "]": "[", "}": "{"}
 #: The quotes that open a string literal for :func:`_scan_literals`.
 _QUOTES = frozenset("'\"`")
 #: A comment line for :func:`_executable_line` — its own test, not :data:`_COMMENT_LINE_RE`:
-#: ``*`` and ``--`` start a comment only when whitespace or the end of the line follows
-#: (`` * text``, ``-- text``), so ``*p = 1``, ``*ptr++`` and ``--count`` are code. A pointer
-#: line written ``* p = 1`` still reads as a comment: it cannot be told from a block-comment
-#: continuation, and a comment must never withhold a plan.
-_EXEC_COMMENT_RE = re.compile(r"^\s*(?://|#|/\*|\*/|\*(?:\s|$)|--(?:\s|$))")
+#: only a sure comment opener, ``//``, ``/*`` or ``*/``. A line led by ``*``, ``--`` or ``#``
+#: may be code (``* p = 1``, ``--count``, ``#define N 4``, ``#[derive(Debug)]``), so it is
+#: read like any other line: a short comment written that way that the plan quotes, lead
+#: included, withholds it, as the fragment rule already does for a longer one.
+_EXEC_COMMENT_RE = re.compile(r"^\s*(?://|/\*|\*/)")
 
 
 def _squash(text: str) -> str:
@@ -1390,21 +1401,30 @@ def _balanced(line: str) -> bool:
 
 def _executable_line(stripped: str) -> bool:
     """Whether a normalised added line (stripped, trailing ``;``, ``,``, ``:`` and ``{``
-    dropped) is a complete executable line that carries an answer: not a comment line
-    (:data:`_EXEC_COMMENT_RE`: ``//``, ``#``, ``/*``, ``*/``, and ``*`` or ``--`` followed by
-    whitespace), its brackets balanced outside string literals (:func:`_balanced`), holding an
-    operator or bracket (:data:`_EXEC_OP_CHARS`) or a closed string literal beside other
-    text, and a word that is not a bare keyword or literal (:data:`_TRIVIAL_WORDS`).
-    ``return g()``, ``return limit + 1``, ``f(")")``, ``*p = 1`` and ``return "ok"`` are; a
-    blank line, ``}``, ``)``, ``else {``, ``return``, ``return nil``, ``return ""``, a bare
-    ``"name"``, ``break``, a comment and a lone identifier are not."""
+    dropped) is a complete executable line that carries an answer: not led by a sure comment
+    opener (:data:`_EXEC_COMMENT_RE`: ``//``, ``/*``, ``*/``), its brackets balanced outside
+    string literals (:func:`_balanced`), with a signal of code — an operator or bracket
+    (:data:`_EXEC_OP_CHARS`) outside its string literals (anywhere when a quote is left open,
+    which may be an apostrophe or a prime), a directive lead (:data:`_EXEC_DIRECTIVE_RE`), a
+    closed string literal beside other text, or a statement keyword and one identifier
+    (:data:`_EXEC_LEAD_WORDS`) — and a word, inside a literal or out, that is not a bare
+    keyword or literal (:data:`_TRIVIAL_WORDS`). ``return g()``, ``return limit + 1``,
+    ``f(")")``, ``*p = 1``, ``* p = 1``, ``#define N 4``, ``@Override``, ``raise ValueError``
+    and ``return "ok"`` are; a blank line, ``}``, ``)``, ``else {``, ``return``,
+    ``return nil``, ``return ""``, a bare ``"name"`` or ``"ok)"``, ``break``, a ``//`` or
+    ``/*`` comment and a lone identifier are not."""
     if not stripped or _EXEC_COMMENT_RE.match(stripped) or not _balanced(stripped):
         return False
-    if _EXEC_OP_CHARS.isdisjoint(stripped):
-        outside, closed, _left_open = _scan_literals(stripped)
-        if not closed or not _WORD_RE.search(outside):
-            return False
-    return any(w.lower() not in _TRIVIAL_WORDS for w in _WORD_RE.findall(stripped))
+    outside, closed, left_open = _scan_literals(stripped)
+    signal = (
+        not _EXEC_OP_CHARS.isdisjoint(stripped if left_open else outside)
+        or bool(_EXEC_DIRECTIVE_RE.match(stripped))
+        or bool(closed and _WORD_RE.search(outside))
+    )
+    if not signal:
+        pair = _EXEC_LEAD_PAIR_RE.match(stripped)
+        signal = bool(pair and pair.group(1) in _EXEC_LEAD_WORDS)
+    return signal and any(w.lower() not in _TRIVIAL_WORDS for w in _WORD_RE.findall(stripped))
 
 
 def _gold_line(text: str, gold: GoldView, request: str) -> bool:
