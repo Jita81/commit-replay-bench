@@ -253,7 +253,7 @@ on `/capability-map` or `/routes` is **422 `measurement_only_arm`**, `detail: {a
 
 | Method | Path | Role | Notes |
 |---|---|---|---|
-| POST | `/ctxsets` | operator | A `crb.ctxset.v1`, `crb.ctxset.v2` or `crb.ctxset.v3` body (v2: the stated-requirement sources `req` / `req-placebo`, entries of items whose text is rendered by code — ADR-0052; v3: the accepted-plan source `plan`, entries of plans whose text is rendered by code — ADR-0054, see [Accepted-plan sets](#accepted-plan-sets-adr-0054)) → **201** `{name, digest, arm, source, repo, method, matched_to, drafter, hindsight, measurement_only: true, tasks, schema, kind, stored}`, and always `{stated, planned, accepted_by, structure, saw, items_digest}` (`stated: true` on a v2 set; `planned: true` and `accepted_by` on a v3 set; false or empty otherwise) — never an item, a statement or a plan. Verified before it is written: the record's schema and digest, coverage against the repository's registered gold-clean tasks (one change each), and for a placebo the stored treatment it is matched to. A refusal is **422** with the reason as the code (`ctxset_schema`, `ctxset_coverage`, `ctxset_mechanical`, `ctxset_placebo_unmatched`, `ctxset_placebo_overlap`, `ctxset_repo`, and for v2 `ctxset_items_undelivered` (a statement that does not contain a token it discloses) and `ctxset_items_length` (an entry over the fixed limits), and for v3 `ctxset_plan_saw`, `ctxset_plan_accepted`, `ctxset_plan_shape`, `ctxset_plan_render` and `ctxset_plan_length`); an unregistered repository is 404. Written once under `<home>/ctxsets/<digest>.json`: the same body again is `stored: false`; a different body at one digest is **409 `ctxset_conflict`** and is never overwritten. The file is published atomically (a temporary file linked into place, never replacing one), so two concurrent identical stores answer one `stored: true` and one `stored: false`. Each store is a `system/ctxset.stored` event; an identical retry writes the event once when an earlier store wrote the file but not the event |
+| POST | `/ctxsets` | operator | A `crb.ctxset.v1`, `crb.ctxset.v2` or `crb.ctxset.v3` body (v2: the stated-requirement sources `req` / `req-placebo`, entries of items whose text is rendered by code — ADR-0052; v3: the accepted-plan source `plan`, entries of plans whose text is rendered by code — ADR-0054, see [Accepted-plan sets](#accepted-plan-sets-adr-0054); and the audited-bypass source `plan-audited`, the same body with an `audit` attestation — ADR-0055, see [Audited-bypass plan sets](#audited-bypass-plan-sets-adr-0055)) → **201** `{name, digest, arm, source, repo, method, matched_to, drafter, hindsight, measurement_only: true, tasks, schema, kind, stored}`, and always `{stated, planned, accepted_by, structure, saw, items_digest, audited, audit_record_sha256}` (`stated: true` on a v2 set; `planned: true` and `accepted_by` on a v3 set; `audited: true` and the audit record's digest on a `plan-audited` set; false, empty or null otherwise) — never an item, a statement, a plan or an audit's method. Verified before it is written: the record's schema and digest, coverage against the repository's registered gold-clean tasks (one change each), and for a placebo the stored treatment it is matched to. A refusal is **422** with the reason as the code (`ctxset_schema`, `ctxset_coverage`, `ctxset_mechanical`, `ctxset_placebo_unmatched`, `ctxset_placebo_overlap`, `ctxset_repo`, and for v2 `ctxset_items_undelivered` (a statement that does not contain a token it discloses) and `ctxset_items_length` (an entry over the fixed limits), and for v3 `ctxset_plan_saw`, `ctxset_plan_accepted`, `ctxset_plan_shape`, `ctxset_plan_render`, `ctxset_plan_length` and `ctxset_plan_audit` (a malformed `audit`, a `plan-audited` set without one, or an `audit` on any other source)); an unregistered repository is 404. Written once under `<home>/ctxsets/<digest>.json`: the same body again is `stored: false`; a different body at one digest is **409 `ctxset_conflict`** and is never overwritten. The file is published atomically (a temporary file linked into place, never replacing one), so two concurrent identical stores answer one `stored: true` and one `stored: false`. Each store is a `system/ctxset.stored` event; an identical retry writes the event once when an earlier store wrote the file but not the event |
 | GET | `/ctxsets/compare?control=<run_id>&treatment=<run_id>` | viewer | The two runs paired task by task over the treatment set's tasks: `{control_run, treatment_run, banner? (hindsight only, first; a stated set's own banner in place of the ceiling banner), provenance?, stated?, prov_strata? (split by any `tests_only` item), head_to_head? (two entries runs over one items digest: the structure contrast; stated only), ceiling, control_arm, treatment_arm, treatment_set, control_set, tasks, b, c, p (exact two-sided McNemar), complete, pending[], control, treatment ({k, n, point, ci_low, ci_high} (Wilson) plus {delivered_entries, refused_entries, delivered_fraction, delivered_chars}), dose_imbalance, ctx_gap_rule, strata[] (per ctx_gap), apparatus_version, posture_class, builder_executor, checks_arm, builder, model, taxonomy, mode, cost ({control, treatment}: median and total of `cost_usd`, `tokens_in`, `tokens_out` and `ctx_turns` over first attempts (`cost_usd` over known costs only), `cost_usd_missing` (first attempts with no known cost, never read as zero), plus `paired_cost_usd_diff {n, n_missing, median, iqr}` (`n_missing`: tasks unpriced on either side); descriptive), windows ({control, treatment}: first and last row time), drift (true when the sides ran more than seven days apart)}`. A stated treatment links to a control of a stored stated set with the same items digest, repository and tasks. Fail-closed: a pending task is read clean on the control and a miss on the treatment, and no claim is made until `complete`. Refusals are **422** with the reason as the code: `ctx_pair_mixed_arm`, `ctx_pair_unlinked`, `ctx_pair_blend`, `ctx_pair_unsealed`, `ctx_gap_mismatch`, `ctx_pair_items_mismatch` (a stated set against a set with other items, or against a non-stated set). An unknown run is 404; a set the rows name that is not stored is **404 `ctxset_not_stored`**. Declared before `/ctxsets/{name}` |
 | GET | `/ctxsets/{name}` | viewer | The stored set's metadata as `POST /ctxsets` returns it (without `stored`) — never an entry's text; 404 when no stored set has that name |
 
@@ -285,7 +285,10 @@ rendered into the builder's brief.
 
 ### Accepted-plan sets (ADR-0054)
 
-A `crb.ctxset.v3` set holds the `plan` source, and only it; there is no `plan-placebo` yet.
+A `crb.ctxset.v3` set holds the `plan` and `plan-audited` sources, and only them (the
+`plan-audited` form adds an `audit` field, see
+[Audited-bypass plan sets](#audited-bypass-plan-sets-adr-0055)); there is no `plan-placebo`
+yet.
 The body is `{schema, source: "plan", repo, method, drafter, saw, accepted_by, entries}`:
 
 - `drafter` is `human:<id>` or `model:<id>@<sha256>`;
@@ -336,6 +339,45 @@ Entries may carry ADR-0053 `gaps`, and a run over a plan set with open gaps meet
 - **Reading.** `GET /ctxsets/compare` pairs a plan run with its plain `A0` control. It refuses
   a plan arm paired with an entries run of another kind (**422 `ctx_pair_blend`**).
 - **Offline.** `crb ctxset lint` runs `plan_guard` over a plan set against local clones.
+
+### Audited-bypass plan sets (ADR-0055)
+
+A `plan-audited` set is a `crb.ctxset.v3` plan set with one more top-level field, `audit`,
+required on that source and refused on every other (**422 `ctxset_plan_audit`**). It holds
+exactly these keys:
+
+- `audited_by`: `human:<id>` or `model:<id>@<sha256>`, who audited the drafting;
+- `audited`: a sorted, unique subset of `model`, `prompt` and `transcripts` that always holds
+  `transcripts`, what the auditor read;
+- `record_sha256`: the full sha256 of the audit record, which is kept outside crb;
+- `method`: one trimmed line of at most 300 characters, with no line break of any kind and no
+  code fence (a backtick fence or `~~~`);
+- `covers`: every entry's task id, sorted, and no other.
+
+The audit is inside the set's digest, so an audited set never shares a name with a guarded set
+of the same plans. It attests that the plans were drafted blind. **The product does not verify
+it**: crb checks its shape and records its digest and author, and never reads the record.
+
+- **At compose.** On a `ctx.plan-audited*` arm, `plan_guard` runs in full. A structural reason
+  (`plan_render`, `plan_length`, `plan_code_block`, `plan_no_gold`) still withholds the plan
+  whole and is stamped `ctx_plan_refused`. Lookalike reasons alone (`plan_test_name`,
+  `plan_test_path`, `plan_test_span`, `plan_gold_span`, `plan_gold_line`,
+  `plan_asserted_literal`) do not: the plan is delivered. The blind brief still withholds the
+  test files, target tests and test command, but the delivered plan itself may name a
+  held-out test, its path, its lines or an asserted literal (the row's
+  `ctx_plan_would_refuse` says which). Only a reason the lookalike list names is skipped: any
+  other reason withholds the plan.
+- **Stamps.** Every row of the arm carries `ctx_plan_guard` = `audited_bypass`,
+  `ctx_plan_audit` (the record's digest) and `ctx_plan_auditor`; a delivered plan the full guard
+  would have withheld also carries `ctx_plan_would_refuse` (its lookalike reasons, sorted), and
+  only a row that delivered its plan carries it. The ledger refuses a row whose stamps are
+  missing or wrong, and any of these stamps on another row.
+- **Reading.** `GET /ctxsets/compare` pairs an audited run with its own plain `A0` control and
+  refuses it paired with a guarded `ctx.plan` arm, either way round (**422 `ctx_pair_blend`**).
+  `GET /ctxsets/{name}` says `audited` and gives `audit_record_sha256`, never the method.
+- **Offline.** `crb ctxset lint` withholds an audited set's plans on structural reasons only and
+  lists the lookalike ones as `audited bypass of …` (`would_refuse` under `--json`);
+  `crb ctxset show` prints `audited    yes (record <hex12>)`.
 
 ## Classes (an organisation's own classes of work — ADR-0026 item 9)
 

@@ -281,6 +281,37 @@ class TestRead:
     def test_a_v1_set_is_not_planned(self, env: Env) -> None:
         d = _put(env, _doc(env)).json()
         assert d["planned"] is False and d["accepted_by"] == ""
+        assert d["audited"] is False and d["audit_record_sha256"] is None
+
+    def test_an_audited_plan_set_shows_its_audit_record_and_never_the_plan(self, env: Env) -> None:
+        doc = plan_doc(tasks=_tasks(env), repo=ALPHA, audited=True)
+        cset = ctxset.parse(doc)
+        r = _put(env, doc)
+        assert r.status_code == 201, r.text
+        d = env.get(f"/ctxsets/{cset.name}").json()
+        assert d["source"] == ctxset.SOURCE_PLAN_AUDITED and d["planned"] is True
+        assert d["audited"] is True and d["audit_record_sha256"] == "a" * 64
+        text = env.get(f"/ctxsets/{cset.name}").text
+        assert all(line not in text for line in (*PLAN["summary"], *PLAN["steps"]))
+        assert "audit" not in d and "entries" not in d
+
+    def test_a_guarded_plan_set_is_not_audited(self, env: Env) -> None:
+        d = _put(env, plan_doc(tasks=_tasks(env), repo=ALPHA)).json()
+        assert d["audited"] is False and d["audit_record_sha256"] is None
+
+    @pytest.mark.parametrize(
+        "edit",
+        [
+            {"source": ctxset.SOURCE_PLAN_AUDITED},
+            {"audit": {"audited_by": "human:x"}},
+        ],
+    )
+    def test_a_misplaced_or_missing_audit_is_422_ctxset_plan_audit(
+        self, env: Env, edit: dict[str, Any]
+    ) -> None:
+        doc = {**plan_doc(tasks=_tasks(env), repo=ALPHA), **edit}
+        r = _put(env, doc)
+        assert r.status_code == 422 and envelope(r)["code"] == ctxset.REASON_PLAN_AUDIT
 
     @pytest.mark.parametrize(
         ("edit", "reason"),

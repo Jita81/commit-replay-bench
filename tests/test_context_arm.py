@@ -43,6 +43,7 @@ from crb.core.context_arm import (
     TEST_AUTHORED,
     TEST_PERSON,
     ContextArmsPooled,
+    audited_plan_arm,
     context_arm_for,
     ctx_set_name,
     hindsight_arm,
@@ -257,6 +258,7 @@ CTX_ARMS = [
     f"A0+library@ctx.mech.{HEX}",
     f"A0+library@ctx.mech-placebo.{HEX}",
     f"A0+library@ctx.plan.{HEX}",
+    f"A0+library@ctx.plan-audited.{HEX}",
 ]
 PRE_EXISTING_ARMS = [
     "A0",
@@ -283,6 +285,8 @@ MALFORMED_CTX_ARMS = [
     f"A0+library@ctx.mech.{HEX}0",
     f"A0+library@ctx.plan-placebo.{HEX}",
     f"A0+library@ctx.plan.{HEX}0",
+    f"A0+library@ctx.plan-audited-placebo.{HEX}",
+    f"A0+library@ctx.plan-audited.{HEX}0",
 ]
 
 
@@ -308,6 +312,15 @@ def test_plan_arm_is_the_accepted_plan_set_only() -> None:
     assert not hindsight_arm(f"A0+library@ctx.plan.{HEX}")
     for arm in (*PRE_EXISTING_ARMS, "", "not an arm", f"A0+library@ctx.plan-placebo.{HEX}"):
         assert not plan_arm(arm)
+
+
+def test_audited_plan_arm_is_the_plan_audited_set_only_and_a_plan_arm() -> None:
+    arm = f"A0+library@ctx.plan-audited.{HEX}"
+    assert audited_plan_arm(arm) and plan_arm(arm) and measurement_only(arm)
+    assert not hindsight_arm(arm)
+    assert ctx_set_name(arm) == f"ctx.plan-audited.{HEX}"
+    for other in (*CTX_ARMS[:5], *PRE_EXISTING_ARMS, *MALFORMED_CTX_ARMS, ""):
+        assert not audited_plan_arm(other), other
 
 
 def test_a_plan_arm_is_measurement_only() -> None:
@@ -338,6 +351,8 @@ def test_the_context_set_stamps_are_provenance_never_the_arm() -> None:
     for label in (LABEL_CTX_DELIVERED, LABEL_CTX_CHARS, LABEL_CTX_CEILING, "ctx_drafter"):
         assert label in PROVENANCE_LABELS
     for name in ("drafter", "saw", "accepted", "refused", "novel"):
+        assert f"ctx_plan_{name}" in PROVENANCE_LABELS
+    for name in ("guard", "would_refuse", "audit", "auditor"):  # ADR-0055
         assert f"ctx_plan_{name}" in PROVENANCE_LABELS
     assert LABEL_CONTEXT_ARM not in PROVENANCE_LABELS
 

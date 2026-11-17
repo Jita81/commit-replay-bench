@@ -6,12 +6,16 @@ What it is:   The tests of ``crb.core.ledger.ctx_label_violation``'s accepted-pl
 What it does: Pins that a ``ctx.plan*`` entries row carries every plan stamp and neither the
               mechanical drafter nor the hindsight ceiling; that no other row (a control row,
               an oracle, mech or req arm, a plain row) carries a plan stamp; that the optional
-              refusal, novel-token and open-gap stamps are checked when present; and that the
-              ledger refuses a row the rule names.
+              refusal, novel-token and open-gap stamps are checked when present; that an
+              audited-bypass row (ADR-0055) carries its guard, audit and auditor stamps, its
+              would-refuse reasons lookalike ones only and its refused reasons structural ones
+              only, and that no other row carries them; and that the ledger refuses a row the
+              rule names.
 How:          Labels from ``crb.core.ctxset.run_stamps`` on a parsed v3 set (the labels a run
               writes), hand-edited; rows written through the classification tests' ``_replay``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0054-accepted-plan-context-arm.md, docs/adr/0050-context-set-arms.md
+ADRs:         docs/adr/0054-accepted-plan-context-arm.md, docs/adr/0050-context-set-arms.md,
+              docs/adr/0055-audited-bypass-plan-arm.md
 Works with:   src/crb/core/ledger.py (under test), src/crb/core/ctxset.py (``run_stamps``),
               tests/fixtures/ctx_rows.py (``plan_set``), tests/test_ledger_stated.py (the v2
               stamps)
@@ -159,3 +163,104 @@ def test_a_fixture_plan_row_is_a_valid_grade_row() -> None:
     stray["labels"] = {**row.labels, ca.LABEL_CTX_CEILING: "1"}
     with pytest.raises(lg.LedgerIntegrityError, match="ctx_ceiling"):
         lg.GradeRow(**stray)
+
+
+# --- the audited-bypass stamps (ADR-0055) -----------------------------------------------
+
+
+AUDITED = plan_set(audited=True)
+AUDIT_OWN = (*lg.CTX_PLAN_AUDIT_LABELS, ca.LABEL_CTX_PLAN_WOULD_REFUSE)
+
+
+def test_a_run_stamped_audited_row_and_its_control_pass() -> None:
+    labels = _stamps(AUDITED)
+    assert set(lg.CTX_PLAN_AUDIT_LABELS) <= set(labels)
+    assert labels[ca.LABEL_CTX_PLAN_GUARD] == ca.PLAN_GUARD_AUDITED_BYPASS
+    assert labels[ca.LABEL_CTX_PLAN_AUDIT] == "a" * 64
+    assert labels[ca.LABEL_CTX_PLAN_AUDITOR] == "human:fixture-02"
+    assert lg.ctx_label_violation(AUDITED.arm, labels) == ""
+    bypassed = {**labels, ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_gold_span,plan_test_name"}
+    assert lg.ctx_label_violation(AUDITED.arm, bypassed) == ""
+    structural = {
+        **labels,
+        ca.LABEL_CTX_PLAN_REFUSED: "plan_length,plan_render",
+        ca.LABEL_CTX_DELIVERED: "0",
+    }
+    assert lg.ctx_label_violation(AUDITED.arm, structural) == ""
+    control = _stamps(AUDITED, ctxset.ROLE_CONTROL)
+    assert not set(AUDIT_OWN) & set(control)
+    assert lg.ctx_label_violation(ca.BASE_A0, control) == ""
+
+
+@pytest.mark.parametrize(
+    ("edit", "match"),
+    [
+        ({ca.LABEL_CTX_PLAN_GUARD: None}, "lacks"),
+        ({ca.LABEL_CTX_PLAN_AUDIT: None}, "lacks"),
+        ({ca.LABEL_CTX_PLAN_AUDITOR: ""}, "lacks"),
+        ({ca.LABEL_CTX_PLAN_GUARD: "guarded"}, "ctx_plan_guard"),
+        ({ca.LABEL_CTX_PLAN_AUDIT: "a" * 63}, "ctx_plan_audit"),
+        ({ca.LABEL_CTX_PLAN_AUDITOR: "an auditor"}, "ctx_plan_auditor"),
+        ({ca.LABEL_CTX_PLAN_WOULD_REFUSE: ""}, "ctx_plan_would_refuse"),
+        ({ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_test_name,plan_gold_span"}, "would_refuse"),
+        ({ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_test_name,plan_test_name"}, "would_refuse"),
+        ({ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_length"}, "ctx_plan_would_refuse"),
+        ({ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_bogus"}, "ctx_plan_would_refuse"),
+        ({ca.LABEL_CTX_PLAN_REFUSED: "plan_test_name"}, "lookalike"),
+        ({ca.LABEL_CTX_PLAN_REFUSED: "plan_length,plan_test_span"}, "ctx_plan_refused"),
+        # fullmatch: a trailing newline is not a digest or an auditor
+        ({ca.LABEL_CTX_PLAN_AUDIT: "a" * 64 + "\n"}, "ctx_plan_audit"),
+        ({ca.LABEL_CTX_PLAN_AUDITOR: "human:fixture-02\n"}, "ctx_plan_auditor"),
+        # a would-refuse is stamped only for a delivered plan, never beside a withheld one
+        (
+            {
+                ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_test_name",
+                ca.LABEL_CTX_PLAN_REFUSED: "plan_render",
+            },
+            "not delivered",
+        ),
+        (
+            {
+                ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_test_name",
+                ca.LABEL_CTX_PLAN_REFUSED: "plan_render",
+                ca.LABEL_CTX_DELIVERED: "0",
+            },
+            "not delivered",
+        ),
+        (
+            {ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_test_name", ca.LABEL_CTX_DELIVERED: "0"},
+            "not delivered",
+        ),
+    ],
+)
+def test_an_audited_row_whose_audit_stamps_disagree_is_refused(
+    edit: dict[str, str | None], match: str
+) -> None:
+    labels = _stamps(AUDITED)
+    for k, v in edit.items():
+        if v is None:
+            labels.pop(k, None)
+        else:
+            labels[k] = v
+    assert match in lg.ctx_label_violation(AUDITED.arm, labels)
+
+
+@pytest.mark.parametrize("key", AUDIT_OWN)
+def test_no_other_row_carries_an_audit_stamp(key: str) -> None:
+    value = {**_stamps(AUDITED), ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_test_name"}[key]
+    assert "audited-bypass" in lg.ctx_label_violation(PLAN.arm, {**_stamps(PLAN), key: value})
+    for arm, labels in ((ORACLE.arm, _stamps(ORACLE)), (REQ.arm, _stamps(REQ))):
+        assert "non-plan arm" in lg.ctx_label_violation(arm, {**labels, key: value}), arm
+    control = {**_stamps(AUDITED, ctxset.ROLE_CONTROL), key: value}
+    assert "arm's own stamps" in lg.ctx_label_violation(ca.BASE_A0, control)
+    assert "without a ctx_set" in lg.ctx_label_violation(ca.BASE_A0, {key: value})
+
+
+def test_a_fixture_audited_row_is_a_valid_grade_row_and_the_ledger_refuses_a_bad_one() -> None:
+    row = ctx_row(AUDITED, TASKS[0], clean=True)
+    assert row.labels[ca.LABEL_CTX_SOURCE] == ctxset.SOURCE_PLAN_AUDITED
+    assert row.labels[ca.LABEL_CTX_PLAN_GUARD] == ca.PLAN_GUARD_AUDITED_BYPASS
+    bad = row.fields()
+    bad["labels"] = {**row.labels, ca.LABEL_CTX_PLAN_REFUSED: "plan_gold_span"}
+    with pytest.raises(lg.LedgerIntegrityError, match="lookalike"):
+        lg.GradeRow(**bad)

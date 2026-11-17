@@ -24,14 +24,16 @@ Navigation
 What it is:   The accepted-plan vocabulary: the body (``PlanBody``), the sections, what a
               plan's drafter may have seen (``PLAN_SAW_VALUES``), the fixed limits
               (``length_violation``), the shape rule (``shape_violation``), the renderer
-              (``render``) and the ``plan_guard`` reason names.
+              (``render``), the ``plan_guard`` reason names and their split into structural
+              and lookalike reasons with the audit vocabulary (ADR-0055).
 What it does: Renders an entry's text from its plan, deterministically; says why a plan
               breaks its shape or its limits.
 How:          Pure functions over a frozen dataclass (stdlib only), so the set parser
               (``crb.core.ctxset``) and the composer's guard (``crb.builders.brief``) read one
               definition.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0054-accepted-plan-context-arm.md, docs/adr/0050-context-set-arms.md
+ADRs:         docs/adr/0054-accepted-plan-context-arm.md, docs/adr/0050-context-set-arms.md,
+              docs/adr/0055-audited-bypass-plan-arm.md
 Works with:   src/crb/core/ctxset.py (the ``crb.ctxset.v3`` record whose entries carry a plan),
               src/crb/builders/brief.py (``plan_guard``, which re-renders and checks an entry),
               src/crb/core/context_arm.py (the ``ctx.plan*`` source and stamps)
@@ -108,6 +110,51 @@ PLAN_REASONS: tuple[str, ...] = (
     REASON_ASSERTED_LITERAL,
     REASON_NO_GOLD,
 )
+#: ADR-0055: the reasons that say what the plan IS (it does not render, breaks the fixed
+#: limits, carries a code block, or there is no gold view to check it against). They hold on
+#: every plan arm, an audited one too.
+STRUCTURAL_REASONS: tuple[str, ...] = (
+    REASON_RENDER,
+    REASON_LENGTH,
+    REASON_CODE_BLOCK,
+    REASON_NO_GOLD,
+)
+#: ADR-0055: the reasons that say what the plan's TEXT resembles (a test name or path, a span
+#: of the change or its tests, a gold line, an asserted literal). A blind-drafted plan trips
+#: them by coincidence; an audited-bypass arm stamps them instead of withholding the plan.
+LOOKALIKE_REASONS: tuple[str, ...] = (
+    REASON_TEST_NAME,
+    REASON_TEST_PATH,
+    REASON_TEST_SPAN,
+    REASON_GOLD_SPAN,
+    REASON_GOLD_LINE,
+    REASON_ASSERTED_LITERAL,
+)
+
+
+def reason_split_violation(
+    structural: tuple[str, ...], lookalike: tuple[str, ...], every: tuple[str, ...]
+) -> str:
+    """Why ``structural`` and ``lookalike`` are not a partition of ``every`` (a reason in
+    both, or one in neither, or one outside ``every``), or ``""`` (ADR-0055). Checked at
+    import with a real raise, not an ``assert``, so ``python -O`` cannot drop it: a reason in
+    both tuples would be skipped by the audited bypass although it is structural."""
+    both = sorted(set(structural) & set(lookalike))
+    if both:
+        return f"plan reasons {both} are both structural and lookalike"
+    if set(structural) | set(lookalike) != set(every):
+        return "the structural and lookalike plan reasons are not exactly the plan reasons"
+    return ""
+
+
+if _why := reason_split_violation(STRUCTURAL_REASONS, LOOKALIKE_REASONS, PLAN_REASONS):
+    raise RuntimeError(_why)
+
+#: ADR-0055: what an audit of blind drafting may have read (``transcripts`` always), and the
+#: longest one-line ``method`` an audit record may state.
+AUDIT_SCOPES: tuple[str, ...] = ("model", "prompt", "transcripts")
+AUDIT_SCOPE_REQUIRED = "transcripts"
+AUDIT_METHOD_MAX = 300
 
 
 @dataclass(frozen=True)
@@ -214,6 +261,10 @@ def plan_from_doc(doc: Any) -> PlanBody:
 __all__ = [
     "ACCEPTED_BY_RE",
     "ACCEPTED_NONE",
+    "AUDIT_METHOD_MAX",
+    "AUDIT_SCOPES",
+    "AUDIT_SCOPE_REQUIRED",
+    "LOOKALIKE_REASONS",
     "MAX_DECISIONS",
     "MAX_FILES",
     "MAX_LINES",
@@ -237,9 +288,11 @@ __all__ = [
     "REQUIRED_SECTIONS",
     "SECTIONS",
     "SECTION_HEADINGS",
+    "STRUCTURAL_REASONS",
     "PlanBody",
     "length_violation",
     "plan_from_doc",
+    "reason_split_violation",
     "render",
     "shape_violation",
 ]

@@ -30,8 +30,9 @@ What it is:   The context-arm vocabulary: the grammar (``parse_arm`` / ``Context
               (``context_arm_for``), the provenance label names, the pooling refusal
               (``ContextArmsPooled``), the read filter (``rows_for_context_arm``) and the
               context-set predicates (``ctx_set_name``, ``hindsight_arm``,
-              ``stated_arm``, ``plan_arm``, ``measurement_only``, ADR-0050, ADR-0052 and
-              ADR-0054) over one source-to-kind table (``CTX_SOURCE_KIND``).
+              ``stated_arm``, ``plan_arm``, ``audited_plan_arm``, ``measurement_only``,
+              ADR-0050, ADR-0052, ADR-0054 and ADR-0055) over one source-to-kind table
+              (``CTX_SOURCE_KIND``).
 What it does: Refuses an arm id outside the grammar; names an arm's role (descriptive,
               ceiling, certifies retrospectively or prospectively); decides ``A0`` / ``S3`` /
               ``S1@<author>`` / ``S2`` (with ``+L`` when the brief carried the loop) for a
@@ -45,7 +46,8 @@ ADRs:         docs/adr/0026-the-context-standard.md (item 1),
               docs/adr/0025-routing-v2.md (the one bump the stamp rides),
               docs/adr/0050-context-set-arms.md (the reserved ``ctx.`` library names),
               docs/adr/0052-stated-requirement-arms.md (the ``req`` sources and their stamps),
-              docs/adr/0054-accepted-plan-context-arm.md (the ``plan`` source and its stamps)
+              docs/adr/0054-accepted-plan-context-arm.md (the ``plan`` source and its stamps),
+              docs/adr/0055-audited-bypass-plan-arm.md (the ``plan-audited`` source)
 Works with:   src/crb/core/ledger.py (the label, ``GradeRow.context_arm``, the refusal in
               ``cell_stats``), src/crb/core/reading.py (a reading's hierarchy names arms),
               src/crb/core/routing.py (routes one arm), src/crb/core/capability.py (the map
@@ -96,7 +98,9 @@ CTX_PREFIX = "ctx."
 #: pinned drafter) and ``stated`` (ADR-0052: stated requirements, written with hindsight, whose
 #: new names are declared item by item and checked by ``req_guard``) and ``planned``
 #: (ADR-0054: an accepted implementation plan, written before the build from the ticket and the
-#: parent tree, checked by ``plan_guard``; it has no placebo source yet). THE one table every
+#: parent tree, checked by ``plan_guard``; it has no placebo source yet). ``plan-audited``
+#: (ADR-0055) is a ``planned`` source whose set carries an attestation that its plans were
+#: drafted blind; its arm skips only the guard's lookalike reasons. THE one table every
 #: predicate below and ``crb.core.ctxset`` derives a source's kind from (ADR-0052 item 4).
 CTX_KIND_HINDSIGHT = "hindsight"
 CTX_KIND_MECHANICAL = "mechanical"
@@ -116,6 +120,7 @@ CTX_SOURCE_KIND: dict[str, str] = {
     "req": CTX_KIND_STATED,
     "req-placebo": CTX_KIND_STATED,
     "plan": CTX_KIND_PLANNED,
+    "plan-audited": CTX_KIND_PLANNED,
 }
 #: The context-set sources, in table order.
 CTX_SOURCES: tuple[str, ...] = tuple(CTX_SOURCE_KIND)
@@ -171,6 +176,17 @@ LABEL_CTX_PLAN_SAW = "ctx_plan_saw"
 LABEL_CTX_PLAN_ACCEPTED = "ctx_plan_accepted"
 LABEL_CTX_PLAN_REFUSED = "ctx_plan_refused"
 LABEL_CTX_PLAN_NOVEL = "ctx_plan_novel"
+#: Audited-bypass stamps (ADR-0055), on an entries row of a ``ctx.plan-audited*`` arm only:
+#: ``ctx_plan_guard`` = ``audited_bypass`` (the guard's lookalike reasons were not applied);
+#: ``ctx_plan_would_refuse`` the lookalike reasons the full guard would have withheld the plan
+#: for; ``ctx_plan_audit`` the audit record's sha256; ``ctx_plan_auditor`` who attested it.
+#: The attestation is the storing operator's claim: the product does not verify it.
+LABEL_CTX_PLAN_GUARD = "ctx_plan_guard"
+LABEL_CTX_PLAN_WOULD_REFUSE = "ctx_plan_would_refuse"
+LABEL_CTX_PLAN_AUDIT = "ctx_plan_audit"
+LABEL_CTX_PLAN_AUDITOR = "ctx_plan_auditor"
+#: The one value of ``ctx_plan_guard`` (ADR-0055).
+PLAN_GUARD_AUDITED_BYPASS = "audited_bypass"
 #: The builder's turns on a row of a context-set run (ADR-0052 item 5). Deliberately NOT in
 #: :data:`PROVENANCE_LABELS`: a per-row count is not a stamp to list or filter by, and the
 #: control rows that carry it are plain ``A0`` rows (ADR-0052 review note 13).
@@ -215,6 +231,11 @@ PROVENANCE_LABELS: tuple[str, ...] = (
     LABEL_CTX_PLAN_ACCEPTED,
     LABEL_CTX_PLAN_REFUSED,
     LABEL_CTX_PLAN_NOVEL,
+    # the audited-bypass stamps (ADR-0055)
+    LABEL_CTX_PLAN_GUARD,
+    LABEL_CTX_PLAN_WOULD_REFUSE,
+    LABEL_CTX_PLAN_AUDIT,
+    LABEL_CTX_PLAN_AUDITOR,
 )
 
 #: The ``learn`` label value that means the loop was off for the run (ADR-0020 §8).
@@ -401,6 +422,13 @@ def plan_arm(arm: str) -> bool:
     return bool(source) and ctx_kind(source) == CTX_KIND_PLANNED
 
 
+def audited_plan_arm(arm: str) -> bool:
+    """``True`` for an audited-bypass plan arm (``ctx.plan-audited*``, ADR-0055): a plan arm
+    whose set attests blind drafting, so ``plan_guard``'s lookalike reasons are stamped, not
+    applied. Its rows never pool or pair with a ``ctx.plan.<hex>`` arm's."""
+    return ctx_source_of(arm) == "plan-audited"
+
+
 def measurement_only(arm: str) -> bool:
     """``True`` for any context-set arm: no reading accepts it and it never certifies,
     licenses, routes or enters the value scorecard (ADR-0050 item 9)."""
@@ -503,10 +531,14 @@ __all__ = [
     "LABEL_CTX_ITEMS",
     "LABEL_CTX_OPEN_GAPS",
     "LABEL_CTX_PLAN_ACCEPTED",
+    "LABEL_CTX_PLAN_AUDIT",
+    "LABEL_CTX_PLAN_AUDITOR",
     "LABEL_CTX_PLAN_DRAFTER",
+    "LABEL_CTX_PLAN_GUARD",
     "LABEL_CTX_PLAN_NOVEL",
     "LABEL_CTX_PLAN_REFUSED",
     "LABEL_CTX_PLAN_SAW",
+    "LABEL_CTX_PLAN_WOULD_REFUSE",
     "LABEL_CTX_PROV",
     "LABEL_CTX_REQ_DRAFTER",
     "LABEL_CTX_REQ_REFUSED",
@@ -515,6 +547,7 @@ __all__ = [
     "LABEL_CTX_STATED",
     "LABEL_CTX_STRUCTURE",
     "LABEL_CTX_TURNS",
+    "PLAN_GUARD_AUDITED_BYPASS",
     "PROVENANCE_LABELS",
     "REPLAY_MODE",
     "TEST_AUTHORED",
@@ -522,6 +555,7 @@ __all__ = [
     "ContextArm",
     "ContextArmsPooled",
     "arms_present",
+    "audited_plan_arm",
     "context_arm_for",
     "ctx_kind",
     "ctx_set_name",

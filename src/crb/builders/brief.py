@@ -86,7 +86,8 @@ ADRs:         docs/adr/0026-the-context-standard.md (items 1, 7 and 8),
               docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0050-context-set-arms.md (item 4, the context-set admission),
               docs/adr/0052-stated-requirement-arms.md (``req_guard``, the req amendment),
-              docs/adr/0054-accepted-plan-context-arm.md (``plan_guard``, the plan arm)
+              docs/adr/0054-accepted-plan-context-arm.md (``plan_guard``, the plan arm),
+              docs/adr/0055-audited-bypass-plan-arm.md (the audited-bypass split)
 Works with:   src/crb/builders/adapter.py (the replay brief, the ``S1`` arm),
               src/crb/factory/build.py (the factory brief), src/crb/builders/base.py
               (``BuildBrief``, ``DEFAULT_RULES``), src/crb/core/playbook.py (the learned lines'
@@ -145,6 +146,8 @@ LABEL_CTX_CHARS = _arms.LABEL_CTX_CHARS
 LABEL_CTX_REQ_REFUSED = _arms.LABEL_CTX_REQ_REFUSED
 LABEL_CTX_PLAN_REFUSED = _arms.LABEL_CTX_PLAN_REFUSED
 LABEL_CTX_PLAN_NOVEL = _arms.LABEL_CTX_PLAN_NOVEL
+LABEL_CTX_PLAN_GUARD = _arms.LABEL_CTX_PLAN_GUARD
+LABEL_CTX_PLAN_WOULD_REFUSE = _arms.LABEL_CTX_PLAN_WOULD_REFUSE
 CTX_LABELS: tuple[str, ...] = (
     LABEL_CTX_TICKET,
     LABEL_CTX_BRIEF,
@@ -1597,7 +1600,14 @@ def compose(
     ``require_mechanical=False``); an entry carrying a plan is checked by :func:`plan_guard`
     instead of the novel-token guard and is withheld WHOLE on any reason (stamped as
     ``ctx_plan_refused``); a kept plan's text goes to ``BuildBrief.plan``, never to
-    ``spec_facts``, and the gold-novel tokens it names are counted as ``ctx_plan_novel``."""
+    ``spec_facts``, and the gold-novel tokens it names are counted as ``ctx_plan_novel``.
+
+    On an audited-bypass plan arm (``ctx.plan-audited*``, ADR-0055) the same guard runs, and
+    every reason but a lookalike one withholds a plan (the structural reasons,
+    :data:`~crb.core.plan.STRUCTURAL_REASONS`, and any reason in neither tuple: it fails
+    closed); a delivered plan's lookalike reasons (:data:`~crb.core.plan.LOOKALIKE_REASONS`) are
+    stamped as ``ctx_plan_would_refuse``, and the row says ``ctx_plan_guard`` =
+    ``audited_bypass``. Every other check is unchanged."""
     ctx_name = _arms.ctx_set_name(arm)
     if ctx_name:
         retrospective = True
@@ -1644,16 +1654,27 @@ def compose(
             refused_lib.append(e.text)
         else:
             req_kept.append(e)
-    # ADR-0054: a plan entry meets plan_guard and is withheld WHOLE on any reason
+    # ADR-0054: a plan entry meets plan_guard and is withheld WHOLE on any reason; ADR-0055:
+    # on an audited-bypass arm, on any STRUCTURAL reason only (the lookalike ones are stamped)
     request = f"{ticket.subject}\n{ticket.message}"
+    audited = _arms.audited_plan_arm(arm)
     plan_reasons: set[str] = set()
+    plan_would: set[str] = set()
     plan_kept: list[ContextEntry] = []
     for e in plan_entries:
-        withheld = plan_guard(e.plan, gold, request, text=e.text) if e.plan else ()
+        reasons = plan_guard(e.plan, gold, request, text=e.text) if e.plan else ()
+        if audited:
+            # fail closed: only a NAMED lookalike reason is skipped; any other reason, a
+            # structural one or one added later to neither tuple, still withholds the plan
+            withheld = tuple(r for r in reasons if r not in _plan.LOOKALIKE_REASONS)
+            would = tuple(r for r in reasons if r in _plan.LOOKALIKE_REASONS)
+        else:
+            withheld, would = reasons, ()
         if withheld:
             plan_reasons.update(withheld)
             refused_lib.append(e.text)
         else:
+            plan_would.update(would)
             plan_kept.append(e)
     kept_entries = tuple(
         e
@@ -1723,6 +1744,10 @@ def compose(
     if plan_kept:
         plan_lines = "\n".join(ln for e in plan_kept if e.plan for ln in e.plan.lines())
         labels[LABEL_CTX_PLAN_NOVEL] = str(plan_novel(plan_lines, gold))
+    if audited:
+        labels[LABEL_CTX_PLAN_GUARD] = _arms.PLAN_GUARD_AUDITED_BYPASS
+        if plan_would:
+            labels[LABEL_CTX_PLAN_WOULD_REFUSE] = ",".join(sorted(plan_would))
     return Composed(brief=brief, labels=labels, refused=refused, library=kept_entries)
 
 
@@ -1769,8 +1794,10 @@ __all__ = [
     "LABEL_CTX_DELIVERED",
     "LABEL_CTX_HARNESS",
     "LABEL_CTX_LIBRARY",
+    "LABEL_CTX_PLAN_GUARD",
     "LABEL_CTX_PLAN_NOVEL",
     "LABEL_CTX_PLAN_REFUSED",
+    "LABEL_CTX_PLAN_WOULD_REFUSE",
     "LABEL_CTX_REFUSED",
     "LABEL_CTX_REQ_REFUSED",
     "LABEL_CTX_RULES",
