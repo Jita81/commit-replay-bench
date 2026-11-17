@@ -19,12 +19,13 @@ How:          The seeded server (``make_env``), sealed and unsealed, with a ``cr
               document over the seed's ``alpha`` tasks written where ``POST /ctxsets`` stores
               one; the queue replaced by ``FakeJobs``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0050-context-set-arms.md
+ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0054-accepted-plan-context-arm.md
 Works with:   src/crb/server/schemas.py (``RunCreateRequest``'s context-set fields),
               src/crb/server/routes/runs.py (under test),
               src/crb/core/ctxset.py (the set's parser and coverage rule),
               tests/fixtures/server_seed.py (the seeded app, its repositories and logins),
               tests/fixtures/readings.py (``SEALED_SETTINGS``)
+              tests/fixtures/ctx_rows.py (the v3 accepted-plan document)
 Tested by:    tests/test_server_runs_ctx.py
 Touch when:   never for a new repository; a context-set field, a submit refusal or the stored layout
               of a set changes.
@@ -45,6 +46,7 @@ from crb.core.ctxset import CtxSetRefused
 from crb.server.routes.runs import CTXSET_DIR, stored_ctxset
 from crb.server.schemas import RunCreateRequest
 from crb.store.models import Run
+from fixtures.ctx_rows import PLAN, plan_doc
 from fixtures.readings import SEALED_SETTINGS
 from fixtures.server_seed import ALPHA, BETA, Env, login, make_env, task_id
 from test_server_routes_runs import FakeJobs
@@ -348,3 +350,45 @@ def test_submit_admits_a_matched_placebo(sealed: Env, jobs: FakeJobs) -> None:
     r = _post(sealed, context_set=placebo.name)
     assert r.status_code == 201, r.text
     assert jobs.enqueued[0].params_json["context_set"] == placebo.name
+
+
+# --- an accepted-plan set (ADR-0054) --------------------------------------------------------
+
+
+def _plan(*ids: int, **kw: Any) -> dict[str, Any]:
+    return plan_doc(tasks=[task_id(i) for i in ids], repo=ALPHA, **kw)
+
+
+def test_a_plan_set_run_is_admitted_like_any_other_set(sealed: Env, jobs: FakeJobs) -> None:
+    ctx = _store(sealed.settings.home, _plan(1, 2))
+    assert ctx.arm.startswith("A0+library@ctx.plan.")
+    r = _post(sealed, context_set=ctx.name)
+    assert r.status_code == 201, r.text
+    (run,) = jobs.enqueued
+    assert run.params_json["context_set"] == ctx.name
+    assert run.params_json["context_role"] == "entries"
+
+
+def test_a_stored_plan_over_the_limits_is_refused(sealed: Env, jobs: FakeJobs) -> None:
+    real = ctxset.parse(_plan(1, 2))
+    over = _plan(1, 2)
+    over["entries"][0]["plan"] = {**PLAN, "steps": ["y" * 700]}
+    root = sealed.settings.home / CTXSET_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    # written past the store's own parser, under the name of a real set
+    (root / f"{real.digest}.json").write_text(json.dumps(over), encoding="utf-8")
+    r = _post(sealed, context_set=real.name)
+    assert r.status_code == 422 and _code(r) == ctxset.REASON_PLAN_LENGTH, r.text
+    assert jobs.enqueued == [] and _queued(sealed) == 0
+
+
+def test_a_plan_set_with_open_gaps_is_refused_unless_measured(sealed: Env, jobs: FakeJobs) -> None:
+    doc = _plan(1, 2)
+    doc["entries"][0]["gaps"] = [{"question": "Which error text?", "decision": "error_text"}]
+    ctx = _store(sealed.settings.home, doc)
+    r = _post(sealed, context_set=ctx.name)
+    assert r.status_code == 409 and _code(r) == ctxset.REASON_OPEN_GAPS, r.text
+    assert jobs.enqueued == []
+    r = _post(sealed, context_set=ctx.name, measure_open_gaps=True)
+    assert r.status_code == 201, r.text
+    assert jobs.enqueued[0].params_json["measure_open_gaps"] is True

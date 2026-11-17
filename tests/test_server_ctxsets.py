@@ -46,7 +46,7 @@ from crb.server.routes.ctxsets import (
 )
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Run
-from fixtures.ctx_rows import ctx_doc, req_doc, side
+from fixtures.ctx_rows import PLAN, ctx_doc, plan_doc, req_doc, side
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, make_env
 
 SECRET = "The handler reads the flag before parsing; the fix moves the read."
@@ -263,6 +263,45 @@ class TestRead:
         assert isinstance(d["saw"], list)
         assert statement not in env.get(f"/ctxsets/{cset.name}").text
         assert "entries" not in d and "items" not in d
+
+    def test_a_plan_set_shows_its_v3_metadata_and_never_the_plan(self, env: Env) -> None:
+        doc = plan_doc(tasks=_tasks(env), repo=ALPHA)
+        cset = ctxset.parse(doc)
+        r = _put(env, doc)
+        assert r.status_code == 201, r.text
+        assert r.json()["planned"] is True and r.json()["accepted_by"] == "human:fixture-01"
+        d = env.get(f"/ctxsets/{cset.name}").json()
+        assert d["schema"] == ctxset.SCHEMA_V3 and d["source"] == ctxset.SOURCE_PLAN
+        assert d["planned"] is True and d["stated"] is False and d["hindsight"] is False
+        assert d["saw"] == ["ticket", "tree"] and d["accepted_by"] == "human:fixture-01"
+        text = env.get(f"/ctxsets/{cset.name}").text
+        assert all(line not in text for line in (*PLAN["summary"], *PLAN["steps"]))
+        assert "entries" not in d and "plan" not in d
+
+    def test_a_v1_set_is_not_planned(self, env: Env) -> None:
+        d = _put(env, _doc(env)).json()
+        assert d["planned"] is False and d["accepted_by"] == ""
+
+    @pytest.mark.parametrize(
+        ("edit", "reason"),
+        [
+            ({"saw": ["diff", "ticket"]}, ctxset.REASON_PLAN_SAW),
+            ({"accepted_by": "model:x@" + "a" * 64}, ctxset.REASON_PLAN_ACCEPTED),
+            ({"source": "plan-placebo"}, ctxset.REASON_SCHEMA),
+            ({"plan": {**PLAN, "summary": []}}, ctxset.REASON_PLAN_SHAPE),
+            ({"plan": {**PLAN, "steps": ["y" * 700]}}, ctxset.REASON_PLAN_LENGTH),
+        ],
+    )
+    def test_a_plan_set_the_parser_refuses_is_422_with_its_reason(
+        self, env: Env, edit: dict[str, Any], reason: str
+    ) -> None:
+        doc = plan_doc(tasks=_tasks(env), repo=ALPHA)
+        if "plan" in edit:
+            doc["entries"][0]["plan"] = edit["plan"]
+        else:
+            doc.update(edit)
+        r = _put(env, doc)
+        assert r.status_code == 422 and envelope(r)["code"] == reason
 
     def test_unknown_name_is_404(self, env: Env) -> None:
         r = env.get(f"/ctxsets/ctx.oracle.{'0' * 12}")

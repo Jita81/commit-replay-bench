@@ -1789,8 +1789,9 @@ def build_fn_for(
                 root=str(ws.root),
             )
         else:  # no S1 author here, so run_arm is the run's own A0 / S3 arm
-            # a stated-requirement entry (ADR-0052) is guarded against the gold diff and
-            # tests: the harness-side view the builder never sees (ADR-0026 item 7)
+            # a stated-requirement entry (ADR-0052) or an accepted-plan entry (ADR-0054) is
+            # guarded against the gold diff and tests: the harness-side view the builder
+            # never sees (ADR-0026 item 7)
             gold = (
                 gold_view(
                     ws.repo,
@@ -1800,7 +1801,7 @@ def build_fn_for(
                     test_paths=task.test_files,
                     novel=novel,
                 )
-                if ctx_entry is not None and ctx_entry.items
+                if ctx_entry is not None and (ctx_entry.items or ctx_entry.plan is not None)
                 else None
             )
             composed = compose(

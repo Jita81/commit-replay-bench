@@ -523,3 +523,10 @@ echo x 2>&1 | tail -5
 cat <<< "a (b"
 echo x > "out (1).txt"
 cd src && echo x > out.txt
+
+# --- incident without a shell line: the plan text guard (PR 156 review) ----------------
+# The PR 156 review of plan_guard (src/crb/builders/brief.py) found plans delivered that
+# copied a gold line: short whole-line copies, brackets inside string literals, pointer,
+# decrement and attribute lines read as comments, and bare literals withholding a plan.
+# The plan guard takes plan text, not shell commands, so it adds no line here: its
+# regression cases are the tables in tests/test_brief_plan_guard.py.

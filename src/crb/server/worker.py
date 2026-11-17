@@ -3499,8 +3499,8 @@ class Worker:
         coverage, a placebo whose treatment is not stored or no longer matches it
         (``ctxset_placebo_*``, re-verified by ``stored_ctxset``), ``ctx_open_gaps`` (an
         entries run of a set recording open requirement gaps without ``measure_open_gaps``,
-        ADR-0053) and ``ctxset_mechanical`` (a ``mech*`` entry not drafted at its task's
-        parent); a git read failing raises :class:`GitError`. The gap label (``anchor.v1``)
+        ADR-0053) and ``ctxset_mechanical`` (a ``mech*`` or ``plan*`` entry not drafted at its
+        task's parent, ADR-0054); a git read failing raises :class:`GitError`. The gap label (``anchor.v1``)
         reads each task's commit message and its parent tree, nothing else."""
         p = ctx.params
         name = str(p.get("context_set") or "")
@@ -3548,6 +3548,9 @@ class Worker:
                     # a stated (v2) entry: the composer's req_guard re-renders and checks it
                     items=e.items,
                     structure=ctxset.structure if e.items else "",
+                    # an accepted-plan (v3) entry: the composer's plan_guard re-renders and
+                    # checks it (ADR-0054)
+                    plan=e.plan,
                 )
         return _CtxPlan(
             ctxset=ctxset,

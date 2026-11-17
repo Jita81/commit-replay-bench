@@ -167,6 +167,10 @@ class BuildBrief:
         Optional structured specification (structural facts only — never a diff,
         never a file list of the real patch). Empty by default: the bare-message
         floor is the measured baseline.
+    plan:
+        An accepted-plan arm's plan (ADR-0054): the rendered text of the plan the person who
+        asked for the change accepted before the build (``crb.core.plan.render``, which opens
+        with its own header). Empty on every other arm.
     rules:
         The protocol text (see :data:`DEFAULT_RULES`).
     config:
@@ -209,6 +213,9 @@ class BuildBrief:
     #: from closed templates, held out by task and leak-gated at injection
     #: (``crb.core.playbook``). Empty unless the repository's loop switch is on.
     playbook: tuple[str, ...] = ()
+    #: An accepted-plan arm's rendered plan (ADR-0054); empty on every other arm, and then
+    #: neither the task text nor the recorded brief changes.
+    plan: str = ""
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
@@ -321,6 +328,8 @@ class BuildBrief:
             ]
         if self.spec_facts:
             lines += ["", "Known facts:"] + [f"  - {f}" for f in self.spec_facts]
+        if self.plan.strip():
+            lines += ["", self.plan.strip()]
         if self.repair_note.strip():
             lines += [
                 "",
@@ -368,6 +377,7 @@ class BuildBrief:
             **({"finish_checks": list(self.finish_checks)} if self.finish_checks else {}),
             **({"gate_note": self.gate_note} if self.gate_note else {}),
             **({"playbook": list(self.playbook)} if self.playbook else {}),
+            **({"plan": self.plan} if self.plan else {}),
         }
 
 

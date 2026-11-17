@@ -56,6 +56,8 @@ Add opt-in context-set arms. A run without `context_set` behaves exactly as befo
    the parent already has.
    (Amended for the `req` and `req-placebo` sources only by ADR-0052: an entry carrying
    stated items meets `req_guard` instead of `refuse_novel`. Every other source is unchanged.)
+   (Amended for the `plan` source only by ADR-0054: a plan entry meets `plan_guard` instead
+   of `refuse_novel`, and is withheld whole when the guard refuses it.)
 4. **Admission (amends ADR-0026 items 1 and 10).**
    - A hindsight set is exempt from the retrospective time rule only, never from the leak guard
      or the bare-fact refusal. The rule that test values are not entries is waived for
@@ -69,6 +71,9 @@ Add opt-in context-set arms. A run without `context_set` behaves exactly as befo
      treat).
    - (Amended for the `req` and `req-placebo` sources only by ADR-0052: a stated set is exempt
      from the time rule and from `refuse_novel` for its item entries, and meets `req_guard`.)
+   - (Amended for the `plan` source only by ADR-0054: a plan set is admitted by the same
+     parent-commit check as a `ctx.mech` set, without the mechanical stamp, and meets
+     `plan_guard`.)
 5. **Provenance stamps.** A ctx row carries `ctx_set`, `ctx_source`, `ctx_gap`,
    `ctx_gap_rule`, `ctx_delivered` and `ctx_chars`, plus `ctx_drafter` on a mechanical arm and
    `ctx_ceiling` = `1` on a hindsight arm. A control row keeps plain `A0` and carries

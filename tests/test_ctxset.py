@@ -9,11 +9,13 @@ What it does: Pins a digest stable across key order and moved by any entry chang
               ``ctxset_digest``, ``ctxset_coverage``, ``ctxset_repo``,
               ``ctxset_mechanical``, ``ctxset_placebo_unmatched``,
               ``ctxset_placebo_overlap``) on a minimal fixture; the gap label read through
-              ``tree_has`` only; and the per-task stamps for the entries and control roles.
+              ``tree_has`` only; the per-task stamps for the entries and control roles; and
+              the ``crb.ctxset.v3`` accepted-plan record (ADR-0054): its round trip and
+              digest, each ``ctxset_plan_*`` refusal, its gaps, no placebo and its stamps.
 How:          Hand-built JSON sets over fake task ids; the parent tree is a callable over a
               fixed set of identifiers; no repository, no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0050-context-set-arms.md
+ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0054-accepted-plan-context-arm.md
 Works with:   src/crb/core/ctxset.py (the module under test), src/crb/core/context_arm.py
               (the reserved ``ctx.`` names and labels), docs/adr/0050-context-set-arms.md
               (the decision whose refusals are pinned), src/crb/server/routes/ctxsets.py
@@ -427,9 +429,230 @@ def test_stamps_refuse_a_missing_gap_or_an_unknown_role() -> None:
 
 
 def test_every_refusal_reason_is_named_and_an_unknown_one_is_refused() -> None:
-    # +2 for v2 items (ADR-0052), +1 for the open-gaps push-back (ADR-0053)
-    assert len(set(ctxset.REASONS)) == len(ctxset.REASONS) == 12
+    # +2 for v2 items (ADR-0052), +1 for the open-gaps push-back (ADR-0053), +5 for the
+    # accepted-plan record (ADR-0054)
+    assert len(set(ctxset.REASONS)) == len(ctxset.REASONS) == 17
     # every set-shape refusal is ctxset_*; ctx_open_gaps refuses a REQUEST, not a set's shape
     assert all(r.startswith("ctxset_") for r in ctxset.REASONS if r != ctxset.REASON_OPEN_GAPS)
     with pytest.raises(ValueError, match="unknown"):
         CtxSetRefused("ctxset_other", "x")
+
+
+# --- the accepted-plan record (crb.ctxset.v3, ADR-0054) ------------------------------------
+
+
+def _plan_doc(**over: Any) -> dict[str, Any]:
+    plan = {
+        "summary": ["Refuse an empty name"],
+        "files": ["cmd/root.go"],
+        "steps": ["Check the name first", "Return an error for an empty name"],
+        "decisions": [],
+        "tests": [],
+    }
+    doc: dict[str, Any] = {
+        "schema": ctxset.SCHEMA_V3,
+        "source": ctxset.SOURCE_PLAN,
+        "repo": "demo",
+        "method": "written before the build and accepted by the requester",
+        "drafter": "human:planner-01",
+        "saw": ["ticket", "tree"],
+        "accepted_by": "human:requester-01",
+        "entries": [
+            {
+                "task_id": t,
+                "entry_id": f"plan-{t[:4]}",
+                "version": "1",
+                "produced_at": WHEN,
+                "source_rev": parent,
+                "plan": copy.deepcopy(plan),
+            }
+            for t, parent in ((T1, P1), (T2, P2))
+        ],
+    }
+    doc.update(over)
+    return doc
+
+
+def test_a_plan_set_parses_names_itself_and_stamps_its_provenance() -> None:
+    s = ctxset.parse(_plan_doc())
+    assert s.schema == ctxset.SCHEMA_V3
+    assert s.planned and not s.mechanical and not s.hindsight and not s.stated
+    assert not s.placebo
+    assert s.name == f"ctx.plan.{s.digest[:12]}"
+    assert s.arm == f"A0+library@ctx.plan.{s.digest[:12]}"
+    assert arms.plan_arm(s.arm) and not arms.hindsight_arm(s.arm)
+    assert s.accepted_by == "human:requester-01"
+    assert s.saw == ("ticket", "tree")
+    assert all(not e.mechanical and e.plan is not None for e in s.entries)
+    assert s.entries[0].text.startswith("Implementation plan for this change:\n")
+    stamps = ctxset.run_stamps(s, "entries", {T1: "1", T2: "0"})[T1]
+    assert stamps[arms.LABEL_CTX_PLAN_DRAFTER] == "human:planner-01"
+    assert stamps[arms.LABEL_CTX_PLAN_SAW] == "ticket,tree"
+    assert stamps[arms.LABEL_CTX_PLAN_ACCEPTED] == "human:requester-01"
+    assert arms.LABEL_CTX_DRAFTER not in stamps and arms.LABEL_CTX_STATED not in stamps
+    control = ctxset.run_stamps(s, "control", {T1: "1", T2: "0"})[T1]
+    assert not any(k.startswith("ctx_plan_") for k in control)
+
+
+def test_a_plan_set_round_trips_and_its_digest_ignores_key_order_and_text() -> None:
+    s = ctxset.parse(_plan_doc())
+    again = ctxset.parse(json.loads(json.dumps(s.to_doc())))
+    assert again.digest == s.digest == ctxset.canonical_digest(s.to_doc())
+    shuffled = dict(reversed(list(_plan_doc().items())))
+    assert ctxset.parse(shuffled).digest == s.digest
+    with_text = _plan_doc()
+    for raw, e in zip(with_text["entries"], s.entries, strict=True):
+        raw["text"] = e.text
+    assert ctxset.parse(with_text).digest == s.digest
+    moved = _plan_doc()
+    moved["entries"][0]["plan"]["steps"].append("One more step")
+    assert ctxset.parse(moved).digest != s.digest
+    assert ctxset.parse(_plan_doc(accepted_by="none")).digest != s.digest
+
+
+def test_the_plan_source_is_v3_only_and_v3_is_the_plan_source_only() -> None:
+    with _refused("ctxset_schema"):
+        ctxset.parse(_plan_doc(schema=ctxset.SCHEMA_V2))
+    with _refused("ctxset_schema"):
+        ctxset.parse(_plan_doc(schema=ctxset.SCHEMA))
+    v3_oracle = _oracle_doc()
+    v3_oracle["schema"] = ctxset.SCHEMA_V3
+    with _refused("ctxset_schema"):
+        ctxset.parse(v3_oracle)
+
+
+def test_a_plan_placebo_is_refused() -> None:
+    assert "plan-placebo" not in ctxset.SOURCES
+    with _refused("ctxset_schema"):
+        ctxset.parse(_plan_doc(source="plan-placebo", matched_to="d" * 64))
+
+
+@pytest.mark.parametrize(
+    "saw", [["ticket", "diff"], ["tests", "ticket"], ["tree"], [], ["diff", "tests", "ticket"]]
+)
+def test_a_drafter_that_saw_the_change_or_not_the_ticket_is_ctxset_plan_saw(
+    saw: list[str],
+) -> None:
+    with _refused("ctxset_plan_saw"):
+        ctxset.parse(_plan_doc(saw=saw))
+
+
+@pytest.mark.parametrize("saw", [["ticket", "parent"], "ticket", ["tree", "ticket"]])
+def test_a_malformed_saw_is_ctxset_schema(saw: Any) -> None:
+    with _refused("ctxset_schema"):
+        ctxset.parse(_plan_doc(saw=saw))
+
+
+@pytest.mark.parametrize("accepted_by", ["", "someone", "human:", "model:x@y", 1, None])
+def test_an_unnamed_acceptor_is_ctxset_plan_accepted(accepted_by: Any) -> None:
+    with _refused("ctxset_plan_accepted"):
+        ctxset.parse(_plan_doc(accepted_by=accepted_by))
+
+
+def test_an_unaccepted_plan_says_so() -> None:
+    s = ctxset.parse(_plan_doc(accepted_by="none"))
+    assert s.accepted_by == "none"
+    stamps = ctxset.run_stamps(s, "entries", {T1: "1", T2: "1"})[T2]
+    assert stamps[arms.LABEL_CTX_PLAN_ACCEPTED] == "none"
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda d: d.pop("accepted_by"),
+        lambda d: d.pop("drafter"),
+        lambda d: d.update(drafter="a person"),
+        lambda d: d.update(extra="x"),
+        lambda d: d["entries"][0].pop("source_rev"),
+        lambda d: d["entries"][0].update(source_rev="HEAD"),
+        lambda d: d["entries"][0].update(mechanical=True),
+        lambda d: d["entries"][0].pop("plan"),
+        lambda d: d["entries"][0]["plan"].pop("files"),
+        lambda d: d["entries"][0]["plan"].update(notes=["x"]),
+        lambda d: d["entries"][0]["plan"].update(steps="one step"),
+        lambda d: d.update(entries=list(reversed(d["entries"]))),
+    ],
+)
+def test_a_malformed_plan_set_is_ctxset_schema(mutate: Any) -> None:
+    doc = _plan_doc()
+    mutate(doc)
+    with _refused("ctxset_schema"):
+        ctxset.parse(doc)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda p: p.update(summary=[]),
+        lambda p: p.update(steps=[]),
+        lambda p: p.update(steps=[" padded"]),
+        lambda p: p.update(steps=["two\nlines"]),
+        lambda p: p.update(steps=["use ```x = 1```"]),
+    ],
+)
+def test_a_plan_that_breaks_its_shape_is_ctxset_plan_shape(mutate: Any) -> None:
+    doc = _plan_doc()
+    mutate(doc["entries"][0]["plan"])
+    with _refused("ctxset_plan_shape"):
+        ctxset.parse(doc)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda p: p.update(steps=[f"step {i}" for i in range(81)]),
+        lambda p: p.update(files=[f"f{i}.go" for i in range(41)]),
+        lambda p: p.update(decisions=[f"d{i}" for i in range(25)]),
+        lambda p: p.update(summary=["x" * 601]),
+        lambda p: p.update(steps=["y" * 500 for _ in range(17)]),
+        # the limits hold on the rendered text: 78 plan lines render to 82 lines, and a
+        # 599-character summary bullet renders to 601 characters
+        lambda p: p.update(steps=[f"step {i}" for i in range(76)]),
+        lambda p: p.update(summary=["x" * 599]),
+        lambda p: p.update(steps=["z" * 598]),
+    ],
+)
+def test_a_plan_over_the_fixed_limits_is_ctxset_plan_length(mutate: Any) -> None:
+    doc = _plan_doc()
+    mutate(doc["entries"][0]["plan"])
+    with _refused("ctxset_plan_length"):
+        ctxset.parse(doc)
+
+
+def test_a_stored_text_that_is_not_the_rendering_is_ctxset_plan_render() -> None:
+    doc = _plan_doc()
+    doc["entries"][0]["text"] = "Do what the tests want."
+    with _refused("ctxset_plan_render"):
+        ctxset.parse(doc)
+
+
+def test_the_stated_set_limits_are_unchanged_by_the_plan_limits() -> None:
+    from crb.core import stated
+
+    assert (stated.MAX_ITEMS, stated.MAX_STATEMENT_CHARS, stated.MAX_ENTRY_CHARS) == (12, 240, 1600)
+    assert stated.SPAN_TOKENS == 8
+
+
+def test_a_plan_set_records_gaps_and_stamps_them_only_when_measured() -> None:
+    doc = _plan_doc()
+    doc["entries"][0]["gaps"] = [{"question": "Which error text?", "decision": "error_text"}]
+    s = ctxset.parse(doc)
+    assert s.digest != ctxset.parse(_plan_doc()).digest
+    assert (
+        ctxset.parse({**_plan_doc()}).digest
+        == ctxset.parse(
+            _plan_doc(entries=[{**e, "gaps": []} for e in _plan_doc()["entries"]])
+        ).digest
+    )
+    plain = ctxset.run_stamps(s, "entries", {T1: "1", T2: "1"})
+    assert arms.LABEL_CTX_OPEN_GAPS not in plain[T1]
+    measured = ctxset.run_stamps(s, "entries", {T1: "1", T2: "1"}, measure_open_gaps=True)
+    assert measured[T1][arms.LABEL_CTX_OPEN_GAPS] == "1"
+    assert arms.LABEL_CTX_OPEN_GAPS not in measured[T2]
+
+
+def test_a_plan_entry_off_its_tasks_parent_is_refused_at_run_time() -> None:
+    s = ctxset.parse(_plan_doc())
+    ctxset.verify_source_revs(s, {T1: P1, T2: P2})
+    with _refused("ctxset_mechanical"):
+        ctxset.verify_source_revs(s, {T1: P2, T2: P2})

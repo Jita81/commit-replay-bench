@@ -44,7 +44,8 @@ How:          Pure functions over ``GradeRow`` values and parsed ``CtxSet`` valu
               passes in (it reads no store).
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0052-stated-requirement-arms.md,
-              docs/adr/0025-routing-v2.md (first attempts)
+              docs/adr/0054-accepted-plan-context-arm.md (a plan arm never pools with another
+              kind), docs/adr/0025-routing-v2.md (first attempts)
 Works with:   src/crb/core/ctxset.py (the set record), src/crb/core/ledger.py
               (``first_attempts``), src/crb/core/reading.py (``mcnemar_p``),
               src/crb/core/stats.py (``wilson_interval``), src/crb/server/routes/ctxsets.py
@@ -80,6 +81,7 @@ from crb.core.context_arm import (
     LABEL_CTX_TURNS,
     ctx_set_name,
     hindsight_arm,
+    plan_arm,
     stated_arm,
 )
 from crb.core.ctxset import CtxSet
@@ -341,6 +343,12 @@ class CtxPair:
     def stated(self) -> bool:
         """A stated-requirement treatment (``ctx.req*``, ADR-0052)."""
         return stated_arm(self.treatment_arm)
+
+    @property
+    def planned(self) -> bool:
+        """An accepted-plan treatment (``ctx.plan*``, ADR-0054): not a ceiling (the plan was
+        written before the build), still measurement-only."""
+        return plan_arm(self.treatment_arm)
 
     @property
     def drift(self) -> bool:
@@ -629,6 +637,12 @@ def ctx_pair(
     c_arm = _one_arm(control, "control") if control else BASE_A0
     c_digests = {r.labels.get(LABEL_CTX_SET, "") for r in control}
     head_to_head = False
+    if ctx_set_name(c_arm) and plan_arm(c_arm) != plan_arm(t_arm):
+        # ADR-0054: a plan written before the build and a brief written from the answer (or
+        # drafted mechanically) answer different questions; their rows never pool
+        raise CtxPairRefused(
+            REASON_BLEND, f"an accepted-plan arm paired with another kind: {c_arm!r}, {t_arm!r}"
+        )
     if tset.stated and len(c_digests) == 1:
         # a control run (plain A0) or an entries run of any stated set over the same items
         # links: two structures over one items digest share one control (ADR-0052 item 5);
