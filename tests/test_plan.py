@@ -36,8 +36,7 @@ FULL = PlanBody(
 
 def test_the_rendering_is_fixed_byte_for_byte() -> None:
     assert p.render(FULL) == (
-        "Accepted implementation plan for this change (written before the build from the "
-        "ticket and the parent tree):\n"
+        "Implementation plan for this change:\n"
         "Summary:\n"
         "- Refuse an empty name\n"
         "Files:\n"
@@ -45,11 +44,19 @@ def test_the_rendering_is_fixed_byte_for_byte() -> None:
         "Steps:\n"
         "1. Check the name first\n"
         "2. Raise an error when it is empty\n"
-        "Settled decisions:\n"
+        "Decisions:\n"
         "- Existing callers keep working\n"
         "Tests:\n"
         "- A test that an empty name is refused"
     )
+
+
+def test_the_header_and_headings_claim_nothing_the_set_may_not_hold() -> None:
+    """The frame is the same for every plan set: whether the plan was accepted, and what its
+    drafter saw, are row stamps, never words the builder reads (ADR-0054 item 2)."""
+    frame = " ".join((p.PLAN_HEADER, *p.SECTION_HEADINGS.values())).lower()
+    for claim in ("accepted", "settled", "agreed", "reviewed", "ticket", "tree", "before"):
+        assert claim not in frame, claim
 
 
 def test_an_empty_optional_section_is_left_out() -> None:
@@ -135,6 +142,7 @@ def test_the_reason_names_and_saw_values_are_fixed() -> None:
         "plan_test_path",
         "plan_test_span",
         "plan_gold_span",
+        "plan_gold_line",
         "plan_asserted_literal",
         "plan_no_gold",
     )

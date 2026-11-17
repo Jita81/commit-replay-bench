@@ -193,6 +193,99 @@ def test_the_reasons_are_sorted_and_named_from_the_plan_vocabulary() -> None:
     assert {p.REASON_TEST_NAME, p.REASON_TEST_PATH, p.REASON_TEST_SPAN} <= set(why)
 
 
+# -- review fixes: the renderer's own words, short copies, split literals ----------------------
+
+
+FULL_SECTIONS = plan(
+    "Check the name before it is used",
+    files=("src/app/names.py",),
+    decisions=("Existing callers keep working",),
+    tests=("A test that an empty name is refused",),
+)
+
+
+def test_the_header_and_headings_never_trip_the_test_name_or_path_checks() -> None:
+    """A held-out test whose fixture, class or file stem is a word of the renderer's own
+    header or headings (``steps``, ``Tests``, ``plan``, ``summary``) withholds no plan: the
+    checks read the plan's own lines, never the frame the renderer adds."""
+    view = gold(
+        test_after="class Tests:\n    def test_x(steps):\n        assert steps\n",
+        test_added=("class Tests:", "    def test_x(steps):", "        assert steps"),
+        test_paths=(
+            "test/plan.test.js",
+            "src/__tests__/summary.test.js",
+            "spec/decisions.spec.js",
+            "test/change.test.js",
+        ),
+    )
+    assert p.render(FULL_SECTIONS).count(":") >= 5  # the header and every heading are there
+    assert plan_guard(FULL_SECTIONS, view) == ()
+    # a word the plan's own lines use is still checked
+    assert p.REASON_TEST_NAME in plan_guard(plan("Walk the steps in order"), view)
+    assert p.REASON_TEST_PATH in plan_guard(plan("Write the summary first"), view)
+
+
+def test_the_novel_count_reads_the_plans_own_lines_not_the_header() -> None:
+    e = entry(FULL_SECTIONS)
+    words = frozenset({"Implementation", "Decisions", "Summary"})
+    composed = _compose(PLAN_ARM, (e,), novel=frozenset(), gold=gold(novel=words))
+    assert composed.brief.plan == e.text
+    assert composed.labels[LABEL_CTX_PLAN_NOVEL] == "0"
+
+
+def _short_fix(**kw: Any) -> GoldView:
+    return gold(
+        novel=frozenset(),
+        src_after="def clamp(x, lo=0, hi=3):\n    return max(lo, min(x, hi))\n",
+        src_added=("    return max(lo, min(x, hi))",),
+        test_after="def test_clamp_bounds():\n    assert clamp(5) == 3\n",
+        test_added=("    assert clamp(5) == 3",),
+        test_paths=("tests/test_clamp_bounds.py",),
+        **kw,
+    )
+
+
+def test_a_short_change_copied_whole_is_refused_however_few_its_tokens() -> None:
+    src = plan("Replace the body with: return max(lo, min(x, hi))")
+    test = plan("Make sure clamp(5) == 3 holds")
+    spaced = plan("Use MAX( lo ,min( x,hi ) );")
+    for body in (src, test, spaced):
+        why = plan_guard(body, _short_fix())
+        assert p.REASON_GOLD_LINE in why, body
+        assert p.REASON_GOLD_SPAN not in why and p.REASON_TEST_SPAN not in why, body
+    split = plan("Return max(lo,", "min(x, hi)) from clamp")
+    assert p.REASON_GOLD_LINE in plan_guard(split, _short_fix())
+
+
+def test_a_gold_line_the_request_or_the_parent_holds_or_prose_is_not_a_copy() -> None:
+    body = plan("Replace the body with: return max(lo, min(x, hi))")
+    request = "fix: clamp should return max(lo, min(x, hi))"
+    assert p.REASON_GOLD_LINE not in plan_guard(body, _short_fix(), request)
+    held = "    return max(lo, min(x, hi))  # an older copy of the line"
+    parent = _short_fix(parent_has=lambda tok: tok in held)
+    assert p.REASON_GOLD_LINE not in plan_guard(body, parent)
+    # under GOLD_LINE_MIN, or with no code character, a line is the span rules' to judge
+    short = gold(novel=frozenset(), src_added=("    x = f(y)",), test_added=())
+    assert plan_guard(plan("Set x = f(y) first"), short) == ()
+    prose = gold(novel=frozenset(), src_added=("    # Return the clamped value",), test_added=())
+    assert plan_guard(plan("Return the clamped value"), prose) == ()
+    assert plan_guard(CLEAN, _short_fix()) == ()
+
+
+def test_an_asserted_literal_split_across_plan_lines_is_refused() -> None:
+    view = gold(
+        novel=frozenset(),
+        test_added=("    with pytest.raises(ValueError, match='duration must be positive here'):",),
+    )
+    one = plan("Raise ValueError with message: duration must be positive here")
+    split = plan("Raise ValueError with message: duration must", "be positive here")
+    assert p.REASON_ASSERTED_LITERAL in plan_guard(one, view)
+    assert p.REASON_ASSERTED_LITERAL in plan_guard(split, view)
+    assert p.REASON_ASSERTED_LITERAL not in plan_guard(
+        split, view, "duration must be positive here"
+    )
+
+
 # -- admission at the parent ------------------------------------------------------------------
 
 

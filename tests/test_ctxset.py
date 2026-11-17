@@ -484,7 +484,7 @@ def test_a_plan_set_parses_names_itself_and_stamps_its_provenance() -> None:
     assert s.accepted_by == "human:requester-01"
     assert s.saw == ("ticket", "tree")
     assert all(not e.mechanical and e.plan is not None for e in s.entries)
-    assert s.entries[0].text.startswith("Accepted implementation plan")
+    assert s.entries[0].text.startswith("Implementation plan for this change:\n")
     stamps = ctxset.run_stamps(s, "entries", {T1: "1", T2: "0"})[T1]
     assert stamps[arms.LABEL_CTX_PLAN_DRAFTER] == "human:planner-01"
     assert stamps[arms.LABEL_CTX_PLAN_SAW] == "ticket,tree"

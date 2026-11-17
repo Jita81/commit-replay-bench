@@ -39,7 +39,10 @@ tests would hand the builder the answer under another name.
    `summary` and `steps` are never empty. Entries may carry ADR-0053 `gaps`.
 2. **Rendered by code.** The text the builder reads is rendered from the plan by
    `crb.core.plan.render`: one fixed header, then each section as plain bullets (steps
-   numbered), with no indentation. A stored `text` must equal that rendering
+   numbered), with no indentation. The header and headings ("Implementation plan for this
+   change:", "Decisions:") claim nothing the set may not hold: whether the plan was accepted
+   and what its drafter saw are row stamps, never words the builder reads, so every plan set's
+   builder reads the same frame. A stored `text` must equal that rendering
    (`ctxset_plan_render`) and sits outside the digest, so the digest pins the plan, not its
    layout. Fixed limits hold per entry: 8000 characters, 80 lines, 600 characters a line, 40
    files and 24 decisions (`ctxset_plan_length`). They are new limits for a new schema; the
@@ -51,13 +54,20 @@ tests would hand the builder the answer under another name.
 4. **The guard: withheld whole.** At compose time, harness-side, each plan meets
    `plan_guard` against the gold view. It is withheld WHOLE, never trimmed, when:
    - its text is not its rendering (`plan_render`) or it breaks a limit (`plan_length`);
-   - it holds a code block, a held-out test's name or a held-out test's path or stem
-     (`plan_code_block`, `plan_test_name`, `plan_test_path`: the checks `req_guard` makes,
-     now one shared function, pinned equal to the old inline checks);
+   - its own lines hold a code block, a held-out test's name or a held-out test's path or
+     stem (`plan_code_block`, `plan_test_name`, `plan_test_path`: the checks `req_guard`
+     makes, now one shared function, pinned equal to the old inline checks). They read the
+     plan's lines, never the renderer's header and headings, whose words a held-out test may
+     share;
    - its lines, read together, share an eight-token run with the change's added test lines
      (`plan_test_span`) or added source lines (`plan_gold_span`);
-   - a line repeats four words in a row of a string literal an added test may assert, which
-     neither the request nor the parent holds (`plan_asserted_literal`);
+   - its lines, read together, hold a whole added source or test line of code, or that
+     line's body past one leading word, whitespace and case aside: at least 10 characters
+     with a bracket, `=`, `<` or `>`, which neither the request nor the parent holds
+     (`plan_gold_line`). A one-line fix has fewer than eight tokens, so the span rules alone
+     cannot see its copy;
+   - its lines, read together, repeat four words in a row of a string literal an added test
+     may assert, which neither the request nor the parent holds (`plan_asserted_literal`);
    - there is no gold view (`plan_no_gold`: it fails closed).
    A withheld plan is counted as refused, and its reasons are stamped on the row.
 5. **Novel tokens are counted, not refused.** A plan written before the build may name what
@@ -75,7 +85,10 @@ tests would hand the builder the answer under another name.
    plus `ctx_plan_refused` (sorted guard reasons) when a plan was withheld and
    `ctx_plan_novel` when one was kept. It carries no `ctx_drafter` and no `ctx_ceiling`. The
    ledger refuses a plan row that lacks a stamp or whose stamps disagree with these rules, and
-   refuses a plan stamp on any other row.
+   refuses a plan stamp on any other row. `ctx_plan_novel` counts over the plan's own lines.
+   `drafter`, `saw` and `accepted_by` are what the operator who stored the set says, as with
+   a stated set's `drafter`: the server checks their form, not that the named person drafted
+   or accepted the plan.
 9. **Measurement-only, never pooled.** The arm `A0+library@ctx.plan.<hex12>` is
    measurement-only like every context-set arm. It pairs with its own plain `A0` control. The
    paired reader refuses to pair it with an entries run of another kind (`ctx_pair_blend`),
@@ -104,15 +117,19 @@ This is a new arm with a guard of its own, not a relaxed gate. No source but `pl
 
 - A team's own planning step can be measured on real commits: the pass rate with an accepted
   plan against the same builder without one, with n and Wilson intervals, by exact test.
-- A plan that copies the change or names its held-out tests never reaches the builder; the row
-  says why.
+- A plan that names its held-out tests, copies eight tokens of the change in a row, or copies
+  a whole added line of code never reaches the builder; the row says why. A plan that
+  paraphrases a short change in fewer than eight tokens, without a whole line of it, is not
+  caught: the guard finds copies, not ideas.
 - A plan that names what the build will add is delivered. The count is on the row; no reader
   splits on it yet [gap].
 - There is no placebo for a plan yet, so a lift cannot yet be told apart from the effect of
   any extra text of that length [gap].
 - Whether a plan was really written before the change is the drafter's claim. The record names
   the drafter, what they saw and who accepted, and the parent check holds, but the timing
-  itself is attested, not proven.
+  itself is attested, not proven. So are `drafter`, `saw` and `accepted_by`: they are the
+  storing operator's claims, not checked against any account, so `ctx_plan_accepted` reads
+  "the operator says this person accepted it", not a verified acceptance.
 - `GET /ctxsets/{name}` and the UI's API types carry `planned` and `accepted_by`. No page
   shows them or the plan stamps yet [gap].
 

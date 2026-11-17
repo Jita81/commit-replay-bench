@@ -292,13 +292,16 @@ The body is `{schema, source: "plan", repo, method, drafter, saw, accepted_by, e
 - `saw` is `["ticket"]` or `["ticket", "tree"]`: the drafter saw the ticket and, optionally,
   the parent tree, never the change or its tests (else **422 `ctxset_plan_saw`**);
 - `accepted_by` is `human:<id>` or `none` (else **422 `ctxset_plan_accepted`**);
+- `drafter`, `saw` and `accepted_by` are the storing operator's claims: their form is
+  checked, not that the named person drafted or accepted the plan;
 - each entry is `{task_id, entry_id, version, produced_at, source_rev, plan, gaps?, text?}`,
   where `source_rev` is the task's parent commit and `plan` is
   `{summary, files, steps, decisions, tests}`, each a list of one-line strings, with
   `summary` and `steps` never empty (else **422 `ctxset_plan_shape`**).
 
-The text the builder reads is rendered by code from the plan (`crb.core.plan.render`). A
-stored `text` must equal it (**422 `ctxset_plan_render`**) and is outside the digest. A plan
+The text the builder reads is rendered by code from the plan (`crb.core.plan.render`), under
+one header and headings that claim nothing about acceptance or sight. A stored `text` must
+equal it (**422 `ctxset_plan_render`**) and is outside the digest. A plan
 past any limit in this table is refused (**422 `ctxset_plan_length`**); the stated-set limits
 of ADR-0052 are unchanged.
 
@@ -317,13 +320,15 @@ Entries may carry ADR-0053 `gaps`, and a run over a plan set with open gaps meet
   commit, before anything is built.
 - **At compose.** `plan_guard` checks each plan, harness-side, against the change it never
   sees. It withholds the plan WHOLE on `plan_render`, `plan_length`, `plan_code_block`,
-  `plan_test_name`, `plan_test_path`, `plan_test_span` (an eight-token run shared with the
-  change's added test lines), `plan_gold_span` (the same with its added source lines),
-  `plan_asserted_literal` or `plan_no_gold`. A kept plan reaches the brief's own plan block.
+  `plan_test_name`, `plan_test_path` (both on the plan's own lines, never the header and
+  headings), `plan_test_span` (an eight-token run shared with the change's added test lines),
+  `plan_gold_span` (the same with its added source lines), `plan_gold_line` (a whole added
+  line of code, however short in tokens), `plan_asserted_literal` (on the plan's lines read
+  together) or `plan_no_gold`. A kept plan reaches the brief's own plan block.
 - **Stamps.** Each entries row carries `ctx_plan_drafter`, `ctx_plan_saw` (comma-joined) and
   `ctx_plan_accepted`; `ctx_plan_refused` (the sorted reasons) when the plan was withheld;
-  `ctx_plan_novel` (how many tokens the change introduced the plan names, counted, never
-  refused) when it was kept. A plan row carries no `ctx_drafter` and no `ctx_ceiling`, and no
+  `ctx_plan_novel` (how many tokens the change introduced the plan's own lines name, counted,
+  never refused) when it was kept. A plan row carries no `ctx_drafter` and no `ctx_ceiling`, and no
   other row carries a plan stamp; the ledger refuses either.
 - **Reading.** `GET /ctxsets/compare` pairs a plan run with its plain `A0` control. It refuses
   a plan arm paired with an entries run of another kind (**422 `ctx_pair_blend`**).

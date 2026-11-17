@@ -1221,6 +1221,49 @@ def _text_guard(text: str, gold: GoldView, *, prefix: str) -> set[str]:
 
 # --- the accepted-plan guard (ADR-0054) ---------------------------------------------------
 
+#: The fewest characters (whitespace dropped) an added line, or its body past one leading
+#: bare word, must hold for ``plan_gold_line`` to look for it in a plan.
+GOLD_LINE_MIN = 10
+#: A gold line ``plan_gold_line`` looks for holds at least one of these: it reads as code,
+#: not prose (prose copies are the span rules' job).
+_GOLD_LINE_CODE_CHARS = frozenset("()[]{}=<>")
+#: One leading bare word of an added line (``assert``, ``return``, ``expect``, ``const``…):
+#: the line's body past it is looked for too, so ``check clamp(5) == 3`` copies
+#: ``assert clamp(5) == 3``.
+_GOLD_LINE_LEAD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\s+")
+
+
+def _squash(text: str) -> str:
+    """``text`` lower-cased with all whitespace dropped."""
+    return "".join(text.split()).lower()
+
+
+def _gold_line(text: str, gold: GoldView, request: str) -> bool:
+    """Whether ``text`` holds a whole line the change added to its source or tests, or that
+    line's body past one leading bare word (:data:`_GOLD_LINE_LEAD_RE`), case- and
+    whitespace-insensitively, with trailing ``;``, ``,``, ``:`` and ``{`` dropped: a fragment
+    of at least :data:`GOLD_LINE_MIN` characters holding a code character
+    (:data:`_GOLD_LINE_CODE_CHARS`) that neither ``request`` nor the parent tree holds.
+
+    It catches the copy of a short change that the eight-token span rules cannot see: a
+    one-line fix has fewer than eight tokens after stopwords."""
+    said = _squash(text)
+    asked = _squash(request)
+    for line in (*gold.src_added, *gold.test_added):
+        stripped = line.strip().rstrip(";,:{").strip()
+        lead = _GOLD_LINE_LEAD_RE.match(stripped)
+        for fragment in (stripped, stripped[lead.end() :] if lead else ""):
+            squashed = _squash(fragment)
+            if (
+                len(squashed) >= GOLD_LINE_MIN
+                and not _GOLD_LINE_CODE_CHARS.isdisjoint(squashed)
+                and squashed in said
+                and squashed not in asked
+                and not gold.parent_has(fragment)
+            ):
+                return True
+    return False
+
 
 def plan_guard(
     plan: _plan.PlanBody,
@@ -1234,15 +1277,19 @@ def plan_guard(
 
     ``plan_render``: ``text`` (when given) is not the plan's rendering, or the plan breaks
     its shape. ``plan_length``: a fixed limit is broken. ``plan_code_block``,
-    ``plan_test_name`` and ``plan_test_path``: :func:`_text_guard`'s checks.
-    ``plan_test_span``: the plan's lines, read together in order on the change's token
-    vocabulary, share a :data:`~crb.core.stated.SPAN_TOKENS`-token run with the change's
-    added test lines; ``plan_gold_span``: the same with its added source lines (a plan
-    restates the change's code, which it was written without). ``plan_asserted_literal``: a
-    plan line repeats four words in a row of a string literal an added held-out test line may
-    assert that neither ``request`` nor the parent holds. A token the change introduced that
-    the plan names is NOT a reason: a plan written before the build may name what the build
-    will add; :func:`plan_novel` counts it for the row."""
+    ``plan_test_name`` and ``plan_test_path``: :func:`_text_guard`'s checks, on the plan's
+    own lines only — never the fixed header and headings the renderer adds, whose words a
+    held-out test may share (the rendering adds no fence and no indentation, so the code-block
+    check reads the same either way). ``plan_test_span``: the plan's lines, read together in
+    order on the change's token vocabulary, share a :data:`~crb.core.stated.SPAN_TOKENS`-token
+    run with the change's added test lines; ``plan_gold_span``: the same with its added source
+    lines (a plan restates the change's code, which it was written without);
+    ``plan_gold_line``: the plan's lines, read together, hold a whole added source or test
+    line of code (:func:`_gold_line`), however few its tokens. ``plan_asserted_literal``: the
+    plan's lines, read together, repeat four words in a row of a string literal an added
+    held-out test line may assert that neither ``request`` nor the parent holds. A token the
+    change introduced that the plan names is NOT a reason: a plan written before the build may
+    name what the build will add; :func:`plan_novel` counts it for the row."""
     if gold is None:
         return (_plan.REASON_NO_GOLD,)
     reasons: set[str] = set()
@@ -1254,22 +1301,25 @@ def plan_guard(
         reasons.add(_plan.REASON_RENDER)
     if _plan.length_violation(plan, rendered):
         reasons.add(_plan.REASON_LENGTH)
-    reasons.update(_text_guard(rendered, gold, prefix="plan"))
     lines = plan.lines()
+    reasons.update(_text_guard("\n".join(lines), gold, prefix="plan"))
     whole = " ".join(lines)
     n = _stated.SPAN_TOKENS
     if _copied_span(whole, gold.test_added, n):
         reasons.add(_plan.REASON_TEST_SPAN)
     if _copied_span(whole, gold.src_added, n):
         reasons.add(_plan.REASON_GOLD_SPAN)
-    if any(_asserted_literal(line, gold, request) for line in lines):
+    if _gold_line(whole, gold, request):
+        reasons.add(_plan.REASON_GOLD_LINE)
+    if _asserted_literal(whole, gold, request):
         reasons.add(_plan.REASON_ASSERTED_LITERAL)
     return tuple(sorted(reasons))
 
 
 def plan_novel(text: str, gold: GoldView | None) -> int:
     """How many tokens the change introduced (``gold.novel``) ``text`` names, case- and
-    whitespace-insensitively; ``0`` with no gold view. Counted on the row, never refused."""
+    whitespace-insensitively; ``0`` with no gold view. Counted on the row, never refused.
+    The composer passes the kept plans' own lines, never the renderer's header and headings."""
     if gold is None:
         return 0
     return sum(1 for tok in gold.novel if _names_ci(text, tok))
@@ -1464,7 +1514,8 @@ def compose(
     if plan_reasons:
         labels[LABEL_CTX_PLAN_REFUSED] = ",".join(sorted(plan_reasons))
     if plan_kept:
-        labels[LABEL_CTX_PLAN_NOVEL] = str(plan_novel(plan_text, gold))
+        plan_lines = "\n".join(ln for e in plan_kept if e.plan for ln in e.plan.lines())
+        labels[LABEL_CTX_PLAN_NOVEL] = str(plan_novel(plan_lines, gold))
     return Composed(brief=brief, labels=labels, refused=refused, library=kept_entries)
 
 

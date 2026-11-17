@@ -7,9 +7,11 @@ A plan entry is never free text. Its drafter writes five sections of one-line st
      "decisions": ["..."], "tests": ["..."]}
 
 and the text the builder reads is rendered BY CODE (:func:`render`): one fixed header, then
-``Summary:``, ``Files:``, ``Steps:`` (numbered ``1.``, ``2.``…), ``Settled decisions:`` and
+``Summary:``, ``Files:``, ``Steps:`` (numbered ``1.``, ``2.``…), ``Decisions:`` and
 ``Tests:``, each line a ``- `` bullet with no indentation (a section with no lines is left
-out). ``summary`` and ``steps`` are never empty.
+out). ``summary`` and ``steps`` are never empty. The header and headings claim nothing about
+who drafted or accepted the plan or what its drafter saw: those are the set's stamps on the
+row, not words in the brief, so every plan set's builder reads the same frame.
 
 The plan was written BEFORE the build, from the ticket and the parent tree only — never from
 the change or its tests — and accepted by the person who asked for the change (or by no one,
@@ -36,7 +38,8 @@ Works with:   src/crb/core/ctxset.py (the ``crb.ctxset.v3`` record whose entries
 Tested by:    tests/test_plan.py
 Touch when:   never for a new repository; a section, the renderer or a limit changes (a new
               ADR first: a renderer change moves every rendered text).
-Claims:       A rendered plan says what its drafter planned and who accepted it; the set's
+Claims:       A rendered plan says what its drafter planned; who drafted and accepted it, and
+              what they saw, are the storing operator's claims, stamped on the row. The set's
               digest says it is unaltered, not that the plan is right (ADR-0054).
 """
 
@@ -64,11 +67,9 @@ MAX_DECISIONS = 24
 MAX_LINES = 80
 MAX_FILES = 40
 
-#: The one header the renderer opens with.
-PLAN_HEADER = (
-    "Accepted implementation plan for this change "
-    "(written before the build from the ticket and the parent tree):"
-)
+#: The one header the renderer opens with. It claims nothing the set may not hold (that the
+#: plan was accepted, or what its drafter saw): ``accepted_by`` and ``saw`` are row stamps.
+PLAN_HEADER = "Implementation plan for this change:"
 
 #: The sections, in render order, with their headings.
 SECTIONS: tuple[str, ...] = ("summary", "files", "steps", "decisions", "tests")
@@ -76,7 +77,7 @@ SECTION_HEADINGS: dict[str, str] = {
     "summary": "Summary:",
     "files": "Files:",
     "steps": "Steps:",
-    "decisions": "Settled decisions:",
+    "decisions": "Decisions:",
     "tests": "Tests:",
 }
 #: The sections a plan never leaves empty.
@@ -90,6 +91,7 @@ REASON_TEST_NAME = "plan_test_name"
 REASON_TEST_PATH = "plan_test_path"
 REASON_TEST_SPAN = "plan_test_span"
 REASON_GOLD_SPAN = "plan_gold_span"
+REASON_GOLD_LINE = "plan_gold_line"
 REASON_ASSERTED_LITERAL = "plan_asserted_literal"
 REASON_NO_GOLD = "plan_no_gold"
 PLAN_REASONS: tuple[str, ...] = (
@@ -100,6 +102,7 @@ PLAN_REASONS: tuple[str, ...] = (
     REASON_TEST_PATH,
     REASON_TEST_SPAN,
     REASON_GOLD_SPAN,
+    REASON_GOLD_LINE,
     REASON_ASSERTED_LITERAL,
     REASON_NO_GOLD,
 )
@@ -218,6 +221,7 @@ __all__ = [
     "PLAN_SAW_VALUES",
     "REASON_ASSERTED_LITERAL",
     "REASON_CODE_BLOCK",
+    "REASON_GOLD_LINE",
     "REASON_GOLD_SPAN",
     "REASON_LENGTH",
     "REASON_NO_GOLD",

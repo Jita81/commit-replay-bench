@@ -142,7 +142,7 @@ def test_an_existing_arms_brief_is_unchanged(
     assert labels == {"context_arm": arm, **expected}
     assert composed.brief.plan == ""
     assert "plan" not in composed.brief.to_dict()
-    assert "Accepted implementation plan" not in composed.brief.task_text()
+    assert "Implementation plan for this change" not in composed.brief.task_text()
 
 
 def test_the_v1_and_v2_digests_are_unchanged() -> None:

@@ -93,7 +93,7 @@ def test_brief_task_text_has_rules_and_message() -> None:
 def test_brief_task_text_carries_an_accepted_plan_after_the_known_facts() -> None:
     """ADR-0054: a plan reaches the builder as its own block, after the known facts and
     before any repair note; a brief without one reads and serialises exactly as before."""
-    plan = "Accepted implementation plan for this change:\nSteps:\n1. Check the name"
+    plan = "Implementation plan for this change:\nSteps:\n1. Check the name"
     b = base.BuildBrief(
         "subj", "subj", "r", "python", spec_facts=("adds a flag",), plan=plan, repair_note="E501"
     )
@@ -103,7 +103,7 @@ def test_brief_task_text_carries_an_accepted_plan_after_the_known_facts() -> Non
     assert b.to_dict()["plan"] == plan
     plain = base.BuildBrief("subj", "subj", "r", "python", spec_facts=("adds a flag",))
     assert "plan" not in plain.to_dict()
-    assert "Accepted implementation plan" not in plain.task_text()
+    assert "Implementation plan" not in plain.task_text()
     blank = base.BuildBrief("subj", "subj", "r", "python", spec_facts=("adds a flag",), plan="  ")
     assert blank.task_text() == plain.task_text()
 
