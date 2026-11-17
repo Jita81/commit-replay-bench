@@ -26,8 +26,10 @@ text, and a test that a team names after its behaviour leads the drafter to the 
 a guarded arm that plan is withheld, so the arm measures "plans that do not look like the
 answer", not "plans written before the build". [hypothesis] The plans most likely to help are
 the ones most likely to be withheld. Not measured: no run has compared delivered and withheld
-plans. It is supported if, on an audited arm, rows stamped `ctx_plan_would_refuse` are clean
-more often than delivered rows without the stamp, and refuted if they are not.
+plans. The test compares each group with its own matched `A0` controls, because the two groups
+may differ in task difficulty. It is supported if, on an audited arm, the gain in clean rate
+over matched controls is larger for rows stamped `ctx_plan_would_refuse` than for delivered
+rows without the stamp, and refuted if it is not.
 
 Where the drafting itself was audited (a person or a model read the drafter's prompt, the
 model it ran and its transcripts, and found no sight of the change), the text checks mostly
