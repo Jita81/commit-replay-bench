@@ -1309,6 +1309,14 @@ _TRIVIAL_WORDS = frozenset(
 _LINE_TOKEN_RE = re.compile(r"\w+|[^\w\s]")
 _WORD_RE = re.compile(r"\w+")
 _BRACKET_PAIRS = {")": "(", "]": "[", "}": "{"}
+#: The quotes that open a string literal for :func:`_scan_literals`.
+_QUOTES = frozenset("'\"`")
+#: A comment line for :func:`_executable_line` — its own test, not :data:`_COMMENT_LINE_RE`:
+#: ``*`` and ``--`` start a comment only when whitespace or the end of the line follows
+#: (`` * text``, ``-- text``), so ``*p = 1``, ``*ptr++`` and ``--count`` are code. A pointer
+#: line written ``* p = 1`` still reads as a comment: it cannot be told from a block-comment
+#: continuation, and a comment must never withhold a plan.
+_EXEC_COMMENT_RE = re.compile(r"^\s*(?://|#|/\*|\*/|\*(?:\s|$)|--(?:\s|$))")
 
 
 def _squash(text: str) -> str:
@@ -1334,10 +1342,35 @@ def _holds_run(seq: Sequence[str], run: Sequence[str]) -> bool:
     )
 
 
-def _balanced(line: str) -> bool:
-    """Whether every ``()``, ``[]`` and ``{}`` in ``line`` opens and closes within it."""
-    stack: list[str] = []
+def _scan_literals(line: str) -> tuple[str, int, bool]:
+    """``line`` read for string literals (``'``, ``"`` or a backtick, a backslash escaping
+    the next character): the text outside them, how many closed, and whether the last one
+    opened is left open."""
+    outside: list[str] = []
+    closed = 0
+    quote = ""
+    escaped = False
     for ch in line:
+        if not quote:
+            if ch in _QUOTES:
+                quote = ch
+                outside.append(" ")
+            else:
+                outside.append(ch)
+        elif escaped:
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == quote:
+            quote = ""
+            closed += 1
+    return "".join(outside), closed, bool(quote)
+
+
+def _brackets_balance(text: str) -> bool:
+    """Whether every ``()``, ``[]`` and ``{}`` in ``text`` opens and closes within it."""
+    stack: list[str] = []
+    for ch in text:
         if ch in "([{":
             stack.append(ch)
         elif ch in _BRACKET_PAIRS and (not stack or stack.pop() != _BRACKET_PAIRS[ch]):
@@ -1345,18 +1378,32 @@ def _balanced(line: str) -> bool:
     return not stack
 
 
+def _balanced(line: str) -> bool:
+    """Whether every ``()``, ``[]`` and ``{}`` outside a string literal in ``line`` opens and
+    closes within it, so ``f(")")`` balances. A quote left open (an apostrophe, a Rust
+    lifetime) may be no literal at all, so the line then balances when either reading does,
+    counting every bracket or only those outside literals: an open quote never hides a
+    copied line."""
+    outside, _closed, left_open = _scan_literals(line)
+    return _brackets_balance(outside) or (left_open and _brackets_balance(line))
+
+
 def _executable_line(stripped: str) -> bool:
     """Whether a normalised added line (stripped, trailing ``;``, ``,``, ``:`` and ``{``
     dropped) is a complete executable line that carries an answer: not a comment line
-    (``//``, ``#``, ``/*``, ``*``, ``--``), its brackets balanced, holding an operator or
-    bracket (:data:`_EXEC_OP_CHARS`) and a word that is not a bare keyword or literal
-    (:data:`_TRIVIAL_WORDS`). ``return g()`` and ``return limit + 1`` are; a blank line,
-    ``}``, ``)``, ``else {``, ``return``, ``return nil``, ``break``, a comment and a lone
-    identifier are not."""
-    if not stripped or _COMMENT_LINE_RE.match(stripped) or not _balanced(stripped):
+    (:data:`_EXEC_COMMENT_RE`: ``//``, ``#``, ``/*``, ``*/``, and ``*`` or ``--`` followed by
+    whitespace), its brackets balanced outside string literals (:func:`_balanced`), holding an
+    operator or bracket (:data:`_EXEC_OP_CHARS`) or a closed string literal beside other
+    text, and a word that is not a bare keyword or literal (:data:`_TRIVIAL_WORDS`).
+    ``return g()``, ``return limit + 1``, ``f(")")``, ``*p = 1`` and ``return "ok"`` are; a
+    blank line, ``}``, ``)``, ``else {``, ``return``, ``return nil``, ``return ""``, a bare
+    ``"name"``, ``break``, a comment and a lone identifier are not."""
+    if not stripped or _EXEC_COMMENT_RE.match(stripped) or not _balanced(stripped):
         return False
     if _EXEC_OP_CHARS.isdisjoint(stripped):
-        return False
+        outside, closed, _left_open = _scan_literals(stripped)
+        if not closed or not _WORD_RE.search(outside):
+            return False
     return any(w.lower() not in _TRIVIAL_WORDS for w in _WORD_RE.findall(stripped))
 
 

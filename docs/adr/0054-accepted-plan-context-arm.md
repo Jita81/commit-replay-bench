@@ -67,14 +67,20 @@ tests would hand the builder the answer under another name.
      line trimmed, without trailing `;`, `,`, `:` or `{`. (a) The line, or its body past one
      leading word, whitespace and case aside: at least 10 characters with a bracket, `=`,
      `<` or `>`. (b) The whole line, however short, when it is executable: it is not a
-     comment line, its brackets balance, it holds an operator or bracket
-     (`( ) [ ] { } = < > + - * / % ! & | ^ ~ . ?`), and it holds a word that is not a bare
-     keyword or literal (`return`, `else`, `nil`, `None`, `true` and the like). Rule (b)
+     comment line (`//`, `#`, `/*`, `*/`, or `*` or `--` followed by whitespace, so `*p = 1`
+     and `--count` are code; `* p = 1` reads as a comment continuation and is not caught),
+     its brackets balance outside string literals (a quote left open may be an apostrophe
+     or a prime, so then either reading balancing is enough), it holds an operator or
+     bracket (`( ) [ ] { } = < > + - * / % ! & | ^ ~ . ?`) or a closed string literal beside
+     other text (`return "ok"`, never a bare `"name"`), and it holds a word that is not a
+     bare keyword or literal (`return`, `else`, `nil`, `None`, `true` and the like). Rule (b)
      matches on whole tokens, case aside, so `Use return g()` holds `return g()` and
      `return limit + 1` is caught, while `x = 1` is not found inside `max = 10`. A blank
      line, `}`, `)`, `else {`, `return`, `return nil`, `break`, a comment or a lone
      identifier never withholds a plan. A one-line fix has fewer than eight tokens, so the
-     span rules alone cannot see its copy;
+     span rules alone cannot see its copy. The plan guard's regression cases, each naming
+     its incident, live in `tests/test_brief_plan_guard.py`, not in the shell guard's corpus
+     (`tests/fixtures/shell_corpus*.txt`);
    - its lines, read together, repeat four words in a row of a string literal an added test
      may assert, which neither the request nor the parent holds (`plan_asserted_literal`);
    - there is no gold view (`plan_no_gold`: it fails closed).

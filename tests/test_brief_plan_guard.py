@@ -35,6 +35,7 @@ from crb.builders.brief import (
     ContextEntry,
     GoldView,
     Ticket,
+    _executable_line,
     admit_at_parent,
     compose,
     plan_guard,
@@ -348,6 +349,70 @@ def test_a_short_executable_line_the_request_or_the_parent_holds_is_not_a_copy()
         parent_has=lambda tok: tok == "return g()",
     )
     assert p.REASON_GOLD_LINE not in plan_guard(body, parent)
+
+
+# -- plan-guard regressions (PR 156 review) ----------------------------------------------------
+# The guard's own regression table: tests/fixtures/shell_corpus*.txt is the shell guard's
+# corpus, so a plan-guard incident is pinned here, one row per case, naming the incident.
+
+
+@pytest.mark.parametrize(
+    ("incident", "added", "step"),
+    [
+        ("PR 156 review: string-literal brackets", 'f(")")', 'Use f(")")'),
+        ("PR 156 review: string-literal brackets", "x = ']'", "Set x = ']' first"),
+        ("PR 156 review: pointer assignment", "*p = 1;", "Set *p = 1"),
+        ("PR 156 review: pointer assignment", "*ptr++;", "Then *ptr++ once"),
+        ("PR 156 review: pointer assignment", "--count;", "Then --count once"),
+        ("PR 156 review: string-literal only", 'return "ok"', 'Return "ok" on success'),
+        ("PR 156 review: open quote", "y = g(x')", "Set y = g(x') first"),  # a prime, no literal
+    ],
+)
+def test_plan_guard_regression_a_short_line_copy_is_withheld(
+    incident: str, added: str, step: str
+) -> None:
+    assert plan_guard(plan(step), _one_line(added)) == (p.REASON_GOLD_LINE,), incident
+
+
+@pytest.mark.parametrize(
+    "added",
+    [
+        "// x = f()",
+        "# x = f()",
+        " * returns f(x)",
+        "*/",
+        "-- select f(x)",
+        # left open: a pointer line written with a space reads as a comment continuation
+        "* p = f(x)",
+    ],
+)
+def test_plan_guard_regression_a_comment_line_is_not_executable(added: str) -> None:
+    """PR 156 review: the whole-line rule has its own comment test, so ``*p = 1`` and
+    ``--count`` are code while these comment lines stay prose (a long one is still the
+    fragment rule's to judge)."""
+    assert not _executable_line(added.strip())
+
+
+@pytest.mark.parametrize(
+    ("incident", "added"),
+    [
+        ("PR 156 review: string-literal only", '"name",'),
+        ("PR 156 review: string-literal only", 'return ""'),
+        ("PR 156 review: open quote", "don't stop"),
+    ],
+)
+def test_plan_guard_regression_a_bare_literal_is_never_a_copy(incident: str, added: str) -> None:
+    step = f"Write {added} then foo(bar) and limit once"
+    assert p.REASON_GOLD_LINE not in plan_guard(plan(step), _one_line(added)), incident
+
+
+def test_a_short_line_with_a_bracket_in_a_string_is_withheld_by_compose() -> None:
+    """PR 156 review: ``f(")")`` was delivered, its brackets counted inside the literal."""
+    e = entry(plan('Use f(")")'))
+    composed = _compose(PLAN_ARM, (e,), gold=_one_line('f(")")'))
+    assert composed.brief.plan == ""
+    assert composed.labels[LABEL_CTX_PLAN_REFUSED] == p.REASON_GOLD_LINE
+    assert composed.refused == (e.text,)
 
 
 def test_an_asserted_literal_split_across_plan_lines_is_refused() -> None:
