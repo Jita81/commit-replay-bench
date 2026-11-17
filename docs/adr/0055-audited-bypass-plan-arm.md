@@ -31,7 +31,7 @@ may differ in task difficulty. The measure is the difference, on an audited arm,
 gain in clean rate over matched controls for rows stamped `ctx_plan_would_refuse` and the same
 gain for delivered rows without the stamp, with its 95% interval. It is supported if the whole
 interval is above zero, refuted if the whole interval is at or below zero, and inconclusive
-otherwise. A small sample can only give an inconclusive result.
+otherwise. A small sample may give an inconclusive result.
 
 Where the drafting itself was audited (a person or a model read the drafter's prompt, the
 model it ran and its transcripts, and found no sight of the change), the text checks mostly
