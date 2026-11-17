@@ -76,6 +76,7 @@ export const ADR_TITLES: ReadonlyArray<readonly [string, string]> = [
   ['0052', 'Stated-requirement arms: pass rate when every required item is stated'],
   ['0053', 'Open requirement gaps: a stated set records its questions and a run refuses them'],
   ['0054', 'Accepted-plan context arm: pass rate when the builder is given a plan accepted before the build'],
+  ['0055', 'Audited-bypass plan arm: a plan attested as drafted blind skips only the lookalike checks of the plan guard'],
 ]
 
 /** `ADR-0015` — the name a record carries in the /help/docs route. */

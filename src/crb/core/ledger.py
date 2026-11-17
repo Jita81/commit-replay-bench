@@ -84,7 +84,8 @@ ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0024-working-by-construction.md; ADR-0025 items 5 and 6 (stream G);
               docs/adr/0050-context-set-arms.md (``ctx_label_violation``: a row's context-set
               stamps agree with its arm), docs/adr/0054-accepted-plan-context-arm.md (the
-              accepted-plan stamps)
+              accepted-plan stamps), docs/adr/0055-audited-bypass-plan-arm.md (the
+              audited-bypass stamps)
 Works with:   src/crb/core/checks.py (the arm a row's ``checks`` stamp names),
               src/crb/core/grade.py (the GradeResult a row reduces; the belt vocabulary),
               src/crb/core/evidence.py (pack hash, canonical JSON, sha256, timestamps),
@@ -141,10 +142,14 @@ from crb.core.context_arm import (
     LABEL_CTX_ITEMS,
     LABEL_CTX_OPEN_GAPS,
     LABEL_CTX_PLAN_ACCEPTED,
+    LABEL_CTX_PLAN_AUDIT,
+    LABEL_CTX_PLAN_AUDITOR,
     LABEL_CTX_PLAN_DRAFTER,
+    LABEL_CTX_PLAN_GUARD,
     LABEL_CTX_PLAN_NOVEL,
     LABEL_CTX_PLAN_REFUSED,
     LABEL_CTX_PLAN_SAW,
+    LABEL_CTX_PLAN_WOULD_REFUSE,
     LABEL_CTX_PROV,
     LABEL_CTX_REQ_DRAFTER,
     LABEL_CTX_REQ_REFUSED,
@@ -153,9 +158,11 @@ from crb.core.context_arm import (
     LABEL_CTX_STATED,
     LABEL_CTX_STRUCTURE,
     LABEL_CTX_TURNS,
+    PLAN_GUARD_AUDITED_BYPASS,
     TEST_AUTHORED,
     TEST_PERSON,
     ContextArmsPooled,
+    audited_plan_arm,
     context_arm_for,
     ctx_set_name,
     hindsight_arm,
@@ -567,6 +574,15 @@ _CTX_PLAN_OPTIONAL: tuple[str, ...] = (
     LABEL_CTX_PLAN_NOVEL,
     LABEL_CTX_OPEN_GAPS,
 )
+#: The audited-bypass stamps (ADR-0055): exactly on an entries row of a
+#: ``ctx.plan-audited*`` arm, never on a ``ctx.plan.<hex>`` row, a control row or any other
+#: arm; ``ctx_plan_would_refuse`` only when the delivered plan tripped a lookalike reason.
+CTX_PLAN_AUDIT_LABELS: tuple[str, ...] = (
+    LABEL_CTX_PLAN_GUARD,
+    LABEL_CTX_PLAN_AUDIT,
+    LABEL_CTX_PLAN_AUDITOR,
+)
+_CTX_PLAN_AUDIT_OPTIONAL: tuple[str, ...] = (LABEL_CTX_PLAN_WOULD_REFUSE,)
 _CTX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 # ASCII only: ``str.isdecimal`` would also pass non-ASCII digits such as "\u0661".
 _POSITIVE_COUNT_RE = re.compile(r"[1-9][0-9]*")
@@ -613,10 +629,15 @@ def _stated_violation(arm: str, labels: Mapping[str, str]) -> str:
 def _plan_violation(arm: str, labels: Mapping[str, str]) -> str:
     """Why a context-set arm row's accepted-plan stamps disagree with its arm (ADR-0054), or
     ``""``."""
+    audit_own = (*CTX_PLAN_AUDIT_LABELS, *_CTX_PLAN_AUDIT_OPTIONAL)
     if not plan_arm(arm):
-        own = (*CTX_PLAN_LABELS, LABEL_CTX_PLAN_REFUSED, LABEL_CTX_PLAN_NOVEL)
+        own = (*CTX_PLAN_LABELS, LABEL_CTX_PLAN_REFUSED, LABEL_CTX_PLAN_NOVEL, *audit_own)
         stray = [k for k in own if k in labels]
         return f"accepted-plan stamps {stray} on a non-plan arm {arm!r}" if stray else ""
+    if not audited_plan_arm(arm):
+        stray = [k for k in audit_own if k in labels]
+        if stray:
+            return f"audited-bypass stamps {stray} on a guarded plan arm {arm!r} (ADR-0055)"
     missing = [k for k in CTX_PLAN_LABELS if not labels.get(k)]
     if missing:
         return f"an accepted-plan row lacks {missing} (ADR-0054)"
@@ -642,6 +663,35 @@ def _plan_violation(arm: str, labels: Mapping[str, str]) -> str:
         why = refused.split(",")
         if why != sorted(set(why)) or not set(why) <= set(_plan.PLAN_REASONS):
             return f"ctx_plan_refused {refused!r} is not a sorted set of plan_guard reasons"
+    return _audited_violation(arm, labels) if audited_plan_arm(arm) else ""
+
+
+def _audited_violation(arm: str, labels: Mapping[str, str]) -> str:
+    """Why a ``ctx.plan-audited*`` row's audited-bypass stamps are wrong (ADR-0055), or
+    ``""``: the guard, audit and auditor stamps present and well formed, the would-refuse
+    reasons lookalike ones only, the refused reasons structural ones only."""
+    missing = [k for k in CTX_PLAN_AUDIT_LABELS if not labels.get(k)]
+    if missing:
+        return f"an audited-bypass plan row lacks {missing} (ADR-0055)"
+    if labels[LABEL_CTX_PLAN_GUARD] != PLAN_GUARD_AUDITED_BYPASS:
+        return (
+            f"ctx_plan_guard {labels[LABEL_CTX_PLAN_GUARD]!r} is not "
+            f"{PLAN_GUARD_AUDITED_BYPASS!r} (ADR-0055)"
+        )
+    if not _CTX_DIGEST_RE.match(labels[LABEL_CTX_PLAN_AUDIT]):
+        return "ctx_plan_audit is not a full audit-record digest (ADR-0055)"
+    if not _stated.REQ_DRAFTER_RE.match(labels[LABEL_CTX_PLAN_AUDITOR]):
+        return "ctx_plan_auditor is not human:<id> or model:<id>@<sha256> (ADR-0055)"
+    raw = labels.get(LABEL_CTX_PLAN_WOULD_REFUSE)
+    if raw is not None:
+        would = raw.split(",")
+        if not raw or would != sorted(set(would)) or not set(would) <= set(_plan.LOOKALIKE_REASONS):
+            return f"ctx_plan_would_refuse {raw!r} is not a sorted set of lookalike reasons"
+    refused = labels.get(LABEL_CTX_PLAN_REFUSED)
+    if refused is not None:
+        why = refused.split(",")
+        if not set(why) <= set(_plan.STRUCTURAL_REASONS):
+            return f"ctx_plan_refused {refused!r} on an audited arm names a lookalike reason"
     return ""
 
 
@@ -664,12 +714,23 @@ def ctx_label_violation(arm: str, labels: Mapping[str, str]) -> str:
     ADR-0054: a ``ctx.plan*`` arm row carries every :data:`CTX_PLAN_LABELS` stamp (and
     ``ctx_plan_refused``, ``ctx_plan_novel`` and ``ctx_open_gaps`` only sometimes), no
     ``ctx_drafter`` (a plan is accepted, not mechanical) and no ``ctx_ceiling``; no other row
-    carries any plan stamp."""
+    carries any plan stamp.
+
+    ADR-0055: a ``ctx.plan-audited*`` arm row also carries every
+    :data:`CTX_PLAN_AUDIT_LABELS` stamp (``ctx_plan_would_refuse`` only sometimes); no other
+    row, a ``ctx.plan.<hex>`` row included, carries any of them."""
     name = ctx_set_name(arm)
     present = [k for k in (*CTX_RUN_LABELS, *CTX_ARM_LABELS) if k in labels]
     # the stated and plan stamps, each once (ctx_open_gaps is optional on both)
     own = dict.fromkeys(
-        (*CTX_STATED_LABELS, *_CTX_STATED_OPTIONAL, *CTX_PLAN_LABELS, *_CTX_PLAN_OPTIONAL)
+        (
+            *CTX_STATED_LABELS,
+            *_CTX_STATED_OPTIONAL,
+            *CTX_PLAN_LABELS,
+            *_CTX_PLAN_OPTIONAL,
+            *CTX_PLAN_AUDIT_LABELS,
+            *_CTX_PLAN_AUDIT_OPTIONAL,
+        )
     )
     stated_present = [k for k in own if k in labels]
     if not name and not present:

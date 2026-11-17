@@ -25,7 +25,9 @@ How:          :class:`crb.mcp.client.CrbApi` (login, CSRF, the error envelope), 
 Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0050-context-set-arms.md,
               docs/adr/0052-stated-requirement-arms.md,
-              docs/adr/0054-accepted-plan-context-arm.md
+              docs/adr/0054-accepted-plan-context-arm.md,
+              docs/adr/0055-audited-bypass-plan-arm.md (an audited set's ``show`` line and
+              ``lint`` split)
 Works with:   src/crb/server/routes/ctxsets.py (the routes), src/crb/mcp/client.py (the
               transport), src/crb/cli/main.py (the registration), docs/API.md (the
               ``/ctxsets`` routes and the refusal codes this command prints),
@@ -127,6 +129,9 @@ def _meta_lines(d: dict[str, Any]) -> list[str]:
         # ADR-0054: what the plan's drafter saw and who accepted it, never the plan itself
         saw = ",".join(d.get("saw") or []) or "-"
         lines.append(f"planned    saw {saw}  accepted_by {d.get('accepted_by') or '-'}")
+    if d.get("audited"):
+        # ADR-0055: the attestation's record digest only, never its method; unverified by crb
+        lines.append(f"audited    yes (record {(d.get('audit_record_sha256') or '')[:12]})")
     return lines
 
 
@@ -275,13 +280,28 @@ def cmd_lint(args: argparse.Namespace) -> int:
         raise CliError(f"cannot read {path.name}: {e}") from e
     results = lint_set(doc, Path(args.clone))
     gaps = open_gaps(doc)
+    would: dict[str, list[str]] = {}
+    if isinstance(doc, dict) and doc.get("source") == "plan-audited":
+        # ADR-0055: an audited-bypass set is withheld on structural reasons only, as a run
+        # composes it; its lookalike reasons are listed, as the row stamps them
+        from crb.core.plan import LOOKALIKE_REASONS
+
+        would = {t: [x for x in r if x in LOOKALIKE_REASONS] for t, r in results}
+        results = [(t, [x for x in r if x not in LOOKALIKE_REASONS]) for t, r in results]
     withheld = [(t, r) for t, r in results if r]
     if args.json:
-        print_json(
-            {"entries": [{"task_id": t, "reasons": r, "gaps": gaps.get(t, [])} for t, r in results]}
-        )
+        entries = [{"task_id": t, "reasons": r, "gaps": gaps.get(t, [])} for t, r in results]
+        if would:
+            for row in entries:
+                row["would_refuse"] = would[str(row["task_id"])]
+        print_json({"entries": entries})
     else:
         lines = [f"{t[:12]}  {'withheld ' + ','.join(r) if r else 'ok'}" for t, r in results]
+        if would:
+            lines = [
+                line + (f" (audited bypass of {','.join(would[t])})" if would[t] else "")
+                for line, (t, _r) in zip(lines, results, strict=True)
+            ]
         lines.append(f"{len(results) - len(withheld)}/{len(results)} entries pass the guard")
         if any(REASON_ASSERTED_LITERAL in r for _t, r in withheld):
             lines.append(f"{REASON_ASSERTED_LITERAL}: {ASSERTED_LITERAL_ADVICE}")

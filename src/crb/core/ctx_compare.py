@@ -79,6 +79,7 @@ from crb.core.context_arm import (
     LABEL_CTX_SET,
     LABEL_CTX_SOURCE,
     LABEL_CTX_TURNS,
+    audited_plan_arm,
     ctx_set_name,
     hindsight_arm,
     plan_arm,
@@ -642,6 +643,13 @@ def ctx_pair(
         # drafted mechanically) answer different questions; their rows never pool
         raise CtxPairRefused(
             REASON_BLEND, f"an accepted-plan arm paired with another kind: {c_arm!r}, {t_arm!r}"
+        )
+    if ctx_set_name(c_arm) and audited_plan_arm(c_arm) != audited_plan_arm(t_arm):
+        # ADR-0055: an audited-bypass plan skipped the guard's lookalike reasons; a guarded
+        # plan did not. They answer different questions; their rows never pool or pair
+        raise CtxPairRefused(
+            REASON_BLEND,
+            f"an audited-bypass plan arm paired with a guarded one: {c_arm!r}, {t_arm!r}",
         )
     if tset.stated and len(c_digests) == 1:
         # a control run (plain A0) or an entries run of any stated set over the same items

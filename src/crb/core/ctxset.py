@@ -42,7 +42,21 @@ drafter saw the ticket and the parent tree, never the change or its tests
 (``ctxset_plan_saw``); each plan line is one trimmed line with no fence and ``summary`` and
 ``steps`` are never empty (``ctxset_plan_shape``); the fixed limits hold
 (``ctxset_plan_length``); ``accepted_by`` names who accepted the plan
-(``ctxset_plan_accepted``). Its **digest** is the sha256 of its
+(``ctxset_plan_accepted``).
+
+An **audited-bypass** plan set (``plan-audited``, ADR-0055) is the same v3 document with one
+more top-level field, required on that source and refused on every other::
+
+    "audit": {"audited_by": "human:<id>" | "model:<id>@<sha256>",
+              "audited": ["model", "prompt", "transcripts"] (a sorted subset; transcripts always),
+              "record_sha256": "<64 hex: the audit record's digest>",
+              "method": "<one line, at most 300 characters>",
+              "covers": [<every entry's task_id, sorted>]}
+
+The audit attests that the plans were drafted blind; the product does not verify it
+(``ctxset_plan_audit`` refuses only a malformed or misplaced one). It is inside the digest.
+
+Every set's **digest** is the sha256 of its
 canonical JSON (sorted keys, ``(",", ":")`` separators, UTF-8, no ASCII escaping); its
 **name** is ``ctx.<source>.<digest[:12]>`` and is never stored inside the hashed body, so a
 changed set is a new digest and a new arm (``A0+library@<name>``). Every check here refuses
@@ -74,6 +88,7 @@ How:          Pure functions over JSON values (stdlib only); the parent tree is 
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0052-stated-requirement-arms.md
               (the v2 schema), docs/adr/0054-accepted-plan-context-arm.md (the v3 schema),
+              docs/adr/0055-audited-bypass-plan-arm.md (the ``audit`` field),
               docs/adr/0026-the-context-standard.md
               (items 1, 7 and 10, which ADR-0050 amends)
 Works with:   src/crb/core/context_arm.py (the reserved ``ctx.`` names and the ctx labels),
@@ -124,6 +139,8 @@ SOURCE_MECH_PLACEBO = "mech-placebo"
 SOURCE_REQ = "req"
 SOURCE_REQ_PLACEBO = "req-placebo"
 SOURCE_PLAN = "plan"
+#: ADR-0055: a plan set that attests blind drafting; only the guard's lookalike reasons skip.
+SOURCE_PLAN_AUDITED = "plan-audited"
 SOURCES: tuple[str, ...] = _arms.CTX_SOURCES
 PLACEBO_SUFFIX = "-placebo"
 
@@ -165,6 +182,9 @@ REASON_PLAN_SHAPE = "ctxset_plan_shape"
 REASON_PLAN_RENDER = "ctxset_plan_render"
 #: A plan breaks the fixed line, file, decision or character limits.
 REASON_PLAN_LENGTH = "ctxset_plan_length"
+#: ADR-0055: a malformed ``audit``, a ``plan-audited`` set without one, an ``audit`` on any
+#: other source, or an audit whose ``covers`` is not the set's tasks.
+REASON_PLAN_AUDIT = "ctxset_plan_audit"
 REASONS: tuple[str, ...] = (
     REASON_SCHEMA,
     REASON_DIGEST,
@@ -183,6 +203,7 @@ REASONS: tuple[str, ...] = (
     REASON_PLAN_SHAPE,
     REASON_PLAN_RENDER,
     REASON_PLAN_LENGTH,
+    REASON_PLAN_AUDIT,
 )
 
 #: A placebo entry's length may differ from its treatment's by at most
@@ -237,6 +258,9 @@ _V3_TOP_REQUIRED = (
     "accepted_by",
     "entries",
 )
+#: ``audit`` (ADR-0055): required on ``plan-audited``, refused on every other source.
+_V3_TOP_OPTIONAL = ("audit",)
+_AUDIT_KEYS = ("audited_by", "audited", "record_sha256", "method", "covers")
 _V3_ENTRY_REQUIRED = ("task_id", "entry_id", "version", "produced_at", "source_rev", "plan")
 #: ``text`` (optional) must equal the plan's rendering and is outside the digest.
 _V3_ENTRY_OPTIONAL = ("gaps", "text")
@@ -328,6 +352,27 @@ class CtxEntryRecord:
 
 
 @dataclass(frozen=True)
+class Audit:
+    """An audited-bypass plan set's attestation that its plans were drafted blind (ADR-0055).
+    The storing operator's claim, inside the digest; crb does not verify it."""
+
+    audited_by: str
+    audited: tuple[str, ...]
+    record_sha256: str
+    method: str
+    covers: tuple[str, ...]
+
+    def to_doc(self) -> dict[str, Any]:
+        return {
+            "audited_by": self.audited_by,
+            "audited": list(self.audited),
+            "record_sha256": self.record_sha256,
+            "method": self.method,
+            "covers": list(self.covers),
+        }
+
+
+@dataclass(frozen=True)
 class CtxSet:
     """A parsed, digest-checked context set. Build one only through :func:`parse`."""
 
@@ -344,6 +389,8 @@ class CtxSet:
     saw: tuple[str, ...] = ()
     #: Who accepted an accepted-plan set's plans: ``human:<id>`` or ``none`` (v3 only).
     accepted_by: str = ""
+    #: An audited-bypass plan set's attestation (``plan-audited`` only, ADR-0055).
+    audit: Audit | None = None
 
     @property
     def name(self) -> str:
@@ -431,6 +478,8 @@ class CtxSet:
         if self.schema == SCHEMA_V3:
             out["saw"] = list(self.saw)
             out["accepted_by"] = self.accepted_by
+        if self.audit is not None:
+            out["audit"] = self.audit.to_doc()
         return out
 
 
@@ -512,6 +561,10 @@ def parse(doc: object, *, name: str | None = None) -> CtxSet:
         raise _schema(
             f"a {source!r} set is {expected!r}, not {schema!r} (stated-requirement sources "
             "only are v2, ADR-0052; the accepted-plan source only is v3, ADR-0054)"
+        )
+    if "audit" in doc and kind != _arms.CTX_KIND_PLANNED:
+        raise CtxSetRefused(
+            REASON_PLAN_AUDIT, f"audit is a plan-audited set's field; source is {source!r}"
         )
     if kind == _arms.CTX_KIND_STATED:
         out = _parse_v2(doc, source)
@@ -830,8 +883,74 @@ def _parse_plan(entry: Mapping[str, Any], where: str) -> _plan.PlanBody:
     return plan
 
 
+def _audit_refused(detail: str) -> CtxSetRefused:
+    return CtxSetRefused(REASON_PLAN_AUDIT, detail)
+
+
+def _parse_audit(raw: object, task_ids: tuple[str, ...]) -> Audit:
+    """An :class:`Audit` from its document; refuses ``ctxset_plan_audit`` on anything but
+    exactly the five keys, well formed, covering exactly ``task_ids`` (ADR-0055)."""
+    if not isinstance(raw, Mapping):
+        raise _audit_refused("audit is an object")
+    if set(raw) != set(_AUDIT_KEYS):
+        raise _audit_refused(f"audit holds exactly the keys {_AUDIT_KEYS}")
+    audited_by = raw["audited_by"]
+    if not isinstance(audited_by, str) or not _REQ_DRAFTER_RE.match(audited_by):
+        raise _audit_refused("audit.audited_by is not 'human:<id>' or 'model:<id>@<sha256>'")
+    audited = raw["audited"]
+    if (
+        not isinstance(audited, list)
+        or not all(isinstance(x, str) for x in audited)
+        or audited != sorted(set(audited))
+        or not set(audited) <= set(_plan.AUDIT_SCOPES)
+        or _plan.AUDIT_SCOPE_REQUIRED not in audited
+    ):
+        raise _audit_refused(
+            f"audit.audited is a sorted, unique subset of {_plan.AUDIT_SCOPES} that holds "
+            f"{_plan.AUDIT_SCOPE_REQUIRED!r}"
+        )
+    record = raw["record_sha256"]
+    if not isinstance(record, str) or not _DIGEST_RE.match(record):
+        raise _audit_refused("audit.record_sha256 is not a full sha256 digest")
+    method = raw["method"]
+    if (
+        not isinstance(method, str)
+        or not method
+        or method.strip() != method
+        or len(method) > _plan.AUDIT_METHOD_MAX
+        or "\n" in method
+        or "\r" in method
+        or "```" in method
+    ):
+        raise _audit_refused(
+            f"audit.method is one trimmed line of 1 to {_plan.AUDIT_METHOD_MAX} characters "
+            "with no code fence"
+        )
+    covers = raw["covers"]
+    if (
+        not isinstance(covers, list)
+        or not all(isinstance(x, str) for x in covers)
+        or covers != sorted(set(covers))
+    ):
+        raise _audit_refused("audit.covers is a sorted, unique list of task ids")
+    if tuple(covers) != task_ids:
+        raise _audit_refused("audit.covers is not exactly the set's tasks")
+    return Audit(
+        audited_by=audited_by,
+        audited=tuple(audited),
+        record_sha256=record,
+        method=method,
+        covers=tuple(covers),
+    )
+
+
 def _parse_v3(doc: Mapping[str, Any], source: str) -> CtxSet:
-    _keys(doc, _V3_TOP_REQUIRED, (), "set")
+    _keys(doc, _V3_TOP_REQUIRED, _V3_TOP_OPTIONAL, "set")
+    audited = source == SOURCE_PLAN_AUDITED
+    if audited and "audit" not in doc:
+        raise _audit_refused("a plan-audited set carries its audit")
+    if not audited and "audit" in doc:
+        raise _audit_refused(f"audit is a plan-audited set's field; source is {source!r}")
     repo = _text(doc, "repo", "set")
     if not _REPO_RE.match(repo):
         raise _schema(f"repo {repo!r} is not a repository id")
@@ -886,6 +1005,7 @@ def _parse_v3(doc: Mapping[str, Any], source: str) -> CtxSet:
             )
         )
     _check_entry_order(entries)
+    audit = _parse_audit(doc["audit"], tuple(e.task_id for e in entries)) if audited else None
     return CtxSet(
         source=source,
         repo=repo,
@@ -896,6 +1016,7 @@ def _parse_v3(doc: Mapping[str, Any], source: str) -> CtxSet:
         schema=SCHEMA_V3,
         saw=tuple(saw),
         accepted_by=accepted_by,
+        audit=audit,
     )
 
 
@@ -1074,7 +1195,9 @@ def run_stamps(
     ``measure_open_gaps`` (ADR-0053), ``ctx_open_gaps`` = the count of the task's open gaps
     when it has any; on an accepted-plan set (ADR-0054) ``ctx_plan_drafter``,
     ``ctx_plan_saw`` (comma-joined) and ``ctx_plan_accepted``, and ``ctx_open_gaps`` as on a
-    stated set. ``control``: ``ctx_set``, ``ctx_source`` =
+    stated set; on an audited-bypass plan set (ADR-0055) also ``ctx_plan_guard`` =
+    ``audited_bypass``, ``ctx_plan_audit`` (the audit record's digest) and
+    ``ctx_plan_auditor`` — never the audit's method or scope. ``control``: ``ctx_set``, ``ctx_source`` =
     ``control``, ``ctx_gap`` and ``ctx_gap_rule``. ``gaps`` holds every task's
     :func:`ctx_gap_anchor` value."""
     if role not in ROLES:
@@ -1116,6 +1239,10 @@ def run_stamps(
                 stamps[_arms.LABEL_CTX_PLAN_DRAFTER] = ctxset.drafter
                 stamps[_arms.LABEL_CTX_PLAN_SAW] = ",".join(ctxset.saw)
                 stamps[_arms.LABEL_CTX_PLAN_ACCEPTED] = ctxset.accepted_by
+                if ctxset.audit is not None:
+                    stamps[_arms.LABEL_CTX_PLAN_GUARD] = _arms.PLAN_GUARD_AUDITED_BYPASS
+                    stamps[_arms.LABEL_CTX_PLAN_AUDIT] = ctxset.audit.record_sha256
+                    stamps[_arms.LABEL_CTX_PLAN_AUDITOR] = ctxset.audit.audited_by
                 if measure_open_gaps and entry.gaps:
                     stamps[_arms.LABEL_CTX_OPEN_GAPS] = str(len(entry.gaps))
         out[tid] = stamps
@@ -1141,6 +1268,7 @@ __all__ = [
     "REASON_PLACEBO_OVERLAP",
     "REASON_PLACEBO_UNMATCHED",
     "REASON_PLAN_ACCEPTED",
+    "REASON_PLAN_AUDIT",
     "REASON_PLAN_LENGTH",
     "REASON_PLAN_RENDER",
     "REASON_PLAN_SAW",
@@ -1161,9 +1289,11 @@ __all__ = [
     "SOURCE_ORACLE",
     "SOURCE_ORACLE_PLACEBO",
     "SOURCE_PLAN",
+    "SOURCE_PLAN_AUDITED",
     "SOURCE_REQ",
     "SOURCE_REQ_PLACEBO",
     "STOPWORDS",
+    "Audit",
     "CtxEntryRecord",
     "CtxSet",
     "CtxSetRefused",

@@ -7,13 +7,16 @@ What it is:   The CLI suite for the offline ``crb ctxset lint FILE --clone DIR``
 What it does: Pins that a guard-clean stated entry lints ``ok`` (exit 0), that an undeclared
               answer is reported with ``req_undeclared_novel`` (exit 2), that a parse refusal
               is a one-line error naming its reason, that a non-stated set has nothing to
-              guard, that an accepted-plan set is linted through ``plan_guard``, and that
-              the stated banner, provenance, cost and drift lines print.
+              guard, that an accepted-plan set is linted through ``plan_guard`` (an
+              audited-bypass one, ADR-0055, withheld on structural reasons only, its lookalike
+              reasons listed), and that the stated banner, provenance, cost and drift lines
+              and an audited set's record line print.
 How:          The pyrepo ``feat: add subtract`` commit (tests/fixtures/pyrepo.py) as the clone;
               documents from tests/fixtures/ctx_rows.py; ``crb.cli.main.main``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0052-stated-requirement-arms.md,
-              docs/adr/0054-accepted-plan-context-arm.md
+              docs/adr/0054-accepted-plan-context-arm.md,
+              docs/adr/0055-audited-bypass-plan-arm.md
 Works with:   src/crb/cli/commands/ctxset.py (under test), src/crb/builders/brief.py
               (``req_guard``, ``plan_guard``), tests/test_cli_ctxset.py (the v1 CLI tests)
 Tested by:    tests/test_cli_ctxset_lint.py
@@ -136,6 +139,45 @@ def test_an_accepted_plan_set_is_linted_through_plan_guard(
     assert "plan_test_path" in why
     code, out, err = _lint(leaky, pyrepo, tmp_path, capsys)
     assert code == 2 and "plan_test_path" in out and "1 entry withheld" in err
+
+
+def test_an_audited_plan_set_lints_its_lookalike_reasons_as_a_bypass(
+    pyrepo: pr.PyRepo, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ADR-0055: an audited-bypass set is withheld on structural reasons only, as a run
+    composes it; the lookalike reasons it would have tripped are listed, not refused."""
+    task = pyrepo.feat_task()
+    parent = pyrepo.repo.parent(task.task_id)
+    leaky = {**PLAN, "files": [pr.SRC], "tests": [f"Extend {pr.TEST_SUBTRACT}"]}
+    doc = plan_doc(tasks=[task.task_id], plan=leaky, source_rev=parent, audited=True)
+    code, out, err = _lint(doc, pyrepo, tmp_path, capsys)
+    assert code == 0, err
+    assert f"{task.task_id[:12]}  ok (audited bypass of " in out and "plan_test_path" in out
+    assert "1/1 entries pass the guard" in out
+    path = tmp_path / "set.json"
+    capsys.readouterr()
+    assert main(["ctxset", "lint", str(path), "--clone", str(pyrepo.path), "--json"]) == 0
+    ((entry,),) = (json.loads(capsys.readouterr().out)["entries"],)
+    assert entry["reasons"] == [] and "plan_test_path" in entry["would_refuse"]
+    guarded = plan_doc(tasks=[task.task_id], plan=leaky, source_rev=parent)
+    code, out, _ = _lint(guarded, pyrepo, tmp_path, capsys)
+    assert code == 2 and "audited bypass" not in out
+
+
+def test_show_prints_an_audited_sets_record() -> None:
+    lines = cmd._meta_lines(
+        {
+            "name": "ctx.plan-audited.0123456789ab",
+            "source": "plan-audited",
+            "tasks": 1,
+            "repo": "cobra",
+            "digest": "0" * 64,
+            "arm": "A0+library@ctx.plan-audited.0123456789ab",
+            "audited": True,
+            "audit_record_sha256": "a" * 64,
+        }
+    )
+    assert any(line == f"audited    yes (record {'a' * 12})" for line in lines)
 
 
 def test_show_prints_a_stated_sets_structure_and_items_digest() -> None:

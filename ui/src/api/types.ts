@@ -2960,6 +2960,10 @@ export interface CtxSetMeta {
   planned: boolean
   /** Who accepted the plans (`human:<id>` or `none`) on an accepted-plan set, `""` on any other set. */
   accepted_by: string
+  /** True for an audited-bypass plan set (source `plan-audited`, ADR-0055): it attests its plans were drafted blind, which crb does not verify. */
+  audited: boolean
+  /** The audit record's sha256 on an audited-bypass plan set, `null` on any other set; the audit's method is never served. */
+  audit_record_sha256: string | null
   /** `prose` or `checklist` on a stated set, `""` on a v1 set. */
   structure: string
   /** What the stated set's author saw (a sorted subset of diff, tests, ticket), or what the plan's drafter saw (ticket and, optionally, tree); `[]` on a v1 set. */

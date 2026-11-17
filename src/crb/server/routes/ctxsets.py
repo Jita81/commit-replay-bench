@@ -32,7 +32,8 @@ How:          ``ctxset.parse`` → ``verify_coverage`` (+ ``verify_placebo``) �
               → commit; ``rows_of_runs`` → ``ctx_pair``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0052-stated-requirement-arms.md,
-              docs/adr/0054-accepted-plan-context-arm.md
+              docs/adr/0054-accepted-plan-context-arm.md,
+              docs/adr/0055-audited-bypass-plan-arm.md (the ``audited`` metadata)
 Works with:   src/crb/core/ctxset.py (the record and its verifiers), src/crb/core/ctx_compare.py
               (the paired reader), src/crb/store/ledger.py (``rows_of_runs``),
               src/crb/cli/commands/ctxset.py (the CLI over these routes), docs/API.md (the
@@ -134,7 +135,9 @@ def _meta(ctxset: CtxSet) -> dict[str, Any]:
     A stated set (ADR-0052) also names its structure, what its author saw and its items
     digest (the key a structure contrast links by); those fields are empty on a v1 set. An
     accepted-plan set (ADR-0054) says it is ``planned``, what its drafter saw and who
-    accepted it (``accepted_by``, empty on every other set) — never the plan itself."""
+    accepted it (``accepted_by``, empty on every other set) — never the plan itself. An
+    audited-bypass set (ADR-0055) says it is ``audited`` and names its audit record's digest
+    (``audit_record_sha256``, ``None`` on every other set) — never the audit's method."""
     return {
         "name": ctxset.name,
         "digest": ctxset.digest,
@@ -145,6 +148,8 @@ def _meta(ctxset: CtxSet) -> dict[str, Any]:
         "stated": ctxset.stated,
         "planned": ctxset.planned,
         "accepted_by": ctxset.accepted_by,
+        "audited": ctxset.audit is not None,
+        "audit_record_sha256": ctxset.audit.record_sha256 if ctxset.audit else None,
         "structure": ctxset.structure,
         "saw": list(ctxset.saw),
         "items_digest": ctxset.items_digest,

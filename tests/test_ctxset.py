@@ -430,8 +430,8 @@ def test_stamps_refuse_a_missing_gap_or_an_unknown_role() -> None:
 
 def test_every_refusal_reason_is_named_and_an_unknown_one_is_refused() -> None:
     # +2 for v2 items (ADR-0052), +1 for the open-gaps push-back (ADR-0053), +5 for the
-    # accepted-plan record (ADR-0054)
-    assert len(set(ctxset.REASONS)) == len(ctxset.REASONS) == 17
+    # accepted-plan record (ADR-0054), +1 for the audited-bypass attestation (ADR-0055)
+    assert len(set(ctxset.REASONS)) == len(ctxset.REASONS) == 18
     # every set-shape refusal is ctxset_*; ctx_open_gaps refuses a REQUEST, not a set's shape
     assert all(r.startswith("ctxset_") for r in ctxset.REASONS if r != ctxset.REASON_OPEN_GAPS)
     with pytest.raises(ValueError, match="unknown"):
@@ -656,3 +656,120 @@ def test_a_plan_entry_off_its_tasks_parent_is_refused_at_run_time() -> None:
     ctxset.verify_source_revs(s, {T1: P1, T2: P2})
     with _refused("ctxset_mechanical"):
         ctxset.verify_source_revs(s, {T1: P2, T2: P2})
+
+
+# --- the audited-bypass attestation (plan-audited, ADR-0055) -------------------------------
+
+
+def _audit(**over: Any) -> dict[str, Any]:
+    audit: dict[str, Any] = {
+        "audited_by": "human:auditor-01",
+        "audited": ["prompt", "transcripts"],
+        "record_sha256": "c" * 64,
+        "method": "read every drafting transcript; no test or gold path was shown",
+        "covers": sorted((T1, T2)),
+    }
+    audit.update(over)
+    return audit
+
+
+def _audited_doc(**over: Any) -> dict[str, Any]:
+    return _plan_doc(source=ctxset.SOURCE_PLAN_AUDITED, audit=_audit(), **over)
+
+
+def test_an_audited_plan_set_parses_names_itself_and_round_trips() -> None:
+    s = ctxset.parse(_audited_doc())
+    assert s.planned and s.audit is not None
+    assert s.audit.audited == ("prompt", "transcripts")
+    assert s.name == f"ctx.plan-audited.{s.digest[:12]}"
+    assert arms.plan_arm(s.arm) and arms.audited_plan_arm(s.arm)
+    assert not arms.audited_plan_arm(ctxset.parse(_plan_doc()).arm)
+    again = ctxset.parse(json.loads(json.dumps(s.to_doc())))
+    assert again.digest == s.digest == ctxset.canonical_digest(s.to_doc())
+    assert again.audit == s.audit
+    assert s.to_doc()["audit"] == _audit()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("audited_by", "human:auditor-02"),
+        ("audited", ["model", "prompt", "transcripts"]),
+        ("record_sha256", "d" * 64),
+        ("method", "a different audit method"),
+    ],
+)
+def test_the_digest_moves_with_each_audit_field(field: str, value: Any) -> None:
+    base = ctxset.parse(_audited_doc()).digest
+    doc = _plan_doc(source=ctxset.SOURCE_PLAN_AUDITED, audit=_audit(**{field: value}))
+    assert ctxset.parse(doc).digest != base
+
+
+def test_an_audited_set_differs_from_the_same_plans_guarded() -> None:
+    assert ctxset.parse(_audited_doc()).digest != ctxset.parse(_plan_doc()).digest
+
+
+@pytest.mark.parametrize(
+    "audit",
+    [
+        "yes",
+        {k: v for k, v in _audit().items() if k != "method"},
+        {**_audit(), "extra": 1},
+        _audit(audited_by="auditor"),
+        _audit(audited_by=""),
+        _audit(audited=["prompt"]),
+        _audit(audited=["transcripts", "prompt"]),
+        _audit(audited=["prompt", "prompt", "transcripts"]),
+        _audit(audited=["eyes", "transcripts"]),
+        _audit(audited="transcripts"),
+        _audit(record_sha256="c" * 63),
+        _audit(record_sha256="C" * 64),
+        _audit(method=""),
+        _audit(method=" padded "),
+        _audit(method="two\nlines"),
+        _audit(method="a ``` fence"),
+        _audit(method="x" * 301),
+        _audit(method=7),
+        _audit(covers=[T1]),
+        _audit(covers=sorted((T1, T2), reverse=True)),
+        _audit(covers=sorted((T1, T2, "e" * 40))),
+        _audit(covers=[T1, T1, T2]),
+    ],
+)
+def test_a_malformed_audit_is_ctxset_plan_audit(audit: Any) -> None:
+    with _refused("ctxset_plan_audit"):
+        ctxset.parse(_plan_doc(source=ctxset.SOURCE_PLAN_AUDITED, audit=audit))
+
+
+def test_the_audit_and_the_source_go_together() -> None:
+    with _refused("ctxset_plan_audit"):
+        ctxset.parse(_plan_doc(source=ctxset.SOURCE_PLAN_AUDITED))
+    with _refused("ctxset_plan_audit"):
+        ctxset.parse(_plan_doc(audit=_audit()))
+    oracle = _oracle_doc()
+    oracle["audit"] = _audit()
+    with _refused("ctxset_plan_audit"):
+        ctxset.parse(oracle)
+
+
+def test_a_three_hundred_character_method_is_accepted() -> None:
+    doc = _plan_doc(source=ctxset.SOURCE_PLAN_AUDITED, audit=_audit(method="x" * 300))
+    assert ctxset.parse(doc).audit is not None
+
+
+def test_audited_stamps_carry_the_bypass_the_record_and_the_auditor() -> None:
+    s = ctxset.parse(_audited_doc())
+    stamps = ctxset.run_stamps(s, "entries", {T1: "1", T2: "0"})[T1]
+    assert stamps[arms.LABEL_CTX_PLAN_GUARD] == arms.PLAN_GUARD_AUDITED_BYPASS
+    assert stamps[arms.LABEL_CTX_PLAN_AUDIT] == "c" * 64
+    assert stamps[arms.LABEL_CTX_PLAN_AUDITOR] == "human:auditor-01"
+    assert stamps[arms.LABEL_CTX_PLAN_ACCEPTED] == "human:requester-01"
+    assert arms.LABEL_CTX_PLAN_WOULD_REFUSE not in stamps
+    control = ctxset.run_stamps(s, "control", {T1: "1", T2: "0"})[T1]
+    assert not any(k.startswith("ctx_plan_") for k in control)
+    guarded = ctxset.run_stamps(ctxset.parse(_plan_doc()), "entries", {T1: "1", T2: "0"})[T1]
+    assert not {
+        arms.LABEL_CTX_PLAN_GUARD,
+        arms.LABEL_CTX_PLAN_AUDIT,
+        arms.LABEL_CTX_PLAN_AUDITOR,
+    } & set(guarded)

@@ -92,6 +92,9 @@ tests would hand the builder the answer under another name.
      may assert, which neither the request nor the parent holds (`plan_asserted_literal`);
    - there is no gold view (`plan_no_gold`: it fails closed).
    A withheld plan is counted as refused, and its reasons are stamped on the row.
+   (Amended for the `plan-audited` source only by ADR-0055: on that arm a plan is withheld on
+   `plan_render`, `plan_length`, `plan_code_block` or `plan_no_gold` only; the other reasons
+   are stamped `ctx_plan_would_refuse` and the plan is delivered.)
 5. **Novel tokens are counted, not refused.** A plan written before the build may name what
    the build will add. The number of such tokens a delivered plan names is stamped as
    `ctx_plan_novel`, so a reader can split rows on it. Every fact and learned line on the same

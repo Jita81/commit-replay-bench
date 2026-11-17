@@ -3,8 +3,8 @@
 Navigation
 ----------
 What it is:   Builders for a ``crb.ctxset.v1`` document (a ``crb.ctxset.v2``
-              stated-requirement one, ADR-0052, and a ``crb.ctxset.v3`` accepted-plan one,
-              ADR-0054), its parsed ``CtxSet`` and the grade
+              stated-requirement one, ADR-0052, a ``crb.ctxset.v3`` accepted-plan one,
+              ADR-0054, and its audited-bypass form, ADR-0055), its parsed ``CtxSet`` and the grade
               rows a context-set run or its control writes, each stamped as
               ``crb.core.ctxset.run_stamps`` stamps it.
 What it does: Keeps every ctx test's rows valid under ``ctx_label_violation`` (the ledger's
@@ -12,7 +12,7 @@ What it does: Keeps every ctx test's rows valid under ``ctx_label_violation`` (t
 How:          ``ctx_doc`` → ``ctxset.parse``; ``ctx_row`` = ``posture_row`` at the current
               apparatus, blind, sealed (``builder_executor`` ``docker``) unless overridden.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0050-context-set-arms.md
+ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0055-audited-bypass-plan-arm.md
 Works with:   src/crb/core/ctxset.py (``parse``, ``run_stamps``), src/crb/core/ledger.py
               (``ctx_label_violation``), tests/fixtures/posture.py (``posture_row``)
 Tested by:    tests/test_ctx_compare.py, tests/test_server_ctxsets.py, tests/test_value_ctx.py,
@@ -134,6 +134,15 @@ PLAN: dict[str, list[str]] = {
 }
 PLAN_PARENT = "f" * 40
 
+#: The attestation ``plan_doc(audited=True)`` gives a ``plan-audited`` set (ADR-0055); its
+#: ``covers`` is filled with the set's tasks.
+AUDIT: dict[str, Any] = {
+    "audited_by": "human:fixture-02",
+    "audited": ["prompt", "transcripts"],
+    "record_sha256": "a" * 64,
+    "method": "fixture audit",
+}
+
 
 def plan_doc(
     *,
@@ -146,11 +155,13 @@ def plan_doc(
     accepted_by: str = "human:fixture-01",
     drafter: str = "human:fixture-01",
     repo: str = REPO,
+    audited: bool = False,
 ) -> dict[str, Any]:
-    """A valid ``crb.ctxset.v3`` accepted-plan document (ADR-0054): one plan per task."""
-    return {
+    """A valid ``crb.ctxset.v3`` accepted-plan document (ADR-0054): one plan per task;
+    ``audited`` makes it a ``plan-audited`` set carrying :data:`AUDIT` (ADR-0055)."""
+    doc: dict[str, Any] = {
         "schema": ctxset.SCHEMA_V3,
-        "source": ctxset.SOURCE_PLAN,
+        "source": ctxset.SOURCE_PLAN_AUDITED if audited else ctxset.SOURCE_PLAN,
         "repo": repo,
         "method": "fixture",
         "drafter": drafter,
@@ -168,6 +179,9 @@ def plan_doc(
             for t in sorted(tasks)
         ],
     }
+    if audited:
+        doc["audit"] = {**AUDIT, "covers": sorted(tasks)}
+    return doc
 
 
 def plan_set(**kw: Any) -> ctxset.CtxSet:
@@ -239,6 +253,7 @@ def side(
 
 
 __all__ = [
+    "AUDIT",
     "PACK",
     "PLAN",
     "PLAN_PARENT",
