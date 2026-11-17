@@ -26,8 +26,9 @@ structure (``crb.core.stated.render``), so nothing free-form reaches a brief. Ea
 ``discloses`` tokens appear verbatim in its statement (``ctxset_items_undelivered``) and the
 fixed limits hold (``ctxset_items_length``).
 
-An **accepted-plan** set (``plan``, ADR-0054) is schema ``crb.ctxset.v3`` — and only it is;
-there is no ``plan-placebo`` source yet::
+An **accepted-plan** set (``plan``, ADR-0054) is schema ``crb.ctxset.v3``, and so is its
+audited-bypass form (``plan-audited``, ADR-0055, below); no other source is. There is no
+``plan-placebo`` source yet::
 
     {"schema": "crb.ctxset.v3", "source": "plan", "repo", "method",
      "drafter": "human:<id>" | "model:<id>@<sha256>", "saw": ["ticket"] | ["ticket", "tree"],
@@ -560,7 +561,8 @@ def parse(doc: object, *, name: str | None = None) -> CtxSet:
     if schema != expected:
         raise _schema(
             f"a {source!r} set is {expected!r}, not {schema!r} (stated-requirement sources "
-            "only are v2, ADR-0052; the accepted-plan source only is v3, ADR-0054)"
+            "only are v2, ADR-0052; the plan and plan-audited sources only are v3, ADR-0054 and "
+            "ADR-0055)"
         )
     if "audit" in doc and kind != _arms.CTX_KIND_PLANNED:
         raise CtxSetRefused(
@@ -895,7 +897,8 @@ def _parse_audit(raw: object, task_ids: tuple[str, ...]) -> Audit:
     if set(raw) != set(_AUDIT_KEYS):
         raise _audit_refused(f"audit holds exactly the keys {_AUDIT_KEYS}")
     audited_by = raw["audited_by"]
-    if not isinstance(audited_by, str) or not _REQ_DRAFTER_RE.match(audited_by):
+    # fullmatch, not match: a ``$`` pattern's match also accepts one trailing "\n"
+    if not isinstance(audited_by, str) or not _REQ_DRAFTER_RE.fullmatch(audited_by):
         raise _audit_refused("audit.audited_by is not 'human:<id>' or 'model:<id>@<sha256>'")
     audited = raw["audited"]
     if (
@@ -910,7 +913,7 @@ def _parse_audit(raw: object, task_ids: tuple[str, ...]) -> Audit:
             f"{_plan.AUDIT_SCOPE_REQUIRED!r}"
         )
     record = raw["record_sha256"]
-    if not isinstance(record, str) or not _DIGEST_RE.match(record):
+    if not isinstance(record, str) or not _DIGEST_RE.fullmatch(record):
         raise _audit_refused("audit.record_sha256 is not a full sha256 digest")
     method = raw["method"]
     if (
@@ -918,10 +921,12 @@ def _parse_audit(raw: object, task_ids: tuple[str, ...]) -> Audit:
         or not method
         or method.strip() != method
         or len(method) > _plan.AUDIT_METHOD_MAX
-        or "\n" in method
-        or "\r" in method
+        or len(method.splitlines()) != 1
         or "```" in method
+        or "~~~" in method
     ):
+        # splitlines: every line break (\v, \f, \x1c-\x1e, \x85, \u2028, \u2029 too);
+        # both fences the text guard reads as code (``_text_guard``)
         raise _audit_refused(
             f"audit.method is one trimmed line of 1 to {_plan.AUDIT_METHOD_MAX} characters "
             "with no code fence"
@@ -1197,8 +1202,8 @@ def run_stamps(
     ``ctx_plan_saw`` (comma-joined) and ``ctx_plan_accepted``, and ``ctx_open_gaps`` as on a
     stated set; on an audited-bypass plan set (ADR-0055) also ``ctx_plan_guard`` =
     ``audited_bypass``, ``ctx_plan_audit`` (the audit record's digest) and
-    ``ctx_plan_auditor`` — never the audit's method or scope. ``control``: ``ctx_set``, ``ctx_source`` =
-    ``control``, ``ctx_gap`` and ``ctx_gap_rule``. ``gaps`` holds every task's
+    ``ctx_plan_auditor`` — never the audit's method or scope. ``control``: ``ctx_set``,
+    ``ctx_source`` = ``control``, ``ctx_gap`` and ``ctx_gap_rule``. ``gaps`` holds every task's
     :func:`ctx_gap_anchor` value."""
     if role not in ROLES:
         raise ValueError(f"role {role!r} is not one of {ROLES}")

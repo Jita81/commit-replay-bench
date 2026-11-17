@@ -300,7 +300,9 @@ rule makes them prospective (item 10).
    builder's deny rules, so the leak is closed only in the sealed posture.
    (Amended for the measurement-only `plan` source only by ADR-0054: a delivered accepted plan
    may name a token the commit introduced, counted on the row as `ctx_plan_novel`; it meets
-   `plan_guard` and is withheld whole on any of its reasons. Every other line is unchanged.)
+   `plan_guard` and is withheld whole on any of its reasons. Every other line is unchanged.
+   ADR-0055 extends this to the measurement-only `plan-audited` source, whose arm withholds a
+   plan on the guard's structural reasons only.)
 
 8. **The entry gate: a ticket enters manufacturing only when its cell has a proven standard and
    the ticket carries it.** Readiness reads the cell's standard from the current signed map

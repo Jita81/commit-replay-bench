@@ -181,7 +181,11 @@ def test_a_run_stamped_audited_row_and_its_control_pass() -> None:
     assert lg.ctx_label_violation(AUDITED.arm, labels) == ""
     bypassed = {**labels, ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_gold_span,plan_test_name"}
     assert lg.ctx_label_violation(AUDITED.arm, bypassed) == ""
-    structural = {**bypassed, ca.LABEL_CTX_PLAN_REFUSED: "plan_length,plan_render"}
+    structural = {
+        **labels,
+        ca.LABEL_CTX_PLAN_REFUSED: "plan_length,plan_render",
+        ca.LABEL_CTX_DELIVERED: "0",
+    }
     assert lg.ctx_label_violation(AUDITED.arm, structural) == ""
     control = _stamps(AUDITED, ctxset.ROLE_CONTROL)
     assert not set(AUDIT_OWN) & set(control)
@@ -204,6 +208,29 @@ def test_a_run_stamped_audited_row_and_its_control_pass() -> None:
         ({ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_bogus"}, "ctx_plan_would_refuse"),
         ({ca.LABEL_CTX_PLAN_REFUSED: "plan_test_name"}, "lookalike"),
         ({ca.LABEL_CTX_PLAN_REFUSED: "plan_length,plan_test_span"}, "ctx_plan_refused"),
+        # fullmatch: a trailing newline is not a digest or an auditor
+        ({ca.LABEL_CTX_PLAN_AUDIT: "a" * 64 + "\n"}, "ctx_plan_audit"),
+        ({ca.LABEL_CTX_PLAN_AUDITOR: "human:fixture-02\n"}, "ctx_plan_auditor"),
+        # a would-refuse is stamped only for a delivered plan, never beside a withheld one
+        (
+            {
+                ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_test_name",
+                ca.LABEL_CTX_PLAN_REFUSED: "plan_render",
+            },
+            "not delivered",
+        ),
+        (
+            {
+                ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_test_name",
+                ca.LABEL_CTX_PLAN_REFUSED: "plan_render",
+                ca.LABEL_CTX_DELIVERED: "0",
+            },
+            "not delivered",
+        ),
+        (
+            {ca.LABEL_CTX_PLAN_WOULD_REFUSE: "plan_test_name", ca.LABEL_CTX_DELIVERED: "0"},
+            "not delivered",
+        ),
     ],
 )
 def test_an_audited_row_whose_audit_stamps_disagree_is_refused(

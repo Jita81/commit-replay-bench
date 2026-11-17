@@ -223,6 +223,58 @@ def test_a_structural_and_lookalike_plan_is_withheld_for_the_structural_reason_o
 
 
 @pytest.mark.parametrize("arm", [AUDITED_ARM, GUARDED_ARM])
+def test_a_reason_in_neither_tuple_withholds_the_plan_on_either_arm(
+    arm: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail closed: the audited arm skips only a NAMED lookalike reason, so a reason the
+    guard gains later and nobody files under a tuple still withholds the plan whole."""
+    from crb.builders import brief as brief_mod
+
+    monkeypatch.setattr(brief_mod, "plan_guard", lambda *a, **k: ("plan_future_reason",))
+    e = entry(CLEAN)
+    composed = _compose(arm, e)
+    assert composed.brief.plan == ""
+    assert composed.labels[LABEL_CTX_DELIVERED] == "0"
+    assert composed.labels[LABEL_CTX_PLAN_REFUSED] == "plan_future_reason"
+    assert LABEL_CTX_PLAN_WOULD_REFUSE not in composed.labels
+    assert composed.refused == (e.text,)
+
+
+def test_an_unknown_and_a_lookalike_reason_withhold_on_the_unknown_one() -> None:
+    from crb.builders import brief as brief_mod
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            brief_mod,
+            "plan_guard",
+            lambda *a, **k: ("plan_future_reason", p.REASON_TEST_NAME),
+        )
+        composed = _compose(AUDITED_ARM, entry(LOOKALIKE))
+    assert composed.brief.plan == ""
+    assert composed.labels[LABEL_CTX_PLAN_REFUSED] == "plan_future_reason"
+    assert LABEL_CTX_PLAN_WOULD_REFUSE not in composed.labels
+
+
+@pytest.mark.parametrize(
+    ("structural", "lookalike"),
+    [
+        # a reason in both: the bypass would skip a structural reason
+        ((*p.STRUCTURAL_REASONS, p.REASON_TEST_NAME), p.LOOKALIKE_REASONS),
+        (p.STRUCTURAL_REASONS, (*p.LOOKALIKE_REASONS, p.REASON_LENGTH)),
+        # a reason in neither, or one outside the plan reasons
+        (p.STRUCTURAL_REASONS[1:], p.LOOKALIKE_REASONS),
+        (p.STRUCTURAL_REASONS, (*p.LOOKALIKE_REASONS, "plan_future_reason")),
+    ],
+)
+def test_a_broken_reason_split_is_named_without_an_assert(
+    structural: tuple[str, ...], lookalike: tuple[str, ...]
+) -> None:
+    """The split is checked at import by a real raise, which ``python -O`` keeps."""
+    assert p.reason_split_violation(p.STRUCTURAL_REASONS, p.LOOKALIKE_REASONS, p.PLAN_REASONS) == ""
+    assert p.reason_split_violation(structural, lookalike, p.PLAN_REASONS)
+
+
+@pytest.mark.parametrize("arm", [AUDITED_ARM, GUARDED_ARM])
 def test_the_blind_brief_still_withholds_the_test_files_targets_and_command(arm: str) -> None:
     composed = _compose(arm, entry(LOOKALIKE))
     brief = composed.brief

@@ -285,7 +285,10 @@ rendered into the builder's brief.
 
 ### Accepted-plan sets (ADR-0054)
 
-A `crb.ctxset.v3` set holds the `plan` source, and only it; there is no `plan-placebo` yet.
+A `crb.ctxset.v3` set holds the `plan` and `plan-audited` sources, and only them (the
+`plan-audited` form adds an `audit` field, see
+[Audited-bypass plan sets](#audited-bypass-plan-sets-adr-0055)); there is no `plan-placebo`
+yet.
 The body is `{schema, source: "plan", repo, method, drafter, saw, accepted_by, entries}`:
 
 - `drafter` is `human:<id>` or `model:<id>@<sha256>`;
@@ -347,7 +350,8 @@ exactly these keys:
 - `audited`: a sorted, unique subset of `model`, `prompt` and `transcripts` that always holds
   `transcripts`, what the auditor read;
 - `record_sha256`: the full sha256 of the audit record, which is kept outside crb;
-- `method`: one trimmed line of at most 300 characters, with no code fence;
+- `method`: one trimmed line of at most 300 characters, with no line break of any kind and no
+  code fence (a backtick fence or `~~~`);
 - `covers`: every entry's task id, sorted, and no other.
 
 The audit is inside the set's digest, so an audited set never shares a name with a guarded set
@@ -359,11 +363,15 @@ it**: crb checks its shape and records its digest and author, and never reads th
   whole and is stamped `ctx_plan_refused`. Lookalike reasons alone (`plan_test_name`,
   `plan_test_path`, `plan_test_span`, `plan_gold_span`, `plan_gold_line`,
   `plan_asserted_literal`) do not: the plan is delivered. The blind brief still withholds the
-  test files, target tests and test command.
+  test files, target tests and test command, but the delivered plan itself may name a
+  held-out test, its path, its lines or an asserted literal (the row's
+  `ctx_plan_would_refuse` says which). Only a reason the lookalike list names is skipped: any
+  other reason withholds the plan.
 - **Stamps.** Every row of the arm carries `ctx_plan_guard` = `audited_bypass`,
   `ctx_plan_audit` (the record's digest) and `ctx_plan_auditor`; a delivered plan the full guard
-  would have withheld also carries `ctx_plan_would_refuse` (its lookalike reasons, sorted). The
-  ledger refuses a row whose stamps are missing or wrong, and any of these stamps on another row.
+  would have withheld also carries `ctx_plan_would_refuse` (its lookalike reasons, sorted), and
+  only a row that delivered its plan carries it. The ledger refuses a row whose stamps are
+  missing or wrong, and any of these stamps on another row.
 - **Reading.** `GET /ctxsets/compare` pairs an audited run with its own plain `A0` control and
   refuses it paired with a guarded `ctx.plan` arm, either way round (**422 `ctx_pair_blend`**).
   `GET /ctxsets/{name}` says `audited` and gives `audit_record_sha256`, never the method.

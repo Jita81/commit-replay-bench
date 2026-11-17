@@ -130,8 +130,25 @@ LOOKALIKE_REASONS: tuple[str, ...] = (
     REASON_GOLD_LINE,
     REASON_ASSERTED_LITERAL,
 )
-assert set(STRUCTURAL_REASONS).isdisjoint(LOOKALIKE_REASONS)
-assert set(STRUCTURAL_REASONS) | set(LOOKALIKE_REASONS) == set(PLAN_REASONS)
+
+
+def reason_split_violation(
+    structural: tuple[str, ...], lookalike: tuple[str, ...], every: tuple[str, ...]
+) -> str:
+    """Why ``structural`` and ``lookalike`` are not a partition of ``every`` (a reason in
+    both, or one in neither, or one outside ``every``), or ``""`` (ADR-0055). Checked at
+    import with a real raise, not an ``assert``, so ``python -O`` cannot drop it: a reason in
+    both tuples would be skipped by the audited bypass although it is structural."""
+    both = sorted(set(structural) & set(lookalike))
+    if both:
+        return f"plan reasons {both} are both structural and lookalike"
+    if set(structural) | set(lookalike) != set(every):
+        return "the structural and lookalike plan reasons are not exactly the plan reasons"
+    return ""
+
+
+if _why := reason_split_violation(STRUCTURAL_REASONS, LOOKALIKE_REASONS, PLAN_REASONS):
+    raise RuntimeError(_why)
 
 #: ADR-0055: what an audit of blind drafting may have read (``transcripts`` always), and the
 #: longest one-line ``method`` an audit record may state.
@@ -275,6 +292,7 @@ __all__ = [
     "PlanBody",
     "length_violation",
     "plan_from_doc",
+    "reason_split_violation",
     "render",
     "shape_violation",
 ]

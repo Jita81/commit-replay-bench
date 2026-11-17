@@ -37,6 +37,9 @@ tests would hand the builder the answer under another name.
    Each entry carries the task's parent commit as `source_rev` and a structured `plan` of
    five sections of one-line strings: `summary`, `files`, `steps`, `decisions` and `tests`.
    `summary` and `steps` are never empty. Entries may carry ADR-0053 `gaps`.
+   (Amended by ADR-0055: `crb.ctxset.v3` also holds the `plan-audited` source, the same record
+   with an `audit` attestation; ADR-0055 extends this ADR's amendments of ADR-0050, ADR-0026
+   and ADR-0053 to that source.)
 2. **Rendered by code.** The text the builder reads is rendered from the plan by
    `crb.core.plan.render`: one fixed header, then each section as plain bullets (steps
    numbered), with no indentation. The header and headings ("Implementation plan for this

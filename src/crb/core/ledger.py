@@ -669,7 +669,8 @@ def _plan_violation(arm: str, labels: Mapping[str, str]) -> str:
 def _audited_violation(arm: str, labels: Mapping[str, str]) -> str:
     """Why a ``ctx.plan-audited*`` row's audited-bypass stamps are wrong (ADR-0055), or
     ``""``: the guard, audit and auditor stamps present and well formed, the would-refuse
-    reasons lookalike ones only, the refused reasons structural ones only."""
+    reasons lookalike ones only and only on a row that delivered its plan, the refused
+    reasons structural ones only."""
     missing = [k for k in CTX_PLAN_AUDIT_LABELS if not labels.get(k)]
     if missing:
         return f"an audited-bypass plan row lacks {missing} (ADR-0055)"
@@ -678,15 +679,24 @@ def _audited_violation(arm: str, labels: Mapping[str, str]) -> str:
             f"ctx_plan_guard {labels[LABEL_CTX_PLAN_GUARD]!r} is not "
             f"{PLAN_GUARD_AUDITED_BYPASS!r} (ADR-0055)"
         )
-    if not _CTX_DIGEST_RE.match(labels[LABEL_CTX_PLAN_AUDIT]):
+    # fullmatch, not match: a ``$`` pattern's match also accepts one trailing "\n"
+    if not _CTX_DIGEST_RE.fullmatch(labels[LABEL_CTX_PLAN_AUDIT]):
         return "ctx_plan_audit is not a full audit-record digest (ADR-0055)"
-    if not _stated.REQ_DRAFTER_RE.match(labels[LABEL_CTX_PLAN_AUDITOR]):
+    if not _stated.REQ_DRAFTER_RE.fullmatch(labels[LABEL_CTX_PLAN_AUDITOR]):
         return "ctx_plan_auditor is not human:<id> or model:<id>@<sha256> (ADR-0055)"
     raw = labels.get(LABEL_CTX_PLAN_WOULD_REFUSE)
     if raw is not None:
         would = raw.split(",")
         if not raw or would != sorted(set(would)) or not set(would) <= set(_plan.LOOKALIKE_REASONS):
             return f"ctx_plan_would_refuse {raw!r} is not a sorted set of lookalike reasons"
+        # a would-refuse is stamped only for a DELIVERED plan, and a task has one plan entry:
+        # it never sits beside a withheld plan or on a row that delivered nothing
+        delivered = labels.get(LABEL_CTX_DELIVERED, "")
+        if LABEL_CTX_PLAN_REFUSED in labels or not _POSITIVE_COUNT_RE.fullmatch(delivered):
+            return (
+                "ctx_plan_would_refuse on a row whose plan was not delivered "
+                "(ctx_plan_refused set or ctx_delivered not at least 1, ADR-0055)"
+            )
     refused = labels.get(LABEL_CTX_PLAN_REFUSED)
     if refused is not None:
         why = refused.split(",")

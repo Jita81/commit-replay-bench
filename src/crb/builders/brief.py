@@ -1602,9 +1602,10 @@ def compose(
     ``ctx_plan_refused``); a kept plan's text goes to ``BuildBrief.plan``, never to
     ``spec_facts``, and the gold-novel tokens it names are counted as ``ctx_plan_novel``.
 
-    On an audited-bypass plan arm (``ctx.plan-audited*``, ADR-0055) the same guard runs, but
-    only its structural reasons (:data:`~crb.core.plan.STRUCTURAL_REASONS`) withhold a plan;
-    a delivered plan's lookalike reasons (:data:`~crb.core.plan.LOOKALIKE_REASONS`) are
+    On an audited-bypass plan arm (``ctx.plan-audited*``, ADR-0055) the same guard runs, and
+    every reason but a lookalike one withholds a plan (the structural reasons,
+    :data:`~crb.core.plan.STRUCTURAL_REASONS`, and any reason in neither tuple: it fails
+    closed); a delivered plan's lookalike reasons (:data:`~crb.core.plan.LOOKALIKE_REASONS`) are
     stamped as ``ctx_plan_would_refuse``, and the row says ``ctx_plan_guard`` =
     ``audited_bypass``. Every other check is unchanged."""
     ctx_name = _arms.ctx_set_name(arm)
@@ -1663,7 +1664,9 @@ def compose(
     for e in plan_entries:
         reasons = plan_guard(e.plan, gold, request, text=e.text) if e.plan else ()
         if audited:
-            withheld = tuple(r for r in reasons if r in _plan.STRUCTURAL_REASONS)
+            # fail closed: only a NAMED lookalike reason is skipped; any other reason, a
+            # structural one or one added later to neither tuple, still withholds the plan
+            withheld = tuple(r for r in reasons if r not in _plan.LOOKALIKE_REASONS)
             would = tuple(r for r in reasons if r in _plan.LOOKALIKE_REASONS)
         else:
             withheld, would = reasons, ()

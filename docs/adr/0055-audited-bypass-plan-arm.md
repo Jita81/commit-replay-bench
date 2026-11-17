@@ -7,8 +7,10 @@ brief, guard decision or reader result changes. The new source is opt-in; withou
 field every plan set, brief and row is byte-identical to before, and the new stamps appear only
 on rows of the new arm.
 **Builds on:** ADR-0054 (the accepted-plan context arm), ADR-0050 (context sets) and ADR-0052
-(stated requirements, whose drafter form the audit reuses). **Amends:** ADR-0054 item 4, for
-the `plan-audited` source only (see "Amended lines").
+(stated requirements, whose drafter form the audit reuses). **Amends:** ADR-0054 items 1 and
+4, for the `plan-audited` source only, and extends to that source every amendment ADR-0054
+makes for the `plan` source: ADR-0050 items 3 and 4, ADR-0026 item 7 and ADR-0053 items 1
+and 5 (see "Amended lines").
 
 ## Context
 
@@ -26,9 +28,11 @@ answer", not "plans written before the build". The plans most likely to help are
 likely to be withheld.
 
 Where the drafting itself was audited (a person or a model read the drafter's prompt, the
-model it ran and its transcripts, and found no sight of the change), the text checks add
-nothing that the audit did not already establish, and they cost the measurement its strongest
-plans. But the audit happens outside the product. The product cannot replay it.
+model it ran and its transcripts, and found no sight of the change), the text checks mostly
+duplicate what the audit establishes, and they cost the measurement its strongest plans. They
+are not wholly redundant: an audit of what the drafter was shown cannot show that the model
+did not recall the change from its training. And the audit happens outside the product. The
+product cannot replay it.
 
 ## Decision
 
@@ -42,8 +46,9 @@ plans. But the audit happens outside the product. The product cannot replay it.
    `model:<id>@<sha256>`), `audited` (a sorted, unique subset of `model`, `prompt` and
    `transcripts` that always holds `transcripts`), `record_sha256` (the full sha256 of the
    audit record, which is kept outside the product), `method` (one trimmed line of at most
-   300 characters, with no code fence) and `covers` (every entry's task id, sorted, and no
-   other). Any other shape is refused `ctxset_plan_audit` before the set is stored.
+   300 characters, with no line break of any kind and no code fence, of backticks or
+   `~~~`) and `covers` (every entry's task id, sorted, and no other). Any other shape is
+   refused `ctxset_plan_audit` before the set is stored.
 3. **Inside the digest.** The audit is part of the hashed body, so a set's name moves when any
    audit field moves, and an audited set never shares a name with a guarded set of the same
    plans. A set without `audit` hashes exactly as before.
@@ -55,8 +60,13 @@ plans. But the audit happens outside the product. The product cannot replay it.
 5. **The bypass.** On a `ctx.plan-audited*` arm, compose runs the full `plan_guard`. A
    structural reason still withholds the plan whole, as on a guarded arm, and only the
    structural reasons are stamped `ctx_plan_refused`. Lookalike reasons alone do not withhold
-   it: the plan is delivered, and the reasons are stamped. Every other part of the blind brief
-   is unchanged: the held-out test files, target tests and test command stay withheld.
+   it: the plan is delivered, and the reasons are stamped. The bypass fails closed: only a
+   reason named in the lookalike tuple is skipped, so a reason in neither tuple withholds the
+   plan, and the split is checked when the module loads. Every other part of the blind brief
+   is unchanged: the brief's own test files, target tests and test command stay withheld. The
+   delivered plan itself may still name a held-out test, its path, its lines or an asserted
+   literal: a row whose `ctx_plan_would_refuse` holds `plan_test_name`, `plan_test_path`,
+   `plan_test_span` or `plan_asserted_literal` carries such text to the builder.
 6. **Stamps.** Every row of the arm carries `ctx_plan_guard` = `audited_bypass`,
    `ctx_plan_audit` (the record's sha256) and `ctx_plan_auditor` (who attested). A delivered
    plan the full guard would have withheld also carries `ctx_plan_would_refuse`: its lookalike
@@ -64,8 +74,10 @@ plans. But the audit happens outside the product. The product cannot replay it.
    of these four stamps. The audit's `method` is never stamped.
 7. **The ledger checks them.** A `ctx.plan-audited*` row without the guard, audit or auditor
    stamp, with a guard value other than `audited_bypass`, a short audit digest or a malformed
-   auditor is refused. So is a `ctx_plan_would_refuse` that is empty, unsorted, repeated or
-   names a structural reason, and a `ctx_plan_refused` that names a lookalike reason. Any of
+   auditor is refused, a trailing line break included. So is a `ctx_plan_would_refuse` that
+   is empty, unsorted, repeated, names a structural reason, or sits on a row that delivered no
+   plan (beside `ctx_plan_refused`, or with `ctx_delivered` below 1), and a `ctx_plan_refused`
+   that names a lookalike reason. Any of
    the four stamps on a guarded plan row, another kind's row, a control row or a row with no
    context set is refused.
 8. **Never pooled.** The audited arm is measurement-only, like every plan arm. `ctx_compare`
@@ -74,14 +86,20 @@ plans. But the audit happens outside the product. The product cannot replay it.
 9. **Readable, off by default.** No run uses the source unless an operator stores an audited
    set and names its arm. `crb ctxset lint` withholds an audited set's plans on structural
    reasons only and lists the lookalike ones as "audited bypass of …" (`would_refuse` in
-   `--json`); `crb ctxset show` prints `audited yes (record <hex12>)`. `GET /ctxsets/{name}`
-   carries `audited` and `audit_record_sha256`, never the method; `POST /ctxsets` takes the
-   `audit` field.
+   `--json`); `crb ctxset show` prints the line `audited    yes (record <hex12>)`.
+   `GET /ctxsets/{name}` carries `audited` and `audit_record_sha256`, never the method;
+   `POST /ctxsets` takes the `audit` field.
 
 ### Amended lines
 
 For the `plan-audited` source only:
 
+- **ADR-0054 item 1**, "`crb.ctxset.v3` holds the `plan` source and only it". It holds the
+  `plan-audited` source too, with its `audit` field (item 2 here).
+- **ADR-0054's own amendments** to ADR-0050 items 3 and 4, ADR-0026 item 7 and ADR-0053 items
+  1 and 5, which name the `plan` source, apply to `plan-audited` as well: its plan
+  entries meet `plan_guard` instead of `refuse_novel`, are admitted by the parent-commit check
+  without the mechanical stamp, may name a token the commit introduced and may carry gaps.
 - **ADR-0054 item 4**, "`plan_guard` withholds a plan whole" on any of its reasons. On an
   audited arm it withholds a plan whole on a structural reason only; a lookalike reason is
   stamped on the row (`ctx_plan_would_refuse`) and the plan is delivered.
@@ -108,6 +126,14 @@ stamps, not a relaxed gate.
   plan's shape first and is refused `plan_render`. `plan_code_block` is structural and kept,
   so a future renderer that allows a block cannot open it to the bypass.
 - No page shows `audited`, `audit_record_sha256` or the audited stamps yet [gap].
+- An audit of the drafter's prompt and transcripts cannot detect a model recalling a public
+  commit it was trained on. On a public repository an audited plan that trips a lookalike
+  reason may still carry the answer [gap]; a reader should treat rows whose
+  `ctx_plan_would_refuse` holds `plan_asserted_literal`, `plan_test_span` or `plan_gold_line`
+  as suspect.
+- The text limits that still apply to a delivered plan are weak bounds: up to 8000 characters
+  over 80 trimmed lines, so a falsely attested plan can carry held-out assertion lines word
+  for word, losing only their indentation.
 
 ## Alternatives considered
 
