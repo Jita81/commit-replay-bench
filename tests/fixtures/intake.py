@@ -15,7 +15,8 @@ How:          Plain classes in the ``fixtures`` package, imported as ``from fixt
               never imported by another test module, because pytest's import mode puts
               ``tests/`` on ``sys.path`` and not the repository root.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md
+ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md,
+              docs/adr/0056-a-not-ready-ticket-goes-back.md
 Works with:   src/crb/intake/client.py (the protocol it implements), tests/test_intake_client.py
               (proves the fake satisfies the protocol at runtime), tests/test_intake_draft.py and
               tests/test_intake_feedback.py (``a_ticket``), tests/test_intake_service.py (drives
@@ -27,6 +28,7 @@ Touch when:   a verb is added to the protocol — add it here first, then the ad
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable
 
 from crb.intake import client as c
@@ -94,6 +96,9 @@ class FakeTracker:
         self._maybe_fail("transition", key)
         self.calls.append(("transition", key))
         self.states[key] = state
+        # the ticket's next read shows where it now is, as a real tracker's would (ADR-0056)
+        if key in self.tickets:
+            self.tickets[key] = dataclasses.replace(self.tickets[key], state=state)
 
     def link(self, key: str, url: str, title: str = "") -> None:
         self._maybe_fail("link", key)

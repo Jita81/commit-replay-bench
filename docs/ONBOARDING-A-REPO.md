@@ -302,7 +302,9 @@ intake writes its comments under, read in the server's intake code at this commi
 n/a]**, each marked as its own: what is missing, a note when the work is queued, a note when
 a pull request opens, and a note if the work stopped. It sets one `crb:` label.
 It attaches a link to the backlog item and a link to the pull request. And — only where your
-deployment configured a mapping — it makes one state change after a pull request merges. It
+deployment configured a mapping — it makes one state change after a pull request merges.
+Where your deployment names a return state (`CRB_INTAKE__RETURN_STATE`, ADR-0056), it also
+moves a ticket with open questions back to that state, once each time the ticket changes. It
 edits no other ticket field. It never creates a ticket. It never reads a column it was not
 pointed at. It never puts your source code, your diffs, the ledger or an evidence pack on the
 tracker. Those are bounded by the size of the protocol it has (six verbs: read the column,
