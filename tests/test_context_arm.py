@@ -13,7 +13,8 @@ What it does: Pins the grammar (bases, modifiers in order, the author on ``S1``)
 How:          Rows built with ``tests.fixtures.posture.posture_row`` at apparatus 2.4 and
               grades through ``grade_row_from_result``; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0026-the-context-standard.md (item 1), docs/adr/0025-routing-v2.md
+ADRs:         docs/adr/0026-the-context-standard.md (item 1), docs/adr/0025-routing-v2.md,
+              docs/adr/0054-accepted-plan-context-arm.md (the ``ctx.plan*`` arm)
 Works with:   src/crb/core/context_arm.py (the grammar and ``context_arm_for``),
               src/crb/core/ledger.py (the hashed stamp and ``ContextArmsPooled``),
               tests/fixtures/posture.py (the 2.4 rows the tests build)
@@ -48,6 +49,7 @@ from crb.core.context_arm import (
     is_arm,
     measurement_only,
     parse_arm,
+    plan_arm,
     rows_for_context_arm,
 )
 from crb.core.grade import Belts, GradeResult
@@ -254,6 +256,7 @@ CTX_ARMS = [
     f"A0+library@ctx.oracle-placebo.{HEX}",
     f"A0+library@ctx.mech.{HEX}",
     f"A0+library@ctx.mech-placebo.{HEX}",
+    f"A0+library@ctx.plan.{HEX}",
 ]
 PRE_EXISTING_ARMS = [
     "A0",
@@ -278,6 +281,8 @@ MALFORMED_CTX_ARMS = [
     "A0+library@ctx.oracle.invalid",
     "S1@claude-sonnet-5+library@ctx.oracle.invalid",
     f"A0+library@ctx.mech.{HEX}0",
+    f"A0+library@ctx.plan-placebo.{HEX}",
+    f"A0+library@ctx.plan.{HEX}0",
 ]
 
 
@@ -294,6 +299,21 @@ def test_hindsight_is_the_oracle_set_and_its_placebo_never_a_mechanical_one() ->
     assert hindsight_arm(f"A0+library@ctx.oracle-placebo.{HEX}")
     assert not hindsight_arm(f"A0+library@ctx.mech.{HEX}")
     assert not hindsight_arm(f"A0+library@ctx.mech-placebo.{HEX}")
+
+
+def test_plan_arm_is_the_accepted_plan_set_only() -> None:
+    assert plan_arm(f"A0+library@ctx.plan.{HEX}")
+    for arm in CTX_ARMS[:4]:
+        assert not plan_arm(arm)
+    assert not hindsight_arm(f"A0+library@ctx.plan.{HEX}")
+    for arm in (*PRE_EXISTING_ARMS, "", "not an arm", f"A0+library@ctx.plan-placebo.{HEX}"):
+        assert not plan_arm(arm)
+
+
+def test_a_plan_arm_is_measurement_only() -> None:
+    arm = f"A0+library@ctx.plan.{HEX}"
+    assert measurement_only(arm)
+    assert ctx_set_name(arm) == f"ctx.plan.{HEX}"
 
 
 @pytest.mark.parametrize("arm", MALFORMED_CTX_ARMS)
@@ -317,6 +337,8 @@ def test_the_context_set_stamps_are_provenance_never_the_arm() -> None:
         assert label in PROVENANCE_LABELS
     for label in (LABEL_CTX_DELIVERED, LABEL_CTX_CHARS, LABEL_CTX_CEILING, "ctx_drafter"):
         assert label in PROVENANCE_LABELS
+    for name in ("drafter", "saw", "accepted", "refused", "novel"):
+        assert f"ctx_plan_{name}" in PROVENANCE_LABELS
     assert LABEL_CONTEXT_ARM not in PROVENANCE_LABELS
 
 

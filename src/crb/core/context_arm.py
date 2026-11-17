@@ -30,8 +30,8 @@ What it is:   The context-arm vocabulary: the grammar (``parse_arm`` / ``Context
               (``context_arm_for``), the provenance label names, the pooling refusal
               (``ContextArmsPooled``), the read filter (``rows_for_context_arm``) and the
               context-set predicates (``ctx_set_name``, ``hindsight_arm``,
-              ``stated_arm``, ``measurement_only``, ADR-0050 and ADR-0052) over one
-              source-to-kind table (``CTX_SOURCE_KIND``).
+              ``stated_arm``, ``plan_arm``, ``measurement_only``, ADR-0050, ADR-0052 and
+              ADR-0054) over one source-to-kind table (``CTX_SOURCE_KIND``).
 What it does: Refuses an arm id outside the grammar; names an arm's role (descriptive,
               ceiling, certifies retrospectively or prospectively); decides ``A0`` / ``S3`` /
               ``S1@<author>`` / ``S2`` (with ``+L`` when the brief carried the loop) for a
@@ -44,7 +44,8 @@ Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (item 1),
               docs/adr/0025-routing-v2.md (the one bump the stamp rides),
               docs/adr/0050-context-set-arms.md (the reserved ``ctx.`` library names),
-              docs/adr/0052-stated-requirement-arms.md (the ``req`` sources and their stamps)
+              docs/adr/0052-stated-requirement-arms.md (the ``req`` sources and their stamps),
+              docs/adr/0054-accepted-plan-context-arm.md (the ``plan`` source and its stamps)
 Works with:   src/crb/core/ledger.py (the label, ``GradeRow.context_arm``, the refusal in
               ``cell_stats``), src/crb/core/reading.py (a reading's hierarchy names arms),
               src/crb/core/routing.py (routes one arm), src/crb/core/capability.py (the map
@@ -93,12 +94,20 @@ CTX_PREFIX = "ctx."
 #: The kind of each context-set source: ``hindsight`` (written with sight of the answer, read
 #: as a ceiling, under the novel-token guard), ``mechanical`` (drafted at the parent commit by a
 #: pinned drafter) and ``stated`` (ADR-0052: stated requirements, written with hindsight, whose
-#: new names are declared item by item and checked by ``req_guard``). THE one table every
+#: new names are declared item by item and checked by ``req_guard``) and ``planned``
+#: (ADR-0054: an accepted implementation plan, written before the build from the ticket and the
+#: parent tree, checked by ``plan_guard``; it has no placebo source yet). THE one table every
 #: predicate below and ``crb.core.ctxset`` derives a source's kind from (ADR-0052 item 4).
 CTX_KIND_HINDSIGHT = "hindsight"
 CTX_KIND_MECHANICAL = "mechanical"
 CTX_KIND_STATED = "stated"
-CTX_KINDS: tuple[str, ...] = (CTX_KIND_HINDSIGHT, CTX_KIND_MECHANICAL, CTX_KIND_STATED)
+CTX_KIND_PLANNED = "planned"
+CTX_KINDS: tuple[str, ...] = (
+    CTX_KIND_HINDSIGHT,
+    CTX_KIND_MECHANICAL,
+    CTX_KIND_STATED,
+    CTX_KIND_PLANNED,
+)
 CTX_SOURCE_KIND: dict[str, str] = {
     "oracle": CTX_KIND_HINDSIGHT,
     "oracle-placebo": CTX_KIND_HINDSIGHT,
@@ -106,6 +115,7 @@ CTX_SOURCE_KIND: dict[str, str] = {
     "mech-placebo": CTX_KIND_MECHANICAL,
     "req": CTX_KIND_STATED,
     "req-placebo": CTX_KIND_STATED,
+    "plan": CTX_KIND_PLANNED,
 }
 #: The context-set sources, in table order.
 CTX_SOURCES: tuple[str, ...] = tuple(CTX_SOURCE_KIND)
@@ -149,6 +159,18 @@ LABEL_CTX_REQ_REFUSED = "ctx_req_refused"
 #: ``measure_open_gaps``, the count of the task's open requirement gaps (absent otherwise):
 #: the row was measured with a requirement the requester had not yet stated.
 LABEL_CTX_OPEN_GAPS = "ctx_open_gaps"
+#: Accepted-plan stamps (ADR-0054), on an entries row of a ``ctx.plan*`` arm only:
+#: ``ctx_plan_drafter`` who wrote the plan (``human:<id>`` or ``model:<id>@<sha256>``; never
+#: ``ctx_drafter``, which means a mechanical drafter); ``ctx_plan_saw`` what the drafter saw
+#: (``ticket`` or ``ticket,tree``); ``ctx_plan_accepted`` who accepted it (``human:<id>`` or
+#: ``none``); ``ctx_plan_refused`` the guard's reasons when it withheld the plan;
+#: ``ctx_plan_novel`` how many tokens the change introduced the delivered plan names
+#: (counted, never refused).
+LABEL_CTX_PLAN_DRAFTER = "ctx_plan_drafter"
+LABEL_CTX_PLAN_SAW = "ctx_plan_saw"
+LABEL_CTX_PLAN_ACCEPTED = "ctx_plan_accepted"
+LABEL_CTX_PLAN_REFUSED = "ctx_plan_refused"
+LABEL_CTX_PLAN_NOVEL = "ctx_plan_novel"
 #: The builder's turns on a row of a context-set run (ADR-0052 item 5). Deliberately NOT in
 #: :data:`PROVENANCE_LABELS`: a per-row count is not a stamp to list or filter by, and the
 #: control rows that carry it are plain ``A0`` rows (ADR-0052 review note 13).
@@ -187,6 +209,12 @@ PROVENANCE_LABELS: tuple[str, ...] = (
     LABEL_CTX_REQ_DRAFTER,
     LABEL_CTX_REQ_REFUSED,
     LABEL_CTX_OPEN_GAPS,
+    # the accepted-plan stamps (ADR-0054)
+    LABEL_CTX_PLAN_DRAFTER,
+    LABEL_CTX_PLAN_SAW,
+    LABEL_CTX_PLAN_ACCEPTED,
+    LABEL_CTX_PLAN_REFUSED,
+    LABEL_CTX_PLAN_NOVEL,
 )
 
 #: The ``learn`` label value that means the loop was off for the run (ADR-0020 §8).
@@ -365,6 +393,14 @@ def stated_arm(arm: str) -> bool:
     return bool(source) and ctx_kind(source) == CTX_KIND_STATED
 
 
+def plan_arm(arm: str) -> bool:
+    """``True`` for an accepted-plan arm (``ctx.plan*``, ADR-0054): its entries are rendered
+    from a plan and checked by ``plan_guard``; they are admitted at the task's parent commit
+    without the mechanical stamp, and the text reaches the brief's own plan block."""
+    source = ctx_source_of(arm)
+    return bool(source) and ctx_kind(source) == CTX_KIND_PLANNED
+
+
 def measurement_only(arm: str) -> bool:
     """``True`` for any context-set arm: no reading accepts it and it never certifies,
     licenses, routes or enters the value scorecard (ADR-0050 item 9)."""
@@ -449,6 +485,7 @@ __all__ = [
     "CTX_KINDS",
     "CTX_KIND_HINDSIGHT",
     "CTX_KIND_MECHANICAL",
+    "CTX_KIND_PLANNED",
     "CTX_KIND_STATED",
     "CTX_NAME_RE",
     "CTX_PREFIX",
@@ -465,6 +502,11 @@ __all__ = [
     "LABEL_CTX_GAP_RULE",
     "LABEL_CTX_ITEMS",
     "LABEL_CTX_OPEN_GAPS",
+    "LABEL_CTX_PLAN_ACCEPTED",
+    "LABEL_CTX_PLAN_DRAFTER",
+    "LABEL_CTX_PLAN_NOVEL",
+    "LABEL_CTX_PLAN_REFUSED",
+    "LABEL_CTX_PLAN_SAW",
     "LABEL_CTX_PROV",
     "LABEL_CTX_REQ_DRAFTER",
     "LABEL_CTX_REQ_REFUSED",
@@ -490,6 +532,7 @@ __all__ = [
     "measurement_only",
     "mode_admits",
     "parse_arm",
+    "plan_arm",
     "rows_for_context_arm",
     "stated_arm",
 ]

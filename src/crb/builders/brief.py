@@ -55,13 +55,23 @@ reach the brief — that is the amendment. Every other line of the brief — any
 items, every fact and every learned line — keeps :func:`refuse_novel` exactly as before, on a
 ``req`` arm too.
 
+**Accepted-plan arms** (ADR-0054). On a ``ctx.plan*`` arm the entries are admitted at the
+task's parent commit without the mechanical stamp (a plan is accepted, not mechanical), and an
+entry carrying a plan is checked by :func:`plan_guard`: it re-renders the text from the plan,
+holds the fixed limits, and refuses a code block, a held-out test's name or path, an
+eight-token span copied from the change's added test lines or its added source lines, or an
+asserted literal. A guarded plan is withheld WHOLE. A kept plan reaches ``BuildBrief.plan``,
+never ``spec_facts``; the change's novel tokens it names are counted (``ctx_plan_novel``), not
+refused — a plan written before the build may name what the build will add.
+
 Navigation
 ----------
 What it is:   The one brief composer (``compose``), the context-arm name (``context_arm_for``,
               a seam until stream R's ``crb.core.context_arm`` lands), the leak guard
               (``novel_tokens``, ``refuse_novel``, ``admit_retrospective``,
               ``admit_at_parent``), the stated-requirement guard (``req_guard`` over a
-              harness-side ``GoldView``, ``gold_view``), the replay
+              harness-side ``GoldView``, ``gold_view``), the accepted-plan guard
+              (``plan_guard``, ``plan_novel``), the replay
               ``S1`` arm's hook (``S1Arm``) and the rule for which factory ``S2`` rows a
               reading may count (``counts_as_s2_first_attempt``).
 What it does: Builds every replay and factory ``BuildBrief`` from one arm and one ticket,
@@ -75,13 +85,15 @@ Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (items 1, 7 and 8),
               docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0050-context-set-arms.md (item 4, the context-set admission),
-              docs/adr/0052-stated-requirement-arms.md (``req_guard``, the req amendment)
+              docs/adr/0052-stated-requirement-arms.md (``req_guard``, the req amendment),
+              docs/adr/0054-accepted-plan-context-arm.md (``plan_guard``, the plan arm)
 Works with:   src/crb/builders/adapter.py (the replay brief, the ``S1`` arm),
               src/crb/factory/build.py (the factory brief), src/crb/builders/base.py
               (``BuildBrief``, ``DEFAULT_RULES``), src/crb/core/playbook.py (the learned lines'
               held-out and time-order rules), src/crb/factory/loop.py (the factory's arm)
 Tested by:    tests/test_builders_brief.py, tests/test_replay_s1_arm.py,
-              tests/test_brief_req_guard.py
+              tests/test_brief_req_guard.py, tests/test_brief_plan_guard.py,
+              tests/test_brief_text_guard_equivalence.py
 Touch when:   never for a new repository; a context modifier joins ADR-0026 item 1's grammar
               (``context_arm_for`` and a provenance label); stream R's context-arm module lands
               (replace ``context_arm_for``'s body with R's).
@@ -103,6 +115,7 @@ from typing import Any
 from crb.builders.base import DEFAULT_RULES, BuildBrief
 from crb.core import acceptance as _acceptance
 from crb.core import context_arm as _arms
+from crb.core import plan as _plan
 from crb.core import stated as _stated
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_BLIND
@@ -130,6 +143,8 @@ LABEL_CTX_REFUSED = _arms.LABEL_CTX_REFUSED
 LABEL_CTX_DELIVERED = _arms.LABEL_CTX_DELIVERED
 LABEL_CTX_CHARS = _arms.LABEL_CTX_CHARS
 LABEL_CTX_REQ_REFUSED = _arms.LABEL_CTX_REQ_REFUSED
+LABEL_CTX_PLAN_REFUSED = _arms.LABEL_CTX_PLAN_REFUSED
+LABEL_CTX_PLAN_NOVEL = _arms.LABEL_CTX_PLAN_NOVEL
 CTX_LABELS: tuple[str, ...] = (
     LABEL_CTX_TICKET,
     LABEL_CTX_BRIEF,
@@ -226,7 +241,9 @@ class ContextEntry:
     ``source_rev`` is the commit a mechanical context-set entry was drafted at — its
     knowledge boundary (ADR-0050 item 4); empty for every other entry. ``items`` and
     ``structure`` are a stated-requirement entry's (ADR-0052): ``text`` must be
-    ``structure``'s rendering of ``items``, which :func:`req_guard` re-checks."""
+    ``structure``'s rendering of ``items``, which :func:`req_guard` re-checks. ``plan`` is an
+    accepted-plan entry's (ADR-0054): ``text`` must be its rendering, which :func:`plan_guard`
+    re-checks; ``source_rev`` is then the parent commit the plan was written at."""
 
     entry_id: str
     text: str
@@ -236,6 +253,12 @@ class ContextEntry:
     source_rev: str = ""
     items: tuple[_stated.StatedItem, ...] = ()
     structure: str = ""
+    plan: _plan.PlanBody | None = None
+
+    @property
+    def planned(self) -> bool:
+        """An accepted-plan entry (ADR-0054): it carries a plan."""
+        return self.plan is not None
 
 
 def admit_retrospective(
@@ -257,16 +280,21 @@ def admit_retrospective(
 
 
 def admit_at_parent(
-    entries: Iterable[ContextEntry], parent_rev: str
+    entries: Iterable[ContextEntry], parent_rev: str, *, require_mechanical: bool = True
 ) -> tuple[list[ContextEntry], list[str]]:
     """``(admitted, refused ids)`` for a MECHANICAL context-set arm (``ctx.mech*``, ADR-0050
     item 4; ADR-0026 item 1's ``+facts@<drafter>`` condition): an entry is admitted by its
     knowledge boundary, not by wall-clock time — only when it was produced mechanically and
-    records the task's parent commit as its ``source_rev``. Anything else is refused."""
+    records the task's parent commit as its ``source_rev``. Anything else is refused.
+
+    An accepted-plan arm (``ctx.plan*``, ADR-0054) passes ``require_mechanical=False``: a plan
+    is written and accepted by people or a pinned model, never stamped mechanical, and is
+    admitted by the same knowledge boundary alone (its ``source_rev`` is the parent)."""
     admitted: list[ContextEntry] = []
     refused: list[str] = []
     for e in entries:
-        if e.mechanical and bool(parent_rev) and e.source_rev == parent_rev:
+        ok = e.mechanical or not require_mechanical
+        if ok and bool(parent_rev) and e.source_rev == parent_rev:
             admitted.append(e)
         else:
             refused.append(e.entry_id)
@@ -1118,12 +1146,7 @@ def req_guard(
         reasons.add(_stated.REASON_RENDER)
     if _stated.length_violation(items, text):
         reasons.add(_stated.REASON_LENGTH)
-    if (
-        "```" in text
-        or "~~~" in text
-        or any(ln.startswith(("    ", "\t")) for ln in text.splitlines())
-    ):
-        reasons.add(_stated.REASON_CODE_BLOCK)
+    reasons.update(_text_guard(text, gold, prefix="req"))
     change = _change_tokens(gold)
     for item in items:
         valid = [d for d in item.discloses if d in gold.novel or d in change or gold.parent_has(d)]
@@ -1162,11 +1185,6 @@ def req_guard(
             reasons.add(_stated.REASON_SIGNATURE)
         if _asserted_literal(item.statement, gold, request):
             reasons.add(_stated.REASON_ASSERTED_LITERAL)
-    for tok in _test_def_tokens(gold):
-        if _names_ci(text, tok) and not _holds(gold.src_after, tok) and not gold.parent_has(tok):
-            reasons.add(_stated.REASON_TEST_NAME)
-    if _names_test_path(text, gold):
-        reasons.add(_stated.REASON_TEST_PATH)
     n = _stated.SPAN_TOKENS
     ordered = sorted(items, key=lambda i: i.item_id)
     whole = " ".join(i.statement for i in ordered)
@@ -1177,6 +1195,84 @@ def req_guard(
     if _copied_span(whole, gold.test_added, n) or _copied_span(past_headers, gold.src_added, n):
         reasons.add(_stated.REASON_TEST_SPAN)
     return sorted(reasons)
+
+
+def _text_guard(text: str, gold: GoldView, *, prefix: str) -> set[str]:
+    """The text-level checks :func:`req_guard` and :func:`plan_guard` share, each reason named
+    ``<prefix>_<check>``: ``code_block`` (a fence, or a line indented four spaces or a tab),
+    ``test_name`` (the text names a held-out test's own name that neither the source
+    post-image nor the parent holds) and ``test_path`` (it names a held-out test's path, file
+    name or stem)."""
+    reasons: set[str] = set()
+    if (
+        "```" in text
+        or "~~~" in text
+        or any(ln.startswith(("    ", "\t")) for ln in text.splitlines())
+    ):
+        reasons.add(f"{prefix}_code_block")
+    for tok in _test_def_tokens(gold):
+        if _names_ci(text, tok) and not _holds(gold.src_after, tok) and not gold.parent_has(tok):
+            reasons.add(f"{prefix}_test_name")
+            break
+    if _names_test_path(text, gold):
+        reasons.add(f"{prefix}_test_path")
+    return reasons
+
+
+# --- the accepted-plan guard (ADR-0054) ---------------------------------------------------
+
+
+def plan_guard(
+    plan: _plan.PlanBody,
+    gold: GoldView | None,
+    request: str = "",
+    *,
+    text: str | None = None,
+) -> tuple[str, ...]:
+    """The reasons an accepted-plan entry is withheld WHOLE (ADR-0054), sorted; empty when it
+    may reach the brief. Fails closed: no ``gold`` view is ``plan_no_gold``.
+
+    ``plan_render``: ``text`` (when given) is not the plan's rendering, or the plan breaks
+    its shape. ``plan_length``: a fixed limit is broken. ``plan_code_block``,
+    ``plan_test_name`` and ``plan_test_path``: :func:`_text_guard`'s checks.
+    ``plan_test_span``: the plan's lines, read together in order on the change's token
+    vocabulary, share a :data:`~crb.core.stated.SPAN_TOKENS`-token run with the change's
+    added test lines; ``plan_gold_span``: the same with its added source lines (a plan
+    restates the change's code, which it was written without). ``plan_asserted_literal``: a
+    plan line repeats four words in a row of a string literal an added held-out test line may
+    assert that neither ``request`` nor the parent holds. A token the change introduced that
+    the plan names is NOT a reason: a plan written before the build may name what the build
+    will add; :func:`plan_novel` counts it for the row."""
+    if gold is None:
+        return (_plan.REASON_NO_GOLD,)
+    reasons: set[str] = set()
+    try:
+        rendered = _plan.render(plan)
+    except ValueError:
+        return (_plan.REASON_RENDER,)
+    if text is not None and rendered != text:
+        reasons.add(_plan.REASON_RENDER)
+    if _plan.length_violation(plan, rendered):
+        reasons.add(_plan.REASON_LENGTH)
+    reasons.update(_text_guard(rendered, gold, prefix="plan"))
+    lines = plan.lines()
+    whole = " ".join(lines)
+    n = _stated.SPAN_TOKENS
+    if _copied_span(whole, gold.test_added, n):
+        reasons.add(_plan.REASON_TEST_SPAN)
+    if _copied_span(whole, gold.src_added, n):
+        reasons.add(_plan.REASON_GOLD_SPAN)
+    if any(_asserted_literal(line, gold, request) for line in lines):
+        reasons.add(_plan.REASON_ASSERTED_LITERAL)
+    return tuple(sorted(reasons))
+
+
+def plan_novel(text: str, gold: GoldView | None) -> int:
+    """How many tokens the change introduced (``gold.novel``) ``text`` names, case- and
+    whitespace-insensitively; ``0`` with no gold view. Counted on the row, never refused."""
+    if gold is None:
+        return 0
+    return sum(1 for tok in gold.novel if _names_ci(text, tok))
 
 
 # --- the composer -------------------------------------------------------------------------
@@ -1237,7 +1333,14 @@ def compose(
     On a stated-requirement arm (``ctx.req*``, ADR-0052) an entry carrying items is checked by
     :func:`req_guard` against ``gold`` instead of the novel-token guard; a withheld entry is
     counted in ``ctx_refused`` and its reasons stamped as ``ctx_req_refused``. Every entry
-    without items, every fact and every learned line keeps :func:`refuse_novel` there too."""
+    without items, every fact and every learned line keeps :func:`refuse_novel` there too.
+
+    On an accepted-plan arm (``ctx.plan*``, ADR-0054) the entries are admitted at
+    ``parent_rev`` without the mechanical stamp (:func:`admit_at_parent` with
+    ``require_mechanical=False``); an entry carrying a plan is checked by :func:`plan_guard`
+    instead of the novel-token guard and is withheld WHOLE on any reason (stamped as
+    ``ctx_plan_refused``); a kept plan's text goes to ``BuildBrief.plan``, never to
+    ``spec_facts``, and the gold-novel tokens it names are counted as ``ctx_plan_novel``."""
     ctx_name = _arms.ctx_set_name(arm)
     if ctx_name:
         retrospective = True
@@ -1255,7 +1358,9 @@ def compose(
                     f"a mechanical context-set arm ({arm}) is admitted at the task's parent "
                     "commit: compose needs parent_rev (ADR-0050 item 4)"
                 )
-            admitted, lib_refused = admit_at_parent(library, parent_rev)
+            admitted, lib_refused = admit_at_parent(
+                library, parent_rev, require_mechanical=not _arms.plan_arm(arm)
+            )
         else:
             admitted, lib_refused = admit_retrospective(library, pool_began=pool_began)
         # a bare fact carries no provenance, so it cannot show it was produced mechanically
@@ -1266,8 +1371,10 @@ def compose(
     # ADR-0052 amends ADR-0050 items 3 and 4 for the req source ONLY: on a stated arm an
     # entry with items meets req_guard; everything else still meets refuse_novel
     stated = _arms.stated_arm(arm)
+    planned = _arms.plan_arm(arm)
     req_entries = [e for e in admitted if stated and e.items]
-    guarded = [e for e in admitted if not (stated and e.items)]
+    plan_entries = [e for e in admitted if planned and e.plan is not None]
+    guarded = [e for e in admitted if e not in req_entries and e not in plan_entries]
     guard_texts, refused_lib = refuse_novel([e.text for e in guarded], novel)
     req_reasons: set[str] = set()
     req_kept: list[ContextEntry] = []
@@ -1280,10 +1387,24 @@ def compose(
             refused_lib.append(e.text)
         else:
             req_kept.append(e)
+    # ADR-0054: a plan entry meets plan_guard and is withheld WHOLE on any reason
+    request = f"{ticket.subject}\n{ticket.message}"
+    plan_reasons: set[str] = set()
+    plan_kept: list[ContextEntry] = []
+    for e in plan_entries:
+        withheld = plan_guard(e.plan, gold, request, text=e.text) if e.plan else ()
+        if withheld:
+            plan_reasons.update(withheld)
+            refused_lib.append(e.text)
+        else:
+            plan_kept.append(e)
     kept_entries = tuple(
-        e for e in admitted if e in req_kept or (e in guarded and e.text in guard_texts)
+        e
+        for e in admitted
+        if e in req_kept or e in plan_kept or (e in guarded and e.text in guard_texts)
     )
-    lib_texts = [e.text for e in kept_entries]
+    lib_texts = [e.text for e in kept_entries if e not in plan_kept]
+    plan_text = "\n\n".join(e.text for e in plan_kept)
     blind = mode == MODE_BLIND
     brief = BuildBrief(
         subject=ticket.subject,
@@ -1300,6 +1421,7 @@ def compose(
         config=config,
         finish_checks=tuple(finish_checks),
         playbook=tuple(kept_learned),
+        plan=plan_text,
     )
     refused = (*bare_refused, *refused_facts, *refused_learned, *refused_lib)
     parts = {
@@ -1312,6 +1434,9 @@ def compose(
         "playbook": list(brief.playbook),
         "finish_checks": list(brief.finish_checks),
     }
+    if brief.plan:
+        # only when there is one: every brief without a plan hashes exactly as before
+        parts["plan"] = brief.plan
     labels: dict[str, str] = {
         LABEL_CONTEXT_ARM: arm,
         LABEL_CTX_TICKET: ticket.source,
@@ -1336,6 +1461,10 @@ def compose(
         labels[LABEL_CTX_CHARS] = str(sum(len(e.text) for e in kept_entries))
     if req_reasons:
         labels[LABEL_CTX_REQ_REFUSED] = ",".join(sorted(req_reasons))
+    if plan_reasons:
+        labels[LABEL_CTX_PLAN_REFUSED] = ",".join(sorted(plan_reasons))
+    if plan_kept:
+        labels[LABEL_CTX_PLAN_NOVEL] = str(plan_novel(plan_text, gold))
     return Composed(brief=brief, labels=labels, refused=refused, library=kept_entries)
 
 
@@ -1382,6 +1511,8 @@ __all__ = [
     "LABEL_CTX_DELIVERED",
     "LABEL_CTX_HARNESS",
     "LABEL_CTX_LIBRARY",
+    "LABEL_CTX_PLAN_NOVEL",
+    "LABEL_CTX_PLAN_REFUSED",
     "LABEL_CTX_REFUSED",
     "LABEL_CTX_REQ_REFUSED",
     "LABEL_CTX_RULES",
@@ -1405,6 +1536,8 @@ __all__ = [
     "gold_view",
     "names_novel",
     "novel_tokens",
+    "plan_guard",
+    "plan_novel",
     "refuse_novel",
     "req_guard",
 ]

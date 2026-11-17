@@ -1277,8 +1277,10 @@ def ctxset_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
     (``ctxset_placebo_unmatched`` / ``ctxset_placebo_overlap``, via :func:`stored_ctxset`);
     409 ``ctx_open_gaps`` (ADR-0053) when role ``entries`` would deliver a set whose entries
     record open requirement gaps and the run did not opt in with ``measure_open_gaps``, its
-    ``detail.gaps`` listing each task's questions. Nothing is queued on any refusal; the
-    worker re-checks all of it at claim."""
+    ``detail.gaps`` listing each task's questions; an accepted-plan set (``ctx.plan*``,
+    ADR-0054) meets the same checks, its gaps included. Nothing is queued on any refusal; the
+    worker re-checks all of it at claim (and there, for a ``mech*`` or ``plan*`` set, that
+    each entry was drafted at its task's parent commit)."""
     name = body.context_set
     if name is None:
         return

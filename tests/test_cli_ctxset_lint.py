@@ -1,4 +1,4 @@
-"""``crb ctxset lint`` and the stated lines of ``show``/``compare`` (ADR-0052).
+"""``crb ctxset lint`` and the stated lines of ``show``/``compare`` (ADR-0052, ADR-0054).
 
 Navigation
 ----------
@@ -7,13 +7,15 @@ What it is:   The CLI suite for the offline ``crb ctxset lint FILE --clone DIR``
 What it does: Pins that a guard-clean stated entry lints ``ok`` (exit 0), that an undeclared
               answer is reported with ``req_undeclared_novel`` (exit 2), that a parse refusal
               is a one-line error naming its reason, that a non-stated set has nothing to
-              guard, and that the stated banner, provenance, cost and drift lines print.
+              guard, that an accepted-plan set is linted through ``plan_guard``, and that
+              the stated banner, provenance, cost and drift lines print.
 How:          The pyrepo ``feat: add subtract`` commit (tests/fixtures/pyrepo.py) as the clone;
               documents from tests/fixtures/ctx_rows.py; ``crb.cli.main.main``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0052-stated-requirement-arms.md
+ADRs:         docs/adr/0052-stated-requirement-arms.md,
+              docs/adr/0054-accepted-plan-context-arm.md
 Works with:   src/crb/cli/commands/ctxset.py (under test), src/crb/builders/brief.py
-              (``req_guard``), tests/test_cli_ctxset.py (the v1 CLI tests)
+              (``req_guard``, ``plan_guard``), tests/test_cli_ctxset.py (the v1 CLI tests)
 Tested by:    tests/test_cli_ctxset_lint.py
 Touch when:   never for a new repository; the lint verb or the stated output lines change.
 """
@@ -33,7 +35,7 @@ from crb.core import ctx_compare as cc
 from crb.core import ctxset
 from crb.core import stated as st
 from fixtures import pyrepo as pr
-from fixtures.ctx_rows import ctx_doc, req_doc
+from fixtures.ctx_rows import PLAN, ctx_doc, plan_doc, req_doc
 
 SAFE = "The calculator keeps the existing add function working unchanged"
 LEAK = "Add a subtract function beside add"
@@ -117,6 +119,23 @@ def test_a_parse_refusal_is_a_one_line_error(
 
 def test_a_non_stated_set_has_nothing_to_guard(pyrepo: pr.PyRepo) -> None:
     assert cmd.lint_set(ctx_doc(tasks=[pyrepo.feat_task().task_id]), pyrepo.path) == []
+
+
+def test_an_accepted_plan_set_is_linted_through_plan_guard(
+    pyrepo: pr.PyRepo, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    task = pyrepo.feat_task()
+    parent = pyrepo.repo.parent(task.task_id)
+    clean = {**PLAN, "files": [pr.SRC], "tests": ["Cover the new operation with a unit test"]}
+    ok = plan_doc(tasks=[task.task_id], plan=clean, source_rev=parent)
+    assert cmd.lint_set(ok, pyrepo.path) == [(task.task_id, [])]
+    code, out, _ = _lint(ok, pyrepo, tmp_path, capsys)
+    assert code == 0 and "1/1 entries pass the guard" in out
+    leaky = plan_doc(tasks=[task.task_id], plan={**clean, "tests": [f"Extend {pr.TEST_SUBTRACT}"]})
+    ((_tid, why),) = cmd.lint_set(leaky, pyrepo.path)
+    assert "plan_test_path" in why
+    code, out, err = _lint(leaky, pyrepo, tmp_path, capsys)
+    assert code == 2 and "plan_test_path" in out and "1 entry withheld" in err
 
 
 def test_show_prints_a_stated_sets_structure_and_items_digest() -> None:

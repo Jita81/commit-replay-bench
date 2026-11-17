@@ -83,7 +83,8 @@ ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0019-qualification-is-posture-relative.md,
               docs/adr/0024-working-by-construction.md; ADR-0025 items 5 and 6 (stream G);
               docs/adr/0050-context-set-arms.md (``ctx_label_violation``: a row's context-set
-              stamps agree with its arm)
+              stamps agree with its arm), docs/adr/0054-accepted-plan-context-arm.md (the
+              accepted-plan stamps)
 Works with:   src/crb/core/checks.py (the arm a row's ``checks`` stamp names),
               src/crb/core/grade.py (the GradeResult a row reduces; the belt vocabulary),
               src/crb/core/evidence.py (pack hash, canonical JSON, sha256, timestamps),
@@ -94,7 +95,7 @@ Works with:   src/crb/core/checks.py (the arm a row's ``checks`` stamp names),
 Tested by:    tests/test_ledger.py, tests/test_store_ledger.py, tests/test_census_gate.py,
               tests/test_run.py, tests/test_grade_api_belt.py, tests/test_checks_pooling.py,
               tests/test_ledger_classification.py, tests/test_failure_rule_golden.py,
-              tests/test_ledger_ctx.py
+              tests/test_ledger_ctx.py, tests/test_ledger_plan.py
 Touch when:   never for a new repository; adding a belt, a failure kind, a cell-key field or a
               hashed label changes what the chain commits to — needs an ADR, an apparatus bump
               (src/crb/core/version.py), a store migration (as
@@ -119,6 +120,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from crb.core import plan as _plan
 from crb.core import stated as _stated
 from crb.core import version as _version
 from crb.core.acceptance import held_out_graded, held_out_passes
@@ -138,6 +140,11 @@ from crb.core.context_arm import (
     LABEL_CTX_GAP_RULE,
     LABEL_CTX_ITEMS,
     LABEL_CTX_OPEN_GAPS,
+    LABEL_CTX_PLAN_ACCEPTED,
+    LABEL_CTX_PLAN_DRAFTER,
+    LABEL_CTX_PLAN_NOVEL,
+    LABEL_CTX_PLAN_REFUSED,
+    LABEL_CTX_PLAN_SAW,
     LABEL_CTX_PROV,
     LABEL_CTX_REQ_DRAFTER,
     LABEL_CTX_REQ_REFUSED,
@@ -155,6 +162,7 @@ from crb.core.context_arm import (
     is_arm,
     loop_on,
     parse_arm,
+    plan_arm,
     stated_arm,
 )
 from crb.core.evidence import BuilderRef, canonical_json, sha256_text, utc_now_iso
@@ -544,6 +552,21 @@ CTX_STATED_LABELS: tuple[str, ...] = (
 #: Stated stamps a ``ctx.req*`` entries row carries only sometimes: the guard's refusal and,
 #: on a run that opted in to measuring them, the task's open-gap count (ADR-0053).
 _CTX_STATED_OPTIONAL: tuple[str, ...] = (LABEL_CTX_REQ_REFUSED, LABEL_CTX_OPEN_GAPS)
+#: The accepted-plan stamps (ADR-0054): exactly on an entries row of a ``ctx.plan*`` arm,
+#: never on a control row or any other arm.
+CTX_PLAN_LABELS: tuple[str, ...] = (
+    LABEL_CTX_PLAN_DRAFTER,
+    LABEL_CTX_PLAN_SAW,
+    LABEL_CTX_PLAN_ACCEPTED,
+)
+#: Plan stamps a ``ctx.plan*`` entries row carries only sometimes: the guard's refusal, the
+#: delivered plan's count of the change's novel tokens, and (on a run that opted in to
+#: measuring them) the task's open-gap count (ADR-0053, which ADR-0054 extends to plans).
+_CTX_PLAN_OPTIONAL: tuple[str, ...] = (
+    LABEL_CTX_PLAN_REFUSED,
+    LABEL_CTX_PLAN_NOVEL,
+    LABEL_CTX_OPEN_GAPS,
+)
 _CTX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 # ASCII only: ``str.isdecimal`` would also pass non-ASCII digits such as "\u0661".
 _POSITIVE_COUNT_RE = re.compile(r"[1-9][0-9]*")
@@ -552,7 +575,13 @@ _POSITIVE_COUNT_RE = re.compile(r"[1-9][0-9]*")
 def _stated_violation(arm: str, labels: Mapping[str, str]) -> str:
     """Why a context-set arm row's stated stamps disagree with its arm (ADR-0052), or ``""``."""
     if not stated_arm(arm):
-        stray = [k for k in (*CTX_STATED_LABELS, *_CTX_STATED_OPTIONAL) if k in labels]
+        # ctx_open_gaps is a plan arm's too (ADR-0054); _plan_violation checks it there
+        shared = (LABEL_CTX_OPEN_GAPS,) if plan_arm(arm) else ()
+        stray = [
+            k
+            for k in (*CTX_STATED_LABELS, *_CTX_STATED_OPTIONAL)
+            if k in labels and k not in shared
+        ]
         return f"stated-requirement stamps {stray} on a non-req arm {arm!r}" if stray else ""
     missing = [k for k in CTX_STATED_LABELS if not labels.get(k)]
     if missing:
@@ -581,6 +610,41 @@ def _stated_violation(arm: str, labels: Mapping[str, str]) -> str:
     return ""
 
 
+def _plan_violation(arm: str, labels: Mapping[str, str]) -> str:
+    """Why a context-set arm row's accepted-plan stamps disagree with its arm (ADR-0054), or
+    ``""``."""
+    if not plan_arm(arm):
+        own = (*CTX_PLAN_LABELS, LABEL_CTX_PLAN_REFUSED, LABEL_CTX_PLAN_NOVEL)
+        stray = [k for k in own if k in labels]
+        return f"accepted-plan stamps {stray} on a non-plan arm {arm!r}" if stray else ""
+    missing = [k for k in CTX_PLAN_LABELS if not labels.get(k)]
+    if missing:
+        return f"an accepted-plan row lacks {missing} (ADR-0054)"
+    if not _stated.REQ_DRAFTER_RE.match(labels[LABEL_CTX_PLAN_DRAFTER]):
+        return "ctx_plan_drafter is not human:<id> or model:<id>@<sha256> (ADR-0054)"
+    saw = labels[LABEL_CTX_PLAN_SAW].split(",")
+    if (
+        saw != sorted(set(saw))
+        or not set(saw) <= set(_plan.PLAN_SAW_VALUES)
+        or _plan.PLAN_SAW_TICKET not in saw
+    ):
+        return f"ctx_plan_saw {labels[LABEL_CTX_PLAN_SAW]!r} is not a sorted known subset"
+    if not _plan.ACCEPTED_BY_RE.match(labels[LABEL_CTX_PLAN_ACCEPTED]):
+        return "ctx_plan_accepted is not human:<id> or none (ADR-0054)"
+    open_gaps = labels.get(LABEL_CTX_OPEN_GAPS)
+    if open_gaps is not None and not _POSITIVE_COUNT_RE.fullmatch(open_gaps):
+        return f"ctx_open_gaps {open_gaps!r} is not a positive count (ADR-0053)"
+    novel = labels.get(LABEL_CTX_PLAN_NOVEL)
+    if novel is not None and not (novel.isascii() and novel.isdecimal()):
+        return f"ctx_plan_novel {novel!r} is not a count (ADR-0054)"
+    refused = labels.get(LABEL_CTX_PLAN_REFUSED)
+    if refused is not None:
+        why = refused.split(",")
+        if why != sorted(set(why)) or not set(why) <= set(_plan.PLAN_REASONS):
+            return f"ctx_plan_refused {refused!r} is not a sorted set of plan_guard reasons"
+    return ""
+
+
 def ctx_label_violation(arm: str, labels: Mapping[str, str]) -> str:
     """Why a row's context-set stamps disagree with its arm (ADR-0050 item 5), or ``""``.
 
@@ -595,10 +659,19 @@ def ctx_label_violation(arm: str, labels: Mapping[str, str]) -> str:
 
     ADR-0052: a ``ctx.req*`` arm row also carries every :data:`CTX_STATED_LABELS` stamp
     (and ``ctx_req_refused`` only when the guard refused); no other row carries any of
-    them. ``ctx_turns`` is optional, decimal, and only on a context-set run's row."""
+    them. ``ctx_turns`` is optional, decimal, and only on a context-set run's row.
+
+    ADR-0054: a ``ctx.plan*`` arm row carries every :data:`CTX_PLAN_LABELS` stamp (and
+    ``ctx_plan_refused``, ``ctx_plan_novel`` and ``ctx_open_gaps`` only sometimes), no
+    ``ctx_drafter`` (a plan is accepted, not mechanical) and no ``ctx_ceiling``; no other row
+    carries any plan stamp."""
     name = ctx_set_name(arm)
     present = [k for k in (*CTX_RUN_LABELS, *CTX_ARM_LABELS) if k in labels]
-    stated_present = [k for k in (*CTX_STATED_LABELS, *_CTX_STATED_OPTIONAL) if k in labels]
+    # the stated and plan stamps, each once (ctx_open_gaps is optional on both)
+    own = dict.fromkeys(
+        (*CTX_STATED_LABELS, *_CTX_STATED_OPTIONAL, *CTX_PLAN_LABELS, *_CTX_PLAN_OPTIONAL)
+    )
+    stated_present = [k for k in own if k in labels]
     if not name and not present:
         orphan = [*stated_present, *([LABEL_CTX_TURNS] if LABEL_CTX_TURNS in labels else [])]
         if orphan:
@@ -639,11 +712,12 @@ def ctx_label_violation(arm: str, labels: Mapping[str, str]) -> str:
         hindsight and labels.get(LABEL_CTX_CEILING) != "1"
     ):
         return f"ctx_ceiling must be '1' exactly on a hindsight arm ({arm!r})"
-    if hindsight == bool(labels.get(LABEL_CTX_DRAFTER)) or (
-        hindsight and LABEL_CTX_DRAFTER in labels
+    mechanical = not hindsight and not plan_arm(arm)
+    if mechanical != bool(labels.get(LABEL_CTX_DRAFTER)) or (
+        not mechanical and LABEL_CTX_DRAFTER in labels
     ):
         return f"ctx_drafter is stamped exactly on a mechanical context-set arm ({arm!r})"
-    return _stated_violation(arm, labels)
+    return _stated_violation(arm, labels) or _plan_violation(arm, labels)
 
 
 class ChecksArmsPooled(ValueError):

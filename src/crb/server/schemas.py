@@ -841,7 +841,8 @@ class RunCreateRequest(BaseModel):
     #: same tasks, its rows stamped ``ctx_source=control``. Stored as ``params.context_role``.
     context_role: Literal["entries", "control"] | None = None
     #: ADR-0053, measurement only: with ``context_set`` on role ``entries``, run a set whose
-    #: entries record open requirement gaps instead of being refused 409 ``ctx_open_gaps``.
+    #: entries record open requirement gaps instead of being refused 409 ``ctx_open_gaps`` (a
+    #: stated ``req*`` set's or, ADR-0054, an accepted-plan ``plan*`` set's).
     #: Every row of a task with open gaps is stamped ``ctx_open_gaps`` (the count). Absent or
     #: ``false`` (the default) refuses. Stored as ``params.measure_open_gaps`` only when true.
     measure_open_gaps: bool | None = None

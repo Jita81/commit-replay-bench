@@ -2,18 +2,19 @@
 
 A context set (ADR-0050) lives in the server's store, written only by ``POST /ctxsets``, so
 this verb is an API client, not a reader of a local workdir: ``put FILE`` stores a
-``crb.ctxset.v1`` or ``crb.ctxset.v2`` document, ``show NAME`` prints its metadata (never an
+``crb.ctxset.v1``, ``v2`` or ``v3`` document, ``show NAME`` prints its metadata (never an
 entry's text) and ``compare --control RUN --treatment RUN`` prints the paired, fail-closed
 comparison. A hindsight treatment's ceiling banner (or a stated set's banner) is printed
 first. ``lint FILE --clone DIR`` is the one offline verb: it parses a document and runs a
-stated set's entries through ``req_guard`` against a local clone's gold view (ADR-0052), so a
-drafter sees what a run would withhold before storing it, and lists each entry's open
-requirement gaps as the questions a requester must answer (ADR-0053; never a lint failure).
+stated set's entries through ``req_guard`` (ADR-0052), or an accepted-plan set's through
+``plan_guard`` (ADR-0054), against a local clone's gold view, so a drafter sees what a run
+would withhold before storing it, and lists each entry's open requirement gaps as the
+questions a requester must answer (ADR-0053; never a lint failure).
 
 Navigation
 ----------
 What it is:   The ``crb ctxset`` verb: ``put``, ``show`` and ``compare`` over ``/ctxsets``,
-              and the offline ``lint`` of a stated-requirement document.
+              and the offline ``lint`` of a stated-requirement or accepted-plan document.
 What it does: Reads the API location and a local account from the environment the MCP
               server reads (``CRB_API_URL``, ``CRB_MCP_USERNAME``, ``CRB_MCP_PASSWORD``),
               sends the request and prints the API's answer; a refusal is a one-line
@@ -23,11 +24,12 @@ How:          :class:`crb.mcp.client.CrbApi` (login, CSRF, the error envelope), 
               as-is.
 Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0050-context-set-arms.md,
-              docs/adr/0052-stated-requirement-arms.md
+              docs/adr/0052-stated-requirement-arms.md,
+              docs/adr/0054-accepted-plan-context-arm.md
 Works with:   src/crb/server/routes/ctxsets.py (the routes), src/crb/mcp/client.py (the
               transport), src/crb/cli/main.py (the registration), docs/API.md (the
               ``/ctxsets`` routes and the refusal codes this command prints),
-              src/crb/builders/brief.py (``req_guard``, ``gold_view`` for ``lint``)
+              src/crb/builders/brief.py (``req_guard``, ``plan_guard``, ``gold_view`` for ``lint``)
 Tested by:    tests/test_cli_ctxset.py, tests/test_cli_ctxset_lint.py
 Touch when:   never for a new repository; the ``/ctxsets`` routes change shape (mirror
               docs/API.md#context-sets).
@@ -83,9 +85,10 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     cmp_.set_defaults(func=cmd_compare)
     lint = verbs.add_parser(
         "lint",
-        help="offline: parse a set and run a stated set's entries through the leak guard",
+        help="offline: parse a set and run a stated or plan set's entries through the guard",
         description="Parses FILE and, for a stated-requirement set, runs every entry through "
-        "req_guard against DIR's gold view of its commit. Paths are split into source and "
+        "req_guard (for an accepted-plan set, plan_guard) against DIR's gold view of its "
+        "commit. Paths are split into source and "
         "tests by the generic test-path heuristic; the run's guard, over the registered "
         "task's own split, stays authoritative. Exit 2 when any entry would be withheld.",
     )
@@ -120,6 +123,10 @@ def _meta_lines(d: dict[str, Any]) -> list[str]:
     if d.get("stated"):
         saw = ",".join(d.get("saw") or []) or "-"
         lines.append(f"stated     {d.get('structure')}  saw {saw}  items {d.get('items_digest')}")
+    if d.get("planned"):
+        # ADR-0054: what the plan's drafter saw and who accepted it, never the plan itself
+        saw = ",".join(d.get("saw") or []) or "-"
+        lines.append(f"planned    saw {saw}  accepted_by {d.get('accepted_by') or '-'}")
     return lines
 
 
@@ -191,10 +198,11 @@ def cmd_compare(args: argparse.Namespace) -> int:
 
 
 def lint_set(doc: object, clone: Path) -> list[tuple[str, list[str]]]:
-    """``(task_id, reasons)`` per entry of a stated set; reasons empty when the entry would
-    reach a brief. A parse refusal is a :class:`CliError`; a non-stated set has no entries
-    to guard and answers ``[]``."""
-    from crb.builders.brief import gold_view, req_guard
+    """``(task_id, reasons)`` per entry of a stated set (``req_guard``) or an accepted-plan
+    set (``plan_guard``, ADR-0054); reasons empty when the entry would reach a brief. A parse
+    refusal is a :class:`CliError`; any other set has no entries to guard and answers
+    ``[]``."""
+    from crb.builders.brief import gold_view, plan_guard, req_guard
     from crb.core import ctxset
     from crb.core.git import GitError, GitRepo
     from crb.core.spec import is_test_path
@@ -203,12 +211,12 @@ def lint_set(doc: object, clone: Path) -> list[tuple[str, list[str]]]:
         cset = ctxset.parse(doc)
     except ctxset.CtxSetRefused as refused:
         raise CliError(f"refused {refused.reason}: {refused.detail}") from refused
-    if not cset.stated:
+    if not (cset.stated or cset.planned):
         return []
     repo = GitRepo(clone)
     out: list[tuple[str, list[str]]] = []
     for entry in cset.entries:
-        if not entry.items:
+        if not entry.items and entry.plan is None:
             continue
         try:
             parent = repo.parent(entry.task_id)
@@ -225,7 +233,10 @@ def lint_set(doc: object, clone: Path) -> list[tuple[str, list[str]]]:
         )
         if gold is None:
             raise CliError(f"{entry.task_id[:12]}: a changed file is not readable in {clone.name}")
-        why = req_guard(entry.text, entry.items, cset.structure, gold, request=request)
+        if entry.plan is not None:
+            why = list(plan_guard(entry.plan, gold, request, text=entry.text))
+        else:
+            why = req_guard(entry.text, entry.items, cset.structure, gold, request=request)
         out.append((entry.task_id, why))
     return out
 

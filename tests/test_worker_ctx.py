@@ -1,7 +1,7 @@
 """The worker's claim-time check of a context-set run (ADR-0050 items 5 and 6).
 
 At claim the worker re-reads the run's stored set and re-checks it exactly as ``POST /runs``
-did, plus what only the clone can check: a ``mech*`` entry drafted at its task's parent, and
+did, plus what only the clone can check: a ``mech*`` or ``plan*`` entry drafted at its parent, and
 each task's gap label (rule ``anchor.v1``) read from the commit message and the parent tree.
 It hands the adapter the set's tasks in set order, the stamps every row carries, the entries
 (the ``entries`` role only) and the arm's set name. Any refusal is a ``run.refused`` event
@@ -17,7 +17,7 @@ How:          A worker shell (``Worker.__new__``) over a SQLite store holding th
               fixture's feat task, its clone as the run's git, and sets written where
               ``POST /ctxsets`` stores them.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0050-context-set-arms.md
+ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0054-accepted-plan-context-arm.md
 Works with:   src/crb/server/worker.py (under test), src/crb/core/ctxset.py (the set, the gap
               rule, the stamps), src/crb/server/routes/runs.py (``stored_ctxset``),
               tests/fixtures/pyrepo.py (the tiny git repository the worker runs over)
@@ -48,6 +48,7 @@ from crb.store import init_db, make_engine, make_session_factory
 from crb.store.jobs import STATUS_FAILED
 from crb.store.models import Repo, Task
 from fixtures import pyrepo as pr
+from fixtures.ctx_rows import plan_doc
 
 DRAFTER = "some-model-v1@" + "c" * 64
 WHEN = "2026-01-01T00:00:00+00:00"
@@ -240,6 +241,25 @@ def test_a_mechanical_entry_not_drafted_at_the_parent_is_refused(rig: _Rig) -> N
     ctx = _store(rig.home, _doc(rig.task.task_id, source="mech", parent="0" * 40))
     with _refused(ctxset.REASON_MECHANICAL):
         rig.plan(context_set=ctx.name)
+
+
+def test_a_plan_set_drafted_at_the_parent_plans_its_entry(rig: _Rig) -> None:
+    doc = plan_doc(tasks=(rig.task.task_id,), source_rev=rig.parent, repo=pr.REPO_NAME)
+    ctx = _store(rig.home, doc)
+    plan = rig.plan(context_set=ctx.name, context_role="entries")
+    assert plan.arm_set == ctx.name
+    (entry,) = plan.entries.values()
+    assert entry.plan is not None and entry.planned and not entry.mechanical
+    assert entry.source_rev == rig.parent
+    stamps = plan.stamps[rig.task.task_id]
+    assert stamps[ca.LABEL_CTX_PLAN_ACCEPTED] == "human:fixture-01"
+    assert ctx_label_violation(f"A0+library@{ctx.name}", stamps) == ""
+
+
+def test_a_plan_not_drafted_at_the_parent_is_refused(rig: _Rig) -> None:
+    doc = plan_doc(tasks=(rig.task.task_id,), source_rev="0" * 40, repo=pr.REPO_NAME)
+    with _refused(ctxset.REASON_MECHANICAL):
+        rig.plan(context_set=_store(rig.home, doc).name)
 
 
 def _placebo(treatment: ctxset.CtxSet, text: str) -> dict[str, Any]:

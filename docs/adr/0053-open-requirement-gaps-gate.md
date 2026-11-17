@@ -30,6 +30,8 @@ such a set. The tool should push back on a request with known gaps until they ar
    - A malformed gap is refused as strictly as a malformed item. A v1 entry refuses `gaps`.
    - A `req-placebo` set refuses `gaps`: only the treatment carries the questions, so the
      pair is refused, run and stamped alike.
+   - (Amended by ADR-0054: a `crb.ctxset.v3` accepted-plan entry may carry `gaps` under the
+     same rules, and its set meets the same gate.)
 2. **The digest.** The set digest includes `gaps` only when the list is non-empty, so every
    existing set keeps its digest and its name. The items digest never includes gaps, so a
    closed set pairs with the control of the open one.
@@ -42,6 +44,7 @@ such a set. The tool should push back on a request with known gaps until they ar
    runs the set anyway, for measurement only. It is stored on the run, and every row whose
    entry had gaps carries `ctx_open_gaps` = the gap count. The ledger refuses that stamp on
    any other row and refuses a value that is not a positive count. The default is refuse.
+   (Amended by ADR-0054: an accepted-plan row may carry the stamp too, on the same terms.)
 6. **Offline.** `crb ctxset lint` prints each entry's open gaps as questions. It does not fail
    on them: a gap is a question for a person, not a defect in the file.
 

@@ -2949,16 +2949,20 @@ export interface ClassSetProposal {
 export interface CtxSetMeta {
   name: string
   digest: string
-  /** `crb.ctxset.v1` or `crb.ctxset.v2`. */
+  /** `crb.ctxset.v1`, `crb.ctxset.v2` or `crb.ctxset.v3` (an accepted-plan set, ADR-0054). */
   schema: string
   arm: string
   source: string
   kind: string
   /** True for a stated-requirement set (v2, ADR-0052). */
   stated: boolean
+  /** True for an accepted-plan set (v3, ADR-0054). */
+  planned: boolean
+  /** Who accepted the plans (`human:<id>` or `none`) on an accepted-plan set, `""` on any other set. */
+  accepted_by: string
   /** `prose` or `checklist` on a stated set, `""` on a v1 set. */
   structure: string
-  /** What the stated set's author saw (a sorted subset of diff, tests, ticket); `[]` on a v1 set. */
+  /** What the stated set's author saw (a sorted subset of diff, tests, ticket), or what the plan's drafter saw (ticket and, optionally, tree); `[]` on a v1 set. */
   saw: string[]
   /** The stated set's items digest, `""` on a v1 set. */
   items_digest: string

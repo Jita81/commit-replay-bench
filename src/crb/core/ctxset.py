@@ -24,7 +24,25 @@ other source are refused::
 A v2 entry stores no text: its text is rendered BY CODE from its items with the set's
 structure (``crb.core.stated.render``), so nothing free-form reaches a brief. Each item's
 ``discloses`` tokens appear verbatim in its statement (``ctxset_items_undelivered``) and the
-fixed limits hold (``ctxset_items_length``). Its **digest** is the sha256 of its
+fixed limits hold (``ctxset_items_length``).
+
+An **accepted-plan** set (``plan``, ADR-0054) is schema ``crb.ctxset.v3`` — and only it is;
+there is no ``plan-placebo`` source yet::
+
+    {"schema": "crb.ctxset.v3", "source": "plan", "repo", "method",
+     "drafter": "human:<id>" | "model:<id>@<sha256>", "saw": ["ticket"] | ["ticket", "tree"],
+     "accepted_by": "human:<id>" | "none",
+     "entries": [{"task_id", "entry_id", "version", "produced_at", "source_rev" (the task's
+                  parent commit), "plan": {"summary", "files", "steps", "decisions", "tests"},
+                  "gaps" (optional, ADR-0053), "text" (optional: the plan's rendering)}]}
+
+A v3 entry's text is rendered BY CODE from its plan (``crb.core.plan.render``); a stored
+``text`` must equal that rendering (``ctxset_plan_render``) and is outside the digest. The
+drafter saw the ticket and the parent tree, never the change or its tests
+(``ctxset_plan_saw``); each plan line is one trimmed line with no fence and ``summary`` and
+``steps`` are never empty (``ctxset_plan_shape``); the fixed limits hold
+(``ctxset_plan_length``); ``accepted_by`` names who accepted the plan
+(``ctxset_plan_accepted``). Its **digest** is the sha256 of its
 canonical JSON (sorted keys, ``(",", ":")`` separators, UTF-8, no ASCII escaping); its
 **name** is ``ctx.<source>.<digest[:12]>`` and is never stored inside the hashed body, so a
 changed set is a new digest and a new arm (``A0+library@<name>``). Every check here refuses
@@ -55,7 +73,8 @@ How:          Pure functions over JSON values (stdlib only); the parent tree is 
               through the ``tree_has`` callable the worker passes.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0052-stated-requirement-arms.md
-              (the v2 schema), docs/adr/0026-the-context-standard.md
+              (the v2 schema), docs/adr/0054-accepted-plan-context-arm.md (the v3 schema),
+              docs/adr/0026-the-context-standard.md
               (items 1, 7 and 10, which ADR-0050 amends)
 Works with:   src/crb/core/context_arm.py (the reserved ``ctx.`` names and the ctx labels),
               src/crb/builders/brief.py (``ContextEntry``, the admission the arm derives; it
@@ -83,12 +102,20 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from crb.core import context_arm as _arms
+from crb.core import plan as _plan
 from crb.core import stated as _stated
 
 SCHEMA = "crb.ctxset.v1"
 #: The stated-requirement schema (ADR-0052): items, a structure and the writer's sight.
 SCHEMA_V2 = "crb.ctxset.v2"
-SCHEMAS: tuple[str, ...] = (SCHEMA, SCHEMA_V2)
+#: The accepted-plan schema (ADR-0054): a plan, its drafter's sight and who accepted it.
+SCHEMA_V3 = "crb.ctxset.v3"
+SCHEMAS: tuple[str, ...] = (SCHEMA, SCHEMA_V2, SCHEMA_V3)
+#: The schema each source kind is written in (ADR-0052, ADR-0054); any other kind is v1.
+_KIND_SCHEMA: dict[str, str] = {
+    _arms.CTX_KIND_STATED: SCHEMA_V2,
+    _arms.CTX_KIND_PLANNED: SCHEMA_V3,
+}
 
 SOURCE_ORACLE = "oracle"
 SOURCE_ORACLE_PLACEBO = "oracle-placebo"
@@ -96,6 +123,7 @@ SOURCE_MECH = "mech"
 SOURCE_MECH_PLACEBO = "mech-placebo"
 SOURCE_REQ = "req"
 SOURCE_REQ_PLACEBO = "req-placebo"
+SOURCE_PLAN = "plan"
 SOURCES: tuple[str, ...] = _arms.CTX_SOURCES
 PLACEBO_SUFFIX = "-placebo"
 
@@ -127,6 +155,16 @@ REASON_ITEMS_LENGTH = "ctxset_items_length"
 #: A stated entry records open requirement gaps and the run would deliver it (ADR-0053): the
 #: request is pushed back, its questions listed, until the requester closes them.
 REASON_OPEN_GAPS = "ctx_open_gaps"
+#: An accepted-plan set (ADR-0054) whose drafter saw the change or its tests, or not the ticket.
+REASON_PLAN_SAW = "ctxset_plan_saw"
+#: An accepted-plan set whose ``accepted_by`` is neither ``human:<id>`` nor ``none``.
+REASON_PLAN_ACCEPTED = "ctxset_plan_accepted"
+#: A plan line that is not one trimmed line, carries a fence, or an empty summary or steps.
+REASON_PLAN_SHAPE = "ctxset_plan_shape"
+#: A stored plan entry's ``text`` is not its plan's rendering.
+REASON_PLAN_RENDER = "ctxset_plan_render"
+#: A plan breaks the fixed line, file, decision or character limits.
+REASON_PLAN_LENGTH = "ctxset_plan_length"
 REASONS: tuple[str, ...] = (
     REASON_SCHEMA,
     REASON_DIGEST,
@@ -140,6 +178,11 @@ REASONS: tuple[str, ...] = (
     REASON_ITEMS_UNDELIVERED,
     REASON_ITEMS_LENGTH,
     REASON_OPEN_GAPS,
+    REASON_PLAN_SAW,
+    REASON_PLAN_ACCEPTED,
+    REASON_PLAN_SHAPE,
+    REASON_PLAN_RENDER,
+    REASON_PLAN_LENGTH,
 )
 
 #: A placebo entry's length may differ from its treatment's by at most
@@ -184,6 +227,24 @@ _V2_TOP_OPTIONAL = ("matched_to",)
 _V2_ENTRY_REQUIRED = ("task_id", "entry_id", "version", "produced_at", "items")
 #: ``gaps`` (ADR-0053): absent or ``[]`` is no known gap; a digest reads it only when non-empty.
 _V2_ENTRY_OPTIONAL = ("gaps",)
+_V3_TOP_REQUIRED = (
+    "schema",
+    "source",
+    "repo",
+    "method",
+    "drafter",
+    "saw",
+    "accepted_by",
+    "entries",
+)
+_V3_ENTRY_REQUIRED = ("task_id", "entry_id", "version", "produced_at", "source_rev", "plan")
+#: ``text`` (optional) must equal the plan's rendering and is outside the digest.
+_V3_ENTRY_OPTIONAL = ("gaps", "text")
+#: What a plan's drafter may NOT have seen: the change or its tests (ADR-0054).
+_PLAN_SAW_REFUSED = (_stated.SAW_DIFF, _stated.SAW_TESTS)
+#: Who accepted a plan: a person (an opaque id, never a name or address), or no one.
+ACCEPTED_NONE = _plan.ACCEPTED_NONE
+_ACCEPTED_BY_RE = _plan.ACCEPTED_BY_RE
 _GAP_REQUIRED = ("question", "decision")
 _ITEM_REQUIRED = ("item_id", "kind", "statement", "provenance", "discloses")
 _ITEM_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
@@ -226,8 +287,22 @@ class CtxEntryRecord:
     #: A stated (v2) entry's open requirement gaps (ADR-0053): questions for the requester,
     #: never rendered into ``text``.
     gaps: tuple[_stated.OpenGap, ...] = ()
+    #: An accepted-plan (v3) entry's plan (ADR-0054); ``text`` is its rendering.
+    plan: _plan.PlanBody | None = None
 
     def to_doc(self) -> dict[str, Any]:
+        if self.plan is not None:
+            planned: dict[str, Any] = {
+                "task_id": self.task_id,
+                "entry_id": self.entry_id,
+                "version": self.version,
+                "produced_at": self.produced_at,
+                "source_rev": self.source_rev,
+                "plan": self.plan.to_doc(),
+            }
+            if self.gaps:
+                planned["gaps"] = [g.to_doc() for g in self.gaps]
+            return planned
         if self.items:
             doc: dict[str, Any] = {
                 "task_id": self.task_id,
@@ -267,6 +342,8 @@ class CtxSet:
     #: A stated set's renderer and what its items' writer saw (``crb.ctxset.v2`` only).
     structure: str = ""
     saw: tuple[str, ...] = ()
+    #: Who accepted an accepted-plan set's plans: ``human:<id>`` or ``none`` (v3 only).
+    accepted_by: str = ""
 
     @property
     def name(self) -> str:
@@ -298,6 +375,12 @@ class CtxSet:
     def stated(self) -> bool:
         """``ctx.req*``: entries rendered from declared items (ADR-0052)."""
         return self.kind == _arms.CTX_KIND_STATED
+
+    @property
+    def planned(self) -> bool:
+        """``ctx.plan*``: entries rendered from an accepted plan (ADR-0054), admitted at the
+        task's parent commit."""
+        return self.kind == _arms.CTX_KIND_PLANNED
 
     @property
     def items_digest(self) -> str:
@@ -345,6 +428,9 @@ class CtxSet:
         if self.schema == SCHEMA_V2:
             out["structure"] = self.structure
             out["saw"] = list(self.saw)
+        if self.schema == SCHEMA_V3:
+            out["saw"] = list(self.saw)
+            out["accepted_by"] = self.accepted_by
         return out
 
 
@@ -420,13 +506,19 @@ def parse(doc: object, *, name: str | None = None) -> CtxSet:
     source = doc.get("source")
     if not isinstance(source, str) or source not in SOURCES:
         raise _schema(f"source {source!r} is not one of {SOURCES}")
-    stated = _arms.ctx_kind(source) == _arms.CTX_KIND_STATED
-    if stated != (schema == SCHEMA_V2):
+    kind = _arms.ctx_kind(source)
+    expected = _KIND_SCHEMA.get(kind, SCHEMA)
+    if schema != expected:
         raise _schema(
-            f"a {source!r} set is {SCHEMA_V2 if stated else SCHEMA!r}, not {schema!r} "
-            "(stated-requirement sources only are v2, ADR-0052)"
+            f"a {source!r} set is {expected!r}, not {schema!r} (stated-requirement sources "
+            "only are v2, ADR-0052; the accepted-plan source only is v3, ADR-0054)"
         )
-    out = _parse_v2(doc, source) if stated else _parse_v1(doc, source)
+    if kind == _arms.CTX_KIND_STATED:
+        out = _parse_v2(doc, source)
+    elif kind == _arms.CTX_KIND_PLANNED:
+        out = _parse_v3(doc, source)
+    else:
+        out = _parse_v1(doc, source)
     if canonical_digest(out.to_doc()) != out.digest:  # pragma: no cover - parse round-trips
         raise _schema("the parsed set does not round-trip to its document")
     if name is not None and name != out.name:
@@ -612,16 +704,20 @@ def _parse_gaps(entry: Mapping[str, Any], where: str) -> list[_stated.OpenGap]:
     return gaps
 
 
-def _hashed_body(doc: Mapping[str, Any]) -> Mapping[str, Any]:
-    """The v2 document a digest reads: an entry's empty ``gaps`` is no gap, so it is dropped
-    and a set's digest moves only when an entry records an open gap (ADR-0053)."""
+def _hashed_body(doc: Mapping[str, Any], *, drop_text: bool = False) -> Mapping[str, Any]:
+    """The v2 or v3 document a digest reads: an entry's empty ``gaps`` is no gap, so it is
+    dropped and a set's digest moves only when an entry records an open gap (ADR-0053). With
+    ``drop_text`` (v3, ADR-0054) an entry's ``text`` is dropped too: it is checked to be the
+    plan's rendering, so it carries nothing the plan does not."""
+
+    def dropped(k: str, v: Any) -> bool:
+        return (k == "gaps" and v == []) or (drop_text and k == "text")
+
     entries = doc["entries"]
-    if not any(isinstance(e, Mapping) and e.get("gaps") == [] for e in entries):
+    if not any(isinstance(e, Mapping) and any(dropped(*kv) for kv in e.items()) for e in entries):
         return doc
     out = dict(doc)
-    out["entries"] = [
-        {k: v for k, v in e.items() if not (k == "gaps" and v == [])} for e in entries
-    ]
+    out["entries"] = [{k: v for k, v in e.items() if not dropped(k, v)} for e in entries]
     return out
 
 
@@ -700,6 +796,109 @@ def _parse_v2(doc: Mapping[str, Any], source: str) -> CtxSet:
     )
 
 
+def _parse_plan_saw(doc: Mapping[str, Any]) -> list[str]:
+    saw = doc["saw"]
+    if not isinstance(saw, list) or not all(isinstance(s, str) for s in saw):
+        raise _schema("saw is not a list of strings")
+    seen = [s for s in saw if s in _PLAN_SAW_REFUSED]
+    if seen:
+        raise CtxSetRefused(
+            REASON_PLAN_SAW,
+            f"a plan's drafter saw {seen}: a plan is written from the ticket and the parent "
+            "tree only, never the change or its tests",
+        )
+    unknown = [s for s in saw if s not in _plan.PLAN_SAW_VALUES]
+    if unknown:
+        raise _schema(f"saw {unknown} is not one of {_plan.PLAN_SAW_VALUES}")
+    if _plan.PLAN_SAW_TICKET not in saw:
+        raise CtxSetRefused(REASON_PLAN_SAW, "a plan's drafter saw the ticket ('ticket' in saw)")
+    _sorted_unique(saw, "set.saw")
+    return saw
+
+
+def _parse_plan(entry: Mapping[str, Any], where: str) -> _plan.PlanBody:
+    try:
+        plan = _plan.plan_from_doc(entry["plan"])
+    except ValueError as e:
+        raise _schema(f"{where}.plan: {e}") from e
+    shape = _plan.shape_violation(plan)
+    if shape:
+        raise CtxSetRefused(REASON_PLAN_SHAPE, f"{where}.plan: {shape}")
+    over = _plan.length_violation(plan)
+    if over:
+        raise CtxSetRefused(REASON_PLAN_LENGTH, f"{where}.plan: {over}")
+    return plan
+
+
+def _parse_v3(doc: Mapping[str, Any], source: str) -> CtxSet:
+    _keys(doc, _V3_TOP_REQUIRED, (), "set")
+    repo = _text(doc, "repo", "set")
+    if not _REPO_RE.match(repo):
+        raise _schema(f"repo {repo!r} is not a repository id")
+    method = _text(doc, "method", "set")
+    drafter = _text(doc, "drafter", "set")
+    if not _REQ_DRAFTER_RE.match(drafter):
+        raise _schema("drafter is not 'human:<id>' or 'model:<pinned id>@<sha256 of the prompt>'")
+    saw = _parse_plan_saw(doc)
+    accepted_by = doc["accepted_by"]
+    if not isinstance(accepted_by, str) or not _ACCEPTED_BY_RE.match(accepted_by):
+        raise CtxSetRefused(
+            REASON_PLAN_ACCEPTED, "accepted_by is 'human:<id>' (who accepted the plan) or 'none'"
+        )
+
+    raw = doc["entries"]
+    if not isinstance(raw, list):
+        raise _schema("entries is not a list")
+    if not raw:
+        raise CtxSetRefused(REASON_COVERAGE, "a context set covers at least one task")
+    entries: list[CtxEntryRecord] = []
+    for i, entry in enumerate(raw):
+        where = f"entries[{i}]"
+        if not isinstance(entry, Mapping):
+            raise _schema(f"{where} is not an object")
+        _keys(entry, _V3_ENTRY_REQUIRED, _V3_ENTRY_OPTIONAL, where)
+        task_id = _text(entry, "task_id", where)
+        if not _SHA_RE.match(task_id):
+            raise _schema(f"{where}.task_id {task_id!r} is not a git sha")
+        produced_at = _text(entry, "produced_at", where)
+        _utc(produced_at, where)
+        source_rev = _text(entry, "source_rev", where)
+        if not _SHA_RE.match(source_rev):
+            raise _schema(f"{where}.source_rev is not a git sha")
+        plan = _parse_plan(entry, where)
+        text = _plan.render(plan)
+        if "text" in entry and entry["text"] != text:
+            raise CtxSetRefused(
+                REASON_PLAN_RENDER, f"{where}.text is not its plan's rendering (crb.core.plan)"
+            )
+        gaps = _parse_gaps(entry, where)
+        entries.append(
+            CtxEntryRecord(
+                task_id=task_id,
+                entry_id=_text(entry, "entry_id", where),
+                version=_text(entry, "version", where),
+                text=text,
+                produced_at=produced_at,
+                mechanical=False,
+                source_rev=source_rev,
+                gaps=tuple(gaps),
+                plan=plan,
+            )
+        )
+    _check_entry_order(entries)
+    return CtxSet(
+        source=source,
+        repo=repo,
+        method=method,
+        entries=tuple(entries),
+        digest=canonical_digest(_hashed_body(doc, drop_text=True)),
+        drafter=drafter,
+        schema=SCHEMA_V3,
+        saw=tuple(saw),
+        accepted_by=accepted_by,
+    )
+
+
 class TaskLike(Protocol):
     """What :func:`verify_coverage` reads of a task (``crb.core.spec.TaskSpec`` fits)."""
 
@@ -743,10 +942,11 @@ def verify_coverage(ctxset: CtxSet, tasks: Iterable[TaskLike], *, repo: str | No
 
 
 def verify_source_revs(ctxset: CtxSet, parents: Mapping[str, str]) -> None:
-    """A ``mech*`` set's entries were drafted at their task's parent commit: refuses
-    ``ctxset_mechanical`` when an entry's ``source_rev`` is not ``parents[task_id]``. A
-    hindsight set records no ``source_rev`` and passes."""
-    if not ctxset.mechanical:
+    """A ``mech*`` set's entries were drafted at their task's parent commit, and so were a
+    ``plan`` set's (ADR-0054): refuses ``ctxset_mechanical`` when an entry's ``source_rev``
+    is not ``parents[task_id]``. A hindsight or stated set records no ``source_rev`` and
+    passes."""
+    if not (ctxset.mechanical or ctxset.planned):
         return
     for e in ctxset.entries:
         parent = parents.get(e.task_id, "")
@@ -872,7 +1072,9 @@ def run_stamps(
     ``ctx_stated`` = ``"1"``, ``ctx_items``, ``ctx_structure``, ``ctx_author_saw``, the task's
     ``ctx_prov`` and ``ctx_req_drafter`` — and, on a run that opted in to
     ``measure_open_gaps`` (ADR-0053), ``ctx_open_gaps`` = the count of the task's open gaps
-    when it has any. ``control``: ``ctx_set``, ``ctx_source`` =
+    when it has any; on an accepted-plan set (ADR-0054) ``ctx_plan_drafter``,
+    ``ctx_plan_saw`` (comma-joined) and ``ctx_plan_accepted``, and ``ctx_open_gaps`` as on a
+    stated set. ``control``: ``ctx_set``, ``ctx_source`` =
     ``control``, ``ctx_gap`` and ``ctx_gap_rule``. ``gaps`` holds every task's
     :func:`ctx_gap_anchor` value."""
     if role not in ROLES:
@@ -909,11 +1111,19 @@ def run_stamps(
                 stamps[_arms.LABEL_CTX_REQ_DRAFTER] = ctxset.drafter
                 if measure_open_gaps and entry.gaps:
                     stamps[_arms.LABEL_CTX_OPEN_GAPS] = str(len(entry.gaps))
+            if ctxset.planned:
+                entry = ctxset.entry_for(tid)
+                stamps[_arms.LABEL_CTX_PLAN_DRAFTER] = ctxset.drafter
+                stamps[_arms.LABEL_CTX_PLAN_SAW] = ",".join(ctxset.saw)
+                stamps[_arms.LABEL_CTX_PLAN_ACCEPTED] = ctxset.accepted_by
+                if measure_open_gaps and entry.gaps:
+                    stamps[_arms.LABEL_CTX_OPEN_GAPS] = str(len(entry.gaps))
         out[tid] = stamps
     return out
 
 
 __all__ = [
+    "ACCEPTED_NONE",
     "GAP_NO",
     "GAP_RULE",
     "GAP_YES",
@@ -930,6 +1140,11 @@ __all__ = [
     "REASON_OPEN_GAPS",
     "REASON_PLACEBO_OVERLAP",
     "REASON_PLACEBO_UNMATCHED",
+    "REASON_PLAN_ACCEPTED",
+    "REASON_PLAN_LENGTH",
+    "REASON_PLAN_RENDER",
+    "REASON_PLAN_SAW",
+    "REASON_PLAN_SHAPE",
     "REASON_POSTURE",
     "REASON_REPO",
     "REASON_SCHEMA",
@@ -939,11 +1154,13 @@ __all__ = [
     "SCHEMA",
     "SCHEMAS",
     "SCHEMA_V2",
+    "SCHEMA_V3",
     "SOURCES",
     "SOURCE_MECH",
     "SOURCE_MECH_PLACEBO",
     "SOURCE_ORACLE",
     "SOURCE_ORACLE_PLACEBO",
+    "SOURCE_PLAN",
     "SOURCE_REQ",
     "SOURCE_REQ_PLACEBO",
     "STOPWORDS",

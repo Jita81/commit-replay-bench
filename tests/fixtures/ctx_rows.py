@@ -2,8 +2,9 @@
 
 Navigation
 ----------
-What it is:   Builders for a ``crb.ctxset.v1`` document (and a ``crb.ctxset.v2``
-              stated-requirement one, ADR-0052), its parsed ``CtxSet`` and the grade
+What it is:   Builders for a ``crb.ctxset.v1`` document (a ``crb.ctxset.v2``
+              stated-requirement one, ADR-0052, and a ``crb.ctxset.v3`` accepted-plan one,
+              ADR-0054), its parsed ``CtxSet`` and the grade
               rows a context-set run or its control writes, each stamped as
               ``crb.core.ctxset.run_stamps`` stamps it.
 What it does: Keeps every ctx test's rows valid under ``ctx_label_violation`` (the ledger's
@@ -123,6 +124,56 @@ def req_set(source: str = ctxset.SOURCE_REQ, **kw: Any) -> ctxset.CtxSet:
     return ctxset.parse(req_doc(source, **kw))
 
 
+#: The plan body ``plan_doc`` gives every entry unless told otherwise (ADR-0054).
+PLAN: dict[str, list[str]] = {
+    "summary": ["Refuse an empty name before the command runs"],
+    "files": ["cmd/root.go"],
+    "steps": ["Check the name where the flags are parsed", "Return an error for an empty name"],
+    "decisions": ["Existing flags keep working unchanged"],
+    "tests": ["Add a test that an empty name is refused"],
+}
+PLAN_PARENT = "f" * 40
+
+
+def plan_doc(
+    *,
+    tasks: Sequence[str] = TASKS,
+    plan: Mapping[str, Sequence[str]] | None = None,
+    plans: Mapping[str, Mapping[str, Sequence[str]]] | None = None,
+    source_rev: str = PLAN_PARENT,
+    source_revs: Mapping[str, str] | None = None,
+    saw: Sequence[str] = ("ticket", "tree"),
+    accepted_by: str = "human:fixture-01",
+    drafter: str = "human:fixture-01",
+    repo: str = REPO,
+) -> dict[str, Any]:
+    """A valid ``crb.ctxset.v3`` accepted-plan document (ADR-0054): one plan per task."""
+    return {
+        "schema": ctxset.SCHEMA_V3,
+        "source": ctxset.SOURCE_PLAN,
+        "repo": repo,
+        "method": "fixture",
+        "drafter": drafter,
+        "saw": list(saw),
+        "accepted_by": accepted_by,
+        "entries": [
+            {
+                "task_id": t,
+                "entry_id": f"plan/{t[-6:]}",
+                "version": "1",
+                "produced_at": "2026-11-01T00:00:00Z",
+                "source_rev": (source_revs or {}).get(t, source_rev),
+                "plan": {k: list(v) for k, v in ((plans or {}).get(t) or plan or PLAN).items()},
+            }
+            for t in sorted(tasks)
+        ],
+    }
+
+
+def plan_set(**kw: Any) -> ctxset.CtxSet:
+    return ctxset.parse(plan_doc(**kw))
+
+
 def ctx_row(
     cset: ctxset.CtxSet,
     task_id: str,
@@ -189,11 +240,15 @@ def side(
 
 __all__ = [
     "PACK",
+    "PLAN",
+    "PLAN_PARENT",
     "REPO",
     "TASKS",
     "ctx_doc",
     "ctx_row",
     "ctx_set",
+    "plan_doc",
+    "plan_set",
     "req_doc",
     "req_set",
     "side",

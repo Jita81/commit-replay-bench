@@ -31,7 +31,8 @@ How:          ``ctxset.parse`` → ``verify_coverage`` (+ ``verify_placebo``) �
               per-request temporary file, hard-linked into place) → ``append_system_event``
               → commit; ``rows_of_runs`` → ``ctx_pair``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0052-stated-requirement-arms.md
+ADRs:         docs/adr/0050-context-set-arms.md, docs/adr/0052-stated-requirement-arms.md,
+              docs/adr/0054-accepted-plan-context-arm.md
 Works with:   src/crb/core/ctxset.py (the record and its verifiers), src/crb/core/ctx_compare.py
               (the paired reader), src/crb/store/ledger.py (``rows_of_runs``),
               src/crb/cli/commands/ctxset.py (the CLI over these routes), docs/API.md (the
@@ -131,7 +132,9 @@ def _refused(exc: CtxSetRefused | CtxPairRefused) -> ApiError:
 def _meta(ctxset: CtxSet) -> dict[str, Any]:
     """What a viewer may read of a set: never an entry's text (nor a stated item's statement).
     A stated set (ADR-0052) also names its structure, what its author saw and its items
-    digest (the key a structure contrast links by); those fields are empty on a v1 set."""
+    digest (the key a structure contrast links by); those fields are empty on a v1 set. An
+    accepted-plan set (ADR-0054) says it is ``planned``, what its drafter saw and who
+    accepted it (``accepted_by``, empty on every other set) — never the plan itself."""
     return {
         "name": ctxset.name,
         "digest": ctxset.digest,
@@ -140,6 +143,8 @@ def _meta(ctxset: CtxSet) -> dict[str, Any]:
         "source": ctxset.source,
         "kind": ctxset.kind,
         "stated": ctxset.stated,
+        "planned": ctxset.planned,
+        "accepted_by": ctxset.accepted_by,
         "structure": ctxset.structure,
         "saw": list(ctxset.saw),
         "items_digest": ctxset.items_digest,
