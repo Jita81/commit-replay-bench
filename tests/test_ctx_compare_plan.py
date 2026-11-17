@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import pytest
 
+from crb.core import context_arm as ca
 from crb.core import ctx_compare as cc
 from crb.core import ctxset
 from fixtures.ctx_rows import TASKS, ctx_set, plan_set, side
@@ -78,3 +79,39 @@ def test_an_audited_arm_never_pools_with_a_guarded_plan_arm(audited_is_treatment
         cc.ctx_pair(control, treatment, task_ids=TASKS, sets=SETS)
     assert exc.value.reason == cc.REASON_BLEND
     assert "audited-bypass" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        {ca.LABEL_CTX_PLAN_AUDIT: "b" * 64},
+        {ca.LABEL_CTX_PLAN_AUDITOR: "human:someone-else"},
+    ],
+)
+def test_an_audited_row_naming_another_audit_than_its_set_is_unlinked(edit: dict[str, str]) -> None:
+    # the ledger accepts either stamp (well shaped); only the stored set knows the real audit
+    rows = side(AUDITED, TREAT)
+    rows[3] = side(AUDITED, {TASKS[3]: TREAT[TASKS[3]]}, labels=edit)[0]
+    with pytest.raises(cc.CtxPairRefused) as exc:
+        cc.ctx_pair(
+            side(AUDITED, CONTROL, role=ctxset.ROLE_CONTROL),
+            rows,
+            task_ids=AUDITED.task_ids,
+            sets=SETS,
+        )
+    assert exc.value.reason == cc.REASON_UNLINKED
+    assert "audit stamps" in str(exc.value)
+
+
+def test_a_guarded_arm_name_over_an_audited_digest_is_refused_as_a_control() -> None:
+    # the arm name carries 12 hex of the digest, so the ledger cannot see the set's source:
+    # a row named as a guarded plan arm but pointing at the audited set passes it. As the
+    # control of an audited treatment, the blend check is the only thing that refuses it.
+    disguise = {
+        ca.LABEL_CONTEXT_ARM: f"A0+library@ctx.plan.{AUDITED.digest[:12]}",
+        ca.LABEL_CTX_SET: AUDITED.digest,
+    }
+    control = side(PLAN, CONTROL, labels=disguise)
+    with pytest.raises(cc.CtxPairRefused) as exc:
+        cc.ctx_pair(control, side(AUDITED, TREAT), task_ids=AUDITED.task_ids, sets=SETS)
+    assert exc.value.reason == cc.REASON_BLEND

@@ -75,6 +75,8 @@ from crb.core.context_arm import (
     LABEL_CTX_DELIVERED,
     LABEL_CTX_GAP,
     LABEL_CTX_GAP_RULE,
+    LABEL_CTX_PLAN_AUDIT,
+    LABEL_CTX_PLAN_AUDITOR,
     LABEL_CTX_PROV,
     LABEL_CTX_SET,
     LABEL_CTX_SOURCE,
@@ -633,6 +635,17 @@ def ctx_pair(
         )
     if tuple(task_ids) != tset.task_ids:
         raise CtxPairRefused(REASON_UNLINKED, "task_ids are not the treatment set's tasks")
+    if tset.audit is not None:
+        # ADR-0055: the ledger checks the audit stamps' shape only; the stored set is the
+        # record of who audited what, so a row that names another audit is not this set's row
+        want = (tset.audit.record_sha256, tset.audit.audited_by)
+        for r in treatment:
+            got = (r.labels.get(LABEL_CTX_PLAN_AUDIT, ""), r.labels.get(LABEL_CTX_PLAN_AUDITOR, ""))
+            if got != want:
+                raise CtxPairRefused(
+                    REASON_UNLINKED,
+                    f"a treatment row's audit stamps are not the stored set {name!r}'s audit",
+                )
     linked = {tset.digest, *([tset.matched_to] if tset.placebo else [])}
 
     c_arm = _one_arm(control, "control") if control else BASE_A0
