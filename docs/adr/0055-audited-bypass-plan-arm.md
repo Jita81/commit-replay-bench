@@ -24,8 +24,10 @@ A blind drafter given a precise ticket often writes such a plan. A ticket that s
 an empty name with `name required`" leads a careful drafter to a step that names the error
 text, and a test that a team names after its behaviour leads the drafter to the same name. On
 a guarded arm that plan is withheld, so the arm measures "plans that do not look like the
-answer", not "plans written before the build". The plans most likely to help are the ones most
-likely to be withheld.
+answer", not "plans written before the build". [hypothesis] The plans most likely to help are
+the ones most likely to be withheld. Not measured: no run has compared delivered and withheld
+plans. It is supported if, on an audited arm, rows stamped `ctx_plan_would_refuse` are clean
+more often than delivered rows without the stamp, and refuted if they are not.
 
 Where the drafting itself was audited (a person or a model read the drafter's prompt, the
 model it ran and its transcripts, and found no sight of the change), the text checks mostly
