@@ -309,7 +309,7 @@ of ADR-0052 are unchanged.
 |---|---|
 | `MAX_PLAN_CHARS` | 8000 characters of rendered text |
 | `MAX_LINES` | 80 rendered lines |
-| `MAX_LINE_CHARS` | 600 characters on one line |
+| `MAX_LINE_CHARS` | 600 characters on one rendered line (the `- ` or `1. ` prefix counts) |
 | `MAX_FILES` | 40 entries under `files` |
 | `MAX_DECISIONS` | 24 entries under `decisions` |
 
@@ -323,7 +323,8 @@ Entries may carry ADR-0053 `gaps`, and a run over a plan set with open gaps meet
   `plan_test_name`, `plan_test_path` (both on the plan's own lines, never the header and
   headings), `plan_test_span` (an eight-token run shared with the change's added test lines),
   `plan_gold_span` (the same with its added source lines), `plan_gold_line` (a whole added
-  line of code, however short in tokens), `plan_asserted_literal` (on the plan's lines read
+  line of code, however short in tokens: 10 or more characters with a bracket, `=`, `<` or
+  `>`, or any complete executable line, never a lone brace, a bare keyword or a comment), `plan_asserted_literal` (on the plan's lines read
   together) or `plan_no_gold`. A kept plan reaches the brief's own plan block.
 - **Stamps.** Each entries row carries `ctx_plan_drafter`, `ctx_plan_saw` (comma-joined) and
   `ctx_plan_accepted`; `ctx_plan_refused` (the sorted reasons) when the plan was withheld;

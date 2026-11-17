@@ -60,7 +60,9 @@ PLAN_SAW_VALUES: tuple[str, ...] = (PLAN_SAW_TICKET, PLAN_SAW_TREE)
 ACCEPTED_NONE = "none"
 ACCEPTED_BY_RE = re.compile(r"^(human:[A-Za-z0-9][A-Za-z0-9._-]{0,63}|none)$")
 
-#: The fixed limits (ADR-0054). Changing one is a new ADR.
+#: The fixed limits (ADR-0054). Changing one is a new ADR. The line and character limits hold
+#: on the rendered text (header, headings and bullet prefixes included); the file and decision
+#: limits count the plan's sections.
 MAX_PLAN_CHARS = 8000
 MAX_LINE_CHARS = 600
 MAX_DECISIONS = 24
@@ -168,22 +170,25 @@ def render(plan: PlanBody) -> str:
 
 
 def length_violation(plan: PlanBody, text: str | None = None) -> str:
-    """Why a plan breaks the fixed limits (``""`` when it does not); ``text`` is its rendering
-    (rendered here when not given)."""
-    lines = plan.lines()
-    if len(lines) > MAX_LINES:
-        return f"{len(lines)} lines (at most {MAX_LINES})"
+    """Why a plan breaks the fixed limits (``""`` when it does not). :data:`MAX_LINES`,
+    :data:`MAX_LINE_CHARS` and :data:`MAX_PLAN_CHARS` hold on the RENDERED text — the header,
+    headings and bullet prefixes count — read from :func:`render` and, when ``text`` (a stored
+    rendering) is given, from it too; :data:`MAX_FILES` and :data:`MAX_DECISIONS` count the
+    plan's sections."""
     if len(plan.files) > MAX_FILES:
         return f"{len(plan.files)} files (at most {MAX_FILES})"
     if len(plan.decisions) > MAX_DECISIONS:
         return f"{len(plan.decisions)} decisions (at most {MAX_DECISIONS})"
-    for name in SECTIONS:
-        for j, line in enumerate(plan.section(name)):
+    renderings = [render(plan)] if text is None else [render(plan), text]
+    for rendered in renderings:
+        lines = rendered.split("\n")
+        if len(lines) > MAX_LINES:
+            return f"{len(lines)} rendered lines (at most {MAX_LINES})"
+        for j, line in enumerate(lines, 1):
             if len(line) > MAX_LINE_CHARS:
-                return f"{name}[{j}]: {len(line)} characters (at most {MAX_LINE_CHARS})"
-    rendered = render(plan) if text is None else text
-    if len(rendered) > MAX_PLAN_CHARS:
-        return f"{len(rendered)} plan characters (at most {MAX_PLAN_CHARS})"
+                return f"rendered line {j}: {len(line)} characters (at most {MAX_LINE_CHARS})"
+        if len(rendered) > MAX_PLAN_CHARS:
+            return f"{len(rendered)} plan characters (at most {MAX_PLAN_CHARS})"
     return ""
 
 

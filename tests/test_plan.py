@@ -98,7 +98,7 @@ def test_a_well_formed_plan_has_no_shape_or_length_violation() -> None:
 def test_each_fixed_limit() -> None:
     one = ("x",)
     many_lines = PlanBody(summary=one, steps=tuple(f"s{i}" for i in range(p.MAX_LINES)))
-    assert "lines" in p.length_violation(many_lines)
+    assert "rendered lines" in p.length_violation(many_lines)
     files = PlanBody(summary=one, steps=one, files=tuple(f"f{i}" for i in range(p.MAX_FILES + 1)))
     assert "files" in p.length_violation(files)
     decisions = PlanBody(
@@ -107,11 +107,32 @@ def test_each_fixed_limit() -> None:
     assert "decisions" in p.length_violation(decisions)
     long_line = PlanBody(summary=("x" * (p.MAX_LINE_CHARS + 1),), steps=one)
     assert "characters" in p.length_violation(long_line)
-    at_line_limit = PlanBody(summary=("x" * p.MAX_LINE_CHARS,), steps=one)
+    # the limit holds on the rendered line: "- " counts, so a 599-character bullet is over
+    at_line_limit = PlanBody(summary=("x" * (p.MAX_LINE_CHARS - 2),), steps=one)
+    assert max(len(ln) for ln in p.render(at_line_limit).splitlines()) == p.MAX_LINE_CHARS
     assert p.length_violation(at_line_limit) == ""
+    wide_bullet = PlanBody(summary=("x" * (p.MAX_LINE_CHARS - 1),), steps=one)
+    assert "rendered line 3" in p.length_violation(wide_bullet)
+    wide_step = PlanBody(summary=one, steps=("y" * (p.MAX_LINE_CHARS - 2),))
+    assert "rendered line 5" in p.length_violation(wide_step)  # "1. " is three characters
     wide = PlanBody(summary=one, steps=tuple("y" * 500 for _ in range(17)))
     assert "plan characters" in p.length_violation(wide)
-    assert "plan characters" in p.length_violation(FULL, "z" * (p.MAX_PLAN_CHARS + 1))
+    over_chars = "\n".join("z" * 500 for _ in range(17))  # every line within its limit
+    assert "plan characters" in p.length_violation(FULL, over_chars)
+
+
+def test_the_line_limit_counts_rendered_lines() -> None:
+    """The header and each heading are rendered lines: a plan of ``MAX_LINES`` - 4 lines in
+    two sections renders to exactly ``MAX_LINES`` lines, one more is over."""
+    one = ("x",)
+    at = PlanBody(summary=one, steps=tuple(f"s{i}" for i in range(p.MAX_LINES - 4)))
+    assert len(p.render(at).splitlines()) == p.MAX_LINES
+    assert p.length_violation(at) == ""
+    over = PlanBody(summary=one, steps=tuple(f"s{i}" for i in range(p.MAX_LINES - 3)))
+    assert len(over.lines()) < p.MAX_LINES  # the body alone is under the limit
+    assert f"{p.MAX_LINES + 1} rendered lines" in p.length_violation(over)
+    # a stored text is read too
+    assert "rendered lines" in p.length_violation(at, p.render(at) + "\nextra")
 
 
 def test_the_document_round_trips() -> None:

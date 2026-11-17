@@ -264,12 +264,90 @@ def test_a_gold_line_the_request_or_the_parent_holds_or_prose_is_not_a_copy() ->
     held = "    return max(lo, min(x, hi))  # an older copy of the line"
     parent = _short_fix(parent_has=lambda tok: tok in held)
     assert p.REASON_GOLD_LINE not in plan_guard(body, parent)
-    # under GOLD_LINE_MIN, or with no code character, a line is the span rules' to judge
-    short = gold(novel=frozenset(), src_added=("    x = f(y)",), test_added=())
-    assert plan_guard(plan("Set x = f(y) first"), short) == ()
+    # a comment line is prose, the span rules' to judge
     prose = gold(novel=frozenset(), src_added=("    # Return the clamped value",), test_added=())
     assert plan_guard(plan("Return the clamped value"), prose) == ()
     assert plan_guard(CLEAN, _short_fix()) == ()
+
+
+def _one_line(line: str) -> GoldView:
+    return gold(novel=frozenset(), src_added=(f"    {line}",), test_added=())
+
+
+@pytest.mark.parametrize(
+    ("added", "step"),
+    [
+        ("return g()", "Use return g()"),  # under GOLD_LINE_MIN
+        ("return limit + 1", "Use return limit + 1"),  # no bracket, = , < or >
+        ("return limit + 1;", "Make it return limit+1"),  # whitespace and ";" aside
+        ("x = f(y)", "Set x = f(y) first"),
+        ("i++", "Then i++ once"),
+        ("return -1", "Return -1 on a miss"),
+        ("if err != nil {", "Check if err != nil before use"),
+        ("n -= 1,", "Apply n -= 1"),
+    ],
+)
+def test_a_short_executable_gold_line_copied_whole_is_refused(added: str, step: str) -> None:
+    why = plan_guard(plan(step), _one_line(added))
+    assert p.REASON_GOLD_LINE in why, (added, step)
+    # the test side is read too
+    test_side = gold(novel=frozenset(), src_added=(), test_added=(f"    {added}",))
+    assert p.REASON_GOLD_LINE in plan_guard(plan(step), test_side), added
+
+
+@pytest.mark.parametrize(
+    "added",
+    [
+        "",
+        "}",
+        ")",
+        "})",
+        "} else {",
+        "else {",
+        "else:",
+        "return",
+        "return nil",
+        "return None",
+        "return 0",
+        "return []",
+        "break",
+        "continue",
+        "pass",
+        "limit",
+        "// g()",
+        "# x = f(y)",
+        "/* i++ */",
+        "foo(",
+        "default:",
+    ],
+)
+def test_a_trivial_gold_line_never_withholds_a_plan(added: str) -> None:
+    """A line that carries no answer — blank, a lone bracket, a bare keyword or literal, a
+    comment, a single identifier, an unbalanced fragment — never withholds a plan that says
+    the same words."""
+    step = f"Write {added} then foo(bar) and limit once" if added else "Write nothing"
+    assert p.REASON_GOLD_LINE not in plan_guard(plan(step), _one_line(added)), added
+
+
+def test_a_short_executable_line_is_matched_on_whole_tokens_only() -> None:
+    assert p.REASON_GOLD_LINE not in plan_guard(plan("Use max = 10 here"), _one_line("x = 1"))
+    assert p.REASON_GOLD_LINE not in plan_guard(plan("Call gg() once"), _one_line("return g()"))
+    assert p.REASON_GOLD_LINE not in plan_guard(
+        plan("Return g at the end"), _one_line("return g()")
+    )
+
+
+def test_a_short_executable_line_the_request_or_the_parent_holds_is_not_a_copy() -> None:
+    body = plan("Use return g()")
+    assert p.REASON_GOLD_LINE not in plan_guard(body, _one_line("return g()"), "make f return g()")
+    held = _one_line("return g()")
+    parent = gold(
+        novel=frozenset(),
+        src_added=held.src_added,
+        test_added=(),
+        parent_has=lambda tok: tok == "return g()",
+    )
+    assert p.REASON_GOLD_LINE not in plan_guard(body, parent)
 
 
 def test_an_asserted_literal_split_across_plan_lines_is_refused() -> None:

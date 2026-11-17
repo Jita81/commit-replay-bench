@@ -605,6 +605,11 @@ def test_a_plan_that_breaks_its_shape_is_ctxset_plan_shape(mutate: Any) -> None:
         lambda p: p.update(decisions=[f"d{i}" for i in range(25)]),
         lambda p: p.update(summary=["x" * 601]),
         lambda p: p.update(steps=["y" * 500 for _ in range(17)]),
+        # the limits hold on the rendered text: 78 plan lines render to 82 lines, and a
+        # 599-character summary bullet renders to 601 characters
+        lambda p: p.update(steps=[f"step {i}" for i in range(76)]),
+        lambda p: p.update(summary=["x" * 599]),
+        lambda p: p.update(steps=["z" * 598]),
     ],
 )
 def test_a_plan_over_the_fixed_limits_is_ctxset_plan_length(mutate: Any) -> None:

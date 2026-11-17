@@ -1231,6 +1231,84 @@ _GOLD_LINE_CODE_CHARS = frozenset("()[]{}=<>")
 #: the line's body past it is looked for too, so ``check clamp(5) == 3`` copies
 #: ``assert clamp(5) == 3``.
 _GOLD_LINE_LEAD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\s+")
+#: An operator or bracket: an executable whole line (:func:`_executable_line`) holds one.
+_EXEC_OP_CHARS = frozenset("()[]{}=<>+-*/%!&|^~.?")
+#: Keywords and bare literals that carry no answer on their own: an executable whole line
+#: holds at least one word that is not one of these (lower-cased).
+_TRIVIAL_WORDS = frozenset(
+    [
+        "return",
+        "break",
+        "continue",
+        "pass",
+        "else",
+        "elif",
+        "elsif",
+        "if",
+        "for",
+        "while",
+        "do",
+        "then",
+        "end",
+        "fi",
+        "done",
+        "esac",
+        "try",
+        "catch",
+        "except",
+        "finally",
+        "default",
+        "case",
+        "switch",
+        "nil",
+        "null",
+        "none",
+        "true",
+        "false",
+        "undefined",
+        "self",
+        "this",
+        "super",
+        "yield",
+        "await",
+        "async",
+        "defer",
+        "go",
+        "new",
+        "def",
+        "func",
+        "fn",
+        "function",
+        "class",
+        "var",
+        "let",
+        "const",
+        "val",
+        "public",
+        "private",
+        "protected",
+        "static",
+        "void",
+        "import",
+        "from",
+        "package",
+        "raise",
+        "throw",
+        "throws",
+        "assert",
+        "del",
+        "not",
+        "and",
+        "or",
+        "in",
+        "is",
+        "with",
+        "as",
+    ]
+)
+_LINE_TOKEN_RE = re.compile(r"\w+|[^\w\s]")
+_WORD_RE = re.compile(r"\w+")
+_BRACKET_PAIRS = {")": "(", "]": "[", "}": "{"}
 
 
 def _squash(text: str) -> str:
@@ -1238,19 +1316,79 @@ def _squash(text: str) -> str:
     return "".join(text.split()).lower()
 
 
+def _line_tokens(text: str) -> tuple[str, ...]:
+    """``text`` as lower-cased tokens: each run of word characters, and each other
+    non-space character alone."""
+    return tuple(_LINE_TOKEN_RE.findall(text.lower()))
+
+
+def _holds_run(seq: Sequence[str], run: Sequence[str]) -> bool:
+    """Whether ``run`` occurs contiguously in ``seq``."""
+    n = len(run)
+    if n == 0:
+        return False
+    first, rest = run[0], tuple(run[1:])
+    return any(
+        tok == first and tuple(seq[i + 1 : i + n]) == rest
+        for i, tok in enumerate(seq[: len(seq) - n + 1])
+    )
+
+
+def _balanced(line: str) -> bool:
+    """Whether every ``()``, ``[]`` and ``{}`` in ``line`` opens and closes within it."""
+    stack: list[str] = []
+    for ch in line:
+        if ch in "([{":
+            stack.append(ch)
+        elif ch in _BRACKET_PAIRS and (not stack or stack.pop() != _BRACKET_PAIRS[ch]):
+            return False
+    return not stack
+
+
+def _executable_line(stripped: str) -> bool:
+    """Whether a normalised added line (stripped, trailing ``;``, ``,``, ``:`` and ``{``
+    dropped) is a complete executable line that carries an answer: not a comment line
+    (``//``, ``#``, ``/*``, ``*``, ``--``), its brackets balanced, holding an operator or
+    bracket (:data:`_EXEC_OP_CHARS`) and a word that is not a bare keyword or literal
+    (:data:`_TRIVIAL_WORDS`). ``return g()`` and ``return limit + 1`` are; a blank line,
+    ``}``, ``)``, ``else {``, ``return``, ``return nil``, ``break``, a comment and a lone
+    identifier are not."""
+    if not stripped or _COMMENT_LINE_RE.match(stripped) or not _balanced(stripped):
+        return False
+    if _EXEC_OP_CHARS.isdisjoint(stripped):
+        return False
+    return any(w.lower() not in _TRIVIAL_WORDS for w in _WORD_RE.findall(stripped))
+
+
 def _gold_line(text: str, gold: GoldView, request: str) -> bool:
-    """Whether ``text`` holds a whole line the change added to its source or tests, or that
-    line's body past one leading bare word (:data:`_GOLD_LINE_LEAD_RE`), case- and
-    whitespace-insensitively, with trailing ``;``, ``,``, ``:`` and ``{`` dropped: a fragment
-    of at least :data:`GOLD_LINE_MIN` characters holding a code character
-    (:data:`_GOLD_LINE_CODE_CHARS`) that neither ``request`` nor the parent tree holds.
+    """Whether ``text`` holds a line the change added to its source or tests, on either of
+    two rules, each exempting a line ``request`` or the parent tree holds:
+
+    1. A fragment — the whole line, or its body past one leading bare word
+       (:data:`_GOLD_LINE_LEAD_RE`), with trailing ``;``, ``,``, ``:`` and ``{`` dropped —
+       of at least :data:`GOLD_LINE_MIN` characters holding a code character
+       (:data:`_GOLD_LINE_CODE_CHARS`), found case- and whitespace-insensitively.
+    2. The whole line (normalised the same way) when it is executable
+       (:func:`_executable_line`), however short: its token sequence (:func:`_line_tokens`)
+       occurs contiguously in ``text``'s, so ``Use return g()`` holds ``return g()``, while
+       ``x = 1`` is not found inside ``max = 10``.
 
     It catches the copy of a short change that the eight-token span rules cannot see: a
     one-line fix has fewer than eight tokens after stopwords."""
     said = _squash(text)
     asked = _squash(request)
+    said_tokens = _line_tokens(text)
+    asked_tokens = _line_tokens(request)
     for line in (*gold.src_added, *gold.test_added):
         stripped = line.strip().rstrip(";,:{").strip()
+        if _executable_line(stripped):
+            run = _line_tokens(stripped)
+            if (
+                _holds_run(said_tokens, run)
+                and not _holds_run(asked_tokens, run)
+                and not gold.parent_has(stripped)
+            ):
+                return True
         lead = _GOLD_LINE_LEAD_RE.match(stripped)
         for fragment in (stripped, stripped[lead.end() :] if lead else ""):
             squashed = _squash(fragment)
@@ -1285,7 +1423,9 @@ def plan_guard(
     run with the change's added test lines; ``plan_gold_span``: the same with its added source
     lines (a plan restates the change's code, which it was written without);
     ``plan_gold_line``: the plan's lines, read together, hold a whole added source or test
-    line of code (:func:`_gold_line`), however few its tokens. ``plan_asserted_literal``: the
+    line of code (:func:`_gold_line`), however few its tokens — a fragment of at least
+    :data:`GOLD_LINE_MIN` characters with a code character, or any complete executable line
+    (:func:`_executable_line`), however short. ``plan_asserted_literal``: the
     plan's lines, read together, repeat four words in a row of a string literal an added
     held-out test line may assert that neither ``request`` nor the parent holds. A token the
     change introduced that the plan names is NOT a reason: a plan written before the build may
