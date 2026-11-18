@@ -29,8 +29,9 @@ the configured mapping; inside the product the same item shows on the Factory li
 chain.
 
 **Non-goals.** The product never edits ticket fields other than its own label, its comments
-and the one state transition the mapping allows. It never creates tickets. It never reads a
-column it was not pointed at. It does not replace the freeze form or the evolutions route —
+and the one state transition the mapping allows, and, where `CRB_INTAKE__RETURN_STATE` is
+set, the return of a ticket with open questions to that state (ADR-0056). It never creates
+tickets. It never reads a column it was not pointed at. It does not replace the freeze form or the evolutions route —
 the ticket path lands on the same `POST /factory/{repo}/backlog` and
 `POST /factory/{repo}/backlog/evolutions`. Discovery and inception capture (Jira/Slack/meeting
 notes) stay out of scope (DL-001). GitLab / Azure DevOps as the *repository* host (F21) is a

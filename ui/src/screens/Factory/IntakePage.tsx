@@ -456,6 +456,14 @@ export function IntakePage() {
                   note: 'A deployment that configures no mapping never changes anybody’s ticket state.',
                   hint: 'stat.intake.outcome_map',
                 },
+                {
+                  key: 'When a ticket has open questions',
+                  value: connection.return_state ? `moved back to “${connection.return_state}”` : 'the ticket is not moved',
+                  note: connection.return_state
+                    ? 'After the comment and the label, a ticket never picked up is moved back once per revision, so it leaves the watched column until someone answers it.'
+                    : 'It stays in the watched column with its comment and label until someone answers it.',
+                  hint: 'stat.intake.return_state',
+                },
               ]}
             />
             {operator && (

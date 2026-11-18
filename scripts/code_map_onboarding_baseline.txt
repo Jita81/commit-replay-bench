@@ -26,7 +26,6 @@ src/crb/store/migrations/versions/v0009_users_session_nonce.py
 tests/fixtures/__init__.py
 tests/fixtures/builders_repo.py
 tests/fixtures/cli_repo.py
-tests/fixtures/intake.py
 tests/fixtures/langs/__init__.py
 tests/fixtures/langs/gorepo.py
 tests/fixtures/langs/jvmrepo.py

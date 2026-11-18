@@ -57,6 +57,8 @@ What it does: Turns a watched column into drafts, gap feedback and — once an o
               the screen. Each ticket meets the entry gate the factory's pre-build check
               applies (ADR-0026 item 8): its stop is on the comment, the label (a registered
               ticket that will not be built stays ``crb:not-deliverable``) and the row.
+              Where the deployment names a return state (ADR-0056), a never-registered
+              ticket with open questions is moved back to it after its comment and label.
 How:          Plain functions over injected callables (the tracker, the route lookup, the
               clock, "is a run active") and an injected lease, so the whole flow is exercised
               by a fake tracker with no HTTP and no model; the lease is a row in the
@@ -66,7 +68,8 @@ How:          Plain functions over injected callables (the tracker, the route lo
               the screen reads is one JSON file beside the repository's evidence chain.
 Layer:        server — docs/ARCHITECTURE.md#43-server
 ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md,
-              docs/adr/0022-intake-approval-by-default.md (the Register act, the allowlist)
+              docs/adr/0022-intake-approval-by-default.md (the Register act, the allowlist),
+              docs/adr/0056-a-not-ready-ticket-goes-back.md (the return of a gappy ticket)
 Works with:   src/crb/intake/client.py (the six verbs and the stop reasons),
               src/crb/intake/ado.py and src/crb/intake/jira.py (the adapters it builds),
               src/crb/intake/draft.py (ticket → draft item),
@@ -123,6 +126,7 @@ from crb.factory.readiness import assess
 from crb.factory.standard import NO_READINGS, CellRef, Readers, gate_for
 from crb.intake.ado import AdoConfig, AdoTracker
 from crb.intake.client import (
+    LABEL_NEEDS_INFO,
     LABEL_QUEUED,
     LINK_ITEM,
     LINK_PULL_REQUEST,
@@ -143,6 +147,7 @@ from crb.intake.draft import Draft, content_revision, draft_from
 from crb.intake.fake import FileTracker, fake_tracker_enabled, fake_tracker_path
 from crb.intake.feedback import (
     WAITING_STOPS,
+    Feedback,
     label_once_registered,
     render_delivered,
     render_feedback,
@@ -184,6 +189,29 @@ STATE_FILE = "intake-state.json"
 #: Empty by default: a deployment that configures nothing moves no ticket, ever.
 OUTCOME_MERGED = "merged"
 OUTCOME_CLOSED = "closed"
+
+#: ADR-0056 — the ``outcome`` an ``intake.transitioned`` carries when the product moved a
+#: ticket with open questions back to the deployment's return state. It shares the event
+#: kind with the merge and close moves, which :func:`apply_outcome_map` looks up by their own
+#: outcome only, so the two never collide.
+OUTCOME_RETURNED = "returned"
+
+#: The advice on a row whose return the tracker REFUSED. NOT the refusal's own advice
+#: ("Nothing was changed on the ticket"): by then the comment and the label ARE on the ticket.
+#: A refusal is final at its revision: a workflow that refused once refuses again.
+RETURN_STOP_ADVICE = (
+    "The gap comment and the label are on the ticket, but it was not moved back. It is tried "
+    "again when the ticket next changes, or with Post the feedback again. If the tracker "
+    "refused, check that its workflow allows that move from the watched column."
+)
+
+#: The advice on a row whose return did not happen for a reason that passes (the tracker
+#: did not answer, the pass ran out of time, another pass took the repository over). The
+#: revision is NOT finished with (:func:`already_handled`), so the next pass tries again.
+RETURN_RETRY_ADVICE = (
+    "The gap comment and the label are on the ticket, but it was not moved back yet. The "
+    "next pass tries the move again."
+)
 
 #: What one ticket's registration attempt did, as three words rather than one boolean: the
 #: frozen record took the item, a factory run holds the backlog so the next poll will try
@@ -628,7 +656,9 @@ def already_handled(events: Sequence[Any], tracker: str, key: str, revision: str
 
     "Finished with" means the poll either registered it or decided it was not ready.
     A revision read but left waiting for a busy factory run is NOT finished, so the next
-    poll picks it up — that is how a queued registration is never lost.
+    poll picks it up — that is how a queued registration is never lost. Nor is one whose
+    move back (ADR-0056) failed for a reason that passes (``return_pending``): only a
+    refusal is final at its revision.
     """
     for e in reversed(list(events)):
         p = e.payload
@@ -638,7 +668,9 @@ def already_handled(events: Sequence[Any], tracker: str, key: str, revision: str
             continue
         if str(p.get("revision")) != revision:
             return False
-        return not bool(p.get("awaiting_registration", False))
+        return not (
+            bool(p.get("awaiting_registration", False)) or bool(p.get("return_pending", False))
+        )
     return False
 
 
@@ -959,6 +991,7 @@ def poll_repository(
     approval: ApprovalPolicy | None = None,
     lease: IntakeLease | None = None,
     then: Callable[[PollReport, TrackerClient], None] | None = None,
+    return_state: str = "",
 ) -> PollReport:
     """Read the watched column once and do whatever each ticket has earned.
 
@@ -974,6 +1007,9 @@ def poll_repository(
     around every call. A pass whose lease was taken over while it worked stops with
     ``lease_lost``: it does not write the served view (the new holder does) and does not
     run ``then``.
+
+    ``return_state`` (ADR-0056, empty by default) is the state a never-registered ticket
+    with open questions is moved back to, once per revision, after its comment and label.
 
     Never raises: a tracker failure is a :class:`PollReport` with ``stopped`` set and an
     ``intake.stopped`` event on the chain, and the next poll retries. Nothing is
@@ -1031,6 +1067,7 @@ def poll_repository(
             budget_s=budget_s,
             clock=clock,
             approval=approval if approval is not None else ApprovalPolicy(),
+            return_state=return_state,
         )
         if fenced is not None and fenced.lost:
             # another pass holds the repository now and writes its own view: this one's rows
@@ -1071,6 +1108,7 @@ def _poll_column(
     gate: Readers | None = None,
     require_signed_cell: bool = False,
     classes: Callable[[Draft], Draft] | None = None,
+    return_state: str = "",
 ) -> PollReport:
     """One pass, with no side effect outside the tracker and the chain. See
     :func:`poll_repository`, which is this plus the served view."""
@@ -1153,6 +1191,8 @@ def _poll_column(
             force=force,
             check_budget=check_budget,
             approval=approval,
+            column=column,
+            return_state=return_state,
         )
         if row is not None:
             report.rows.append(row)
@@ -1263,6 +1303,8 @@ def _handle_ticket(
     gate: Readers | None = None,
     require_signed_cell: bool = False,
     classes: Callable[[Draft], Draft] | None = None,
+    column: str = "",
+    return_state: str = "",
 ) -> IntakeRow | None:
     """One ticket, end to end. Returns the row to serve, or ``None`` when it was skipped.
 
@@ -1275,6 +1317,12 @@ def _handle_ticket(
     ``check_budget`` is asked before EVERY tracker call (:class:`_BudgetGuard`), so a
     pass that has run out of time starts no further call on somebody's board. ``approval``
     decides whether a ready draft is registered now or waits for an operator (ADR-0022).
+
+    ``return_state`` (ADR-0056): a ticket with open questions that was never registered and
+    is still in ``column`` is moved back to it after its comment and label, once per
+    revision; the comment says so only when the move is due (or was made or refused at this
+    revision, so a re-post renders the same bytes). A refusal at this revision is final on a
+    normal pass, including one that rebuilds a lost cache row; ``force`` tries it again.
     """
     policy = approval if approval is not None else ApprovalPolicy()
     del actor
@@ -1364,7 +1412,31 @@ def _handle_ticket(
         if draft.item.size_estimate in SIZE_TIER_NAMES
         else ()
     )
-    feedback = render_feedback(draft, readiness, entry=entry, cell_route=route, arms=arms)
+    # ADR-0056: only a ticket the factory never picked up, read in the watched column itself,
+    # is moved back; one already returned at this revision is not moved again, but its
+    # comment still names the return, so a re-post at the same revision is a no-op.
+    eligible = bool(return_state) and not previous_id
+    returned_here = eligible and _returned_at(events, tracker.name, ticket.key, ticket.revision)
+    due = (
+        eligible
+        and not returned_here
+        and _same(ticket.state, column)
+        and not _same(ticket.state, return_state)
+    )
+    # A refusal is final at its revision. Only an operator's forced re-post tries it again;
+    # a pass that rebuilds a lost cache row reads the refusal from the chain and keeps it.
+    refused_here = (
+        due and not force and _refused_at(events, tracker.name, ticket.key, ticket.revision)
+    )
+    will_move = due and not refused_here
+    feedback = render_feedback(
+        draft,
+        readiness,
+        entry=entry,
+        cell_route=route,
+        arms=arms,
+        returns_to=return_state if (due or returned_here) else "",
+    )
     already_registered = backlog is not None and backlog.get(draft.item.id) is not None
     # The label is decided before it is written, not adjusted afterwards: a ticket already
     # on the frozen record is QUEUED, and writing `crb:ready` first and `crb:queued` second
@@ -1426,6 +1498,9 @@ def _handle_ticket(
         route=(route or {}).get("route", ""),
     )
     awaiting = False
+    #: what the return (ADR-0056) adds to this revision's ``intake.read``; empty — and so
+    #: absent from the payload — unless a move was due and did not happen
+    return_note: dict[str, Any] = {}
     if queued_already:
         # A re-read of a ticket already on the frozen record: registering it again would be
         # an ItemExists refusal recorded as a stop. What the ticket is owed instead is the
@@ -1493,6 +1568,36 @@ def _handle_ticket(
                 stopped=REASON_REFUSED,
                 stopped_advice=STOP_ADVICE[REASON_REFUSED],
             )
+    elif will_move and label == LABEL_NEEDS_INFO:
+        # last, because needs-info is never ready to register: the comment and the label are
+        # already on the ticket, so a failed move cannot lose what the person must answer
+        row, return_note = _return_not_ready(
+            row,
+            ticket,
+            tracker=tracker,
+            evidence=evidence,
+            item_id=draft.item.id,
+            column=column,
+            return_state=return_state,
+            check_budget=check_budget,
+        )
+        if return_note.get("return_skipped"):
+            # a person moved the ticket while its comment and label were written: their move
+            # stands, and the comment must not go on saying it "is moved back"
+            row = _unsay_the_return(
+                row,
+                render_feedback(
+                    draft, readiness, entry=entry, cell_route=route, arms=arms, returns_to=""
+                ),
+                ticket_key=ticket.key,
+                tracker=tracker,
+                evidence=evidence,
+                item_id=draft.item.id,
+                check_budget=check_budget,
+            )
+    elif refused_here and label == LABEL_NEEDS_INFO:
+        # the row a lost cache rebuilds says what the refused pass said, and moves nothing
+        row = replace_row(row, stopped=REASON_REFUSED, stopped_advice=RETURN_STOP_ADVICE)
     evidence.append(
         EV_READ,
         draft.item.id,
@@ -1504,6 +1609,7 @@ def _handle_ticket(
         content_revision=draft.item.labels.get("content_revision", ""),
         ready=feedback.ready_to_register,
         awaiting_registration=awaiting,
+        **return_note,
     )
     return row
 
@@ -1519,6 +1625,176 @@ def replace_row(row: IntakeRow, **changes: Any) -> IntakeRow:
 
 def _stopped(row: IntakeRow, exc: TrackerError) -> IntakeRow:
     return replace_row(row, stopped=exc.reason, stopped_advice=exc.advice)
+
+
+def _same(state: str, other: str) -> bool:
+    """Whether a KNOWN state is ``other``, compared as Jira compares statuses (casefolded)."""
+    a = (state or "").strip().casefold()
+    return bool(a) and a == (other or "").strip().casefold()
+
+
+def return_state_for(return_state: str, session: Session, default_column: str) -> str:
+    """The return state a pass may use (ADR-0056), or ``""`` when a switched-on listener
+    WATCHES it.
+
+    Start-up refuses a return state equal to the deployment's column, and the listener
+    switch refuses a repository column equal to it, but a column switched on before the
+    setting was named is in neither check. Moving a ticket into a column another factory
+    reads would hand it to that factory, so the move is off — on every repository, because
+    one board can feed several — until the setting or that listener changes. The worker's
+    timed pass and the poll route both ask this, so they cannot disagree.
+    """
+    wanted = (return_state or "").strip()
+    if not wanted:
+        return ""
+    for row in session.execute(select(Repo)).scalars().all():
+        listener = ListenerState.from_config(dict(row.config_json or {}))
+        if listener.enabled and _same(listener.column or default_column, wanted):
+            log.warning(
+                "intake return state is a watched column: no ticket is moved back",
+                extra={"repo": str(row.name)},
+            )
+            return ""
+    return wanted
+
+
+def _returned_at(events: Sequence[Any], tracker: str, key: str, revision: str) -> bool:
+    """Whether the chain already holds this ticket's return at this revision (ADR-0056)."""
+    return any(
+        e.kind == EV_TRANSITIONED
+        and e.payload.get("outcome") == OUTCOME_RETURNED
+        and str(e.payload.get("tracker")) == tracker
+        and str(e.payload.get("key")) == key
+        and str(e.payload.get("revision")) == revision
+        for e in events
+    )
+
+
+def _refused_at(events: Sequence[Any], tracker: str, key: str, revision: str) -> bool:
+    """Whether the last move back of this ticket tried at this revision was REFUSED
+    (ADR-0056). The refusal's ``intake.stopped`` is the durable record, so a pass that
+    rebuilds a lost cache row does not try the move again. A later failure for a passing
+    reason at the same revision (after a forced re-post) supersedes it."""
+    for e in reversed(list(events)):
+        p = e.payload
+        if e.kind != EV_STOPPED or p.get("step") != "return":
+            continue
+        if str(p.get("tracker")) != tracker or str(p.get("key")) != key:
+            continue
+        if str(p.get("revision")) != revision:
+            continue
+        return str(p.get("reason")) == REASON_REFUSED
+    return False
+
+
+def _return_not_ready(
+    row: IntakeRow,
+    ticket: Ticket,
+    *,
+    tracker: TrackerClient,
+    evidence: Any,
+    item_id: str,
+    column: str,
+    return_state: str,
+    check_budget: Callable[[str], None],
+) -> tuple[IntakeRow, dict[str, Any]]:
+    """Move a ticket with open questions back to the deployment's return state (ADR-0056).
+
+    Returns the row to serve and what the revision's ``intake.read`` must add: nothing when
+    the ticket moved or the tracker refused (both final at this revision; only a forced
+    re-post tries a refused move again), ``return_pending`` when the move failed for a
+    reason that passes, so :func:`already_handled` lets the next pass try again,
+    ``return_pending`` with ``content_changed`` when a person edited what was assessed, and
+    ``return_skipped`` when a person moved the ticket first.
+
+    The ticket is read again just before the move, because the first read was several
+    tracker calls ago: a person who dragged it out of the watched column while its comment
+    and label were written has made their move, and it is not overwritten; a person who
+    edited its content gets it assessed again on the next pass instead of moved on the old
+    assessment. (Neither tracker
+    offers a conditional move through the six verbs, so a move in the instant between this
+    read and the write is still possible; ADR-0056 *Gaps*.)
+
+    Recorded either way and never raised: a refusal, an unreachable tracker or a spent budget
+    is an ``intake.stopped`` with ``step="return"`` and a row that says the comment and the
+    label ARE there; the pass carries on.
+    """
+    try:
+        check_budget("return")
+        fresh = tracker.read(ticket.key)
+        if not _same(fresh.state, column):
+            return replace_row(row, state=fresh.state), {
+                "return_skipped": True,
+                "state_now": fresh.state,
+            }
+        if content_revision(fresh) != content_revision(ticket):
+            # a person edited the ticket while its comment and label were written: what was
+            # assessed is no longer what the ticket says, so nothing moves and the revision
+            # stays unfinished; the next pass assesses the ticket as it now reads
+            return replace_row(row, state=fresh.state), {
+                "return_pending": True,
+                "content_changed": True,
+            }
+        check_budget("return")
+        tracker.transition(ticket.key, return_state)
+    except TrackerError as exc:
+        evidence.append(
+            EV_STOPPED,
+            item_id,
+            step="return",
+            tracker=tracker.name,
+            key=ticket.key,
+            revision=ticket.revision,
+            reason=exc.reason,
+            detail=exc.detail,
+            state=return_state,
+        )
+        if exc.reason == REASON_REFUSED:
+            return replace_row(row, stopped=exc.reason, stopped_advice=RETURN_STOP_ADVICE), {}
+        return (
+            replace_row(row, stopped=exc.reason, stopped_advice=RETURN_RETRY_ADVICE),
+            {"return_pending": True},
+        )
+    evidence.append(
+        EV_TRANSITIONED,
+        item_id,
+        tracker=tracker.name,
+        key=ticket.key,
+        state=return_state,
+        outcome=OUTCOME_RETURNED,
+        from_state=ticket.state,
+        revision=ticket.revision,
+    )
+    return replace_row(row, state=return_state), {}
+
+
+def _unsay_the_return(
+    row: IntakeRow,
+    plain: Feedback,
+    *,
+    ticket_key: str,
+    tracker: TrackerClient,
+    evidence: Any,
+    item_id: str,
+    check_budget: Callable[[str], None],
+) -> IntakeRow:
+    """Rewrite the gap comment without its return sentence, after a person moved the ticket
+    out of the watched column before the product could (ADR-0056). The ticket has left the
+    column, so no later pass reads it until it comes back: this edit cannot start a loop."""
+    try:
+        check_budget("comment")
+        tracker.comment(ticket_key, plain.text, plain.marker)
+    except TrackerError as exc:
+        evidence.append(
+            EV_STOPPED,
+            item_id,
+            step="feedback",
+            key=ticket_key,
+            reason=exc.reason,
+            detail=exc.detail,
+        )
+        return _stopped(row, exc)
+    return replace_row(row, feedback=plain.text)
 
 
 def _register_and_queue(
@@ -2086,6 +2362,9 @@ __all__ = [
     "OUTCOME_QUEUED",
     "OUTCOME_REFUSED",
     "OUTCOME_REGISTERED",
+    "OUTCOME_RETURNED",
+    "RETURN_RETRY_ADVICE",
+    "RETURN_STOP_ADVICE",
     "STATE_FILE",
     "STOPPED_STATUSES",
     "ApprovalPolicy",
@@ -2113,5 +2392,6 @@ __all__ = [
     "post_refusal",
     "register_approved",
     "replace_row",
+    "return_state_for",
     "store_for",
 ]
