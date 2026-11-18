@@ -4660,7 +4660,7 @@ class Worker:
         )
         budget = Budget(max_cost_usd=float(p.get("max_cost_usd") or 0.0))
         builder = builder_for_rung(rung, gap_probe=True)
-        dest = self.scratch_dir / f"gap-probe-{run.id}"
+        dest = opaque_dest(self.scratch_dir, "probe")
         try:
             with Workspace.at_ref(
                 ctx.git, ctx.git.rev_parse("HEAD"), dest, config=ctx.config
