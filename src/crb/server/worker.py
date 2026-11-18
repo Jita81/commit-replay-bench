@@ -317,6 +317,7 @@ from crb.core.git import (
     GitRepo,
     clone_repo,
     redact_url,
+    scoped_auth_env,
 )
 from crb.core.grade import MODE_BLIND, MODE_SIGHTED
 from crb.core.ledger import (
@@ -2445,6 +2446,7 @@ class Worker:
         # ADR-0057 — an Azure Repos repository in the board's own organisation, with the
         # switch on, clones with the tracker's token the same way
         azure_header = None if auth_header else self._azure_auth_header(url)
+        azure_fields: dict[str, Any] = {"azure_repos": True} if azure_header else {}
         if emitter is not None:
             emitter.emit(
                 "system",
@@ -2452,7 +2454,7 @@ class Worker:
                 url=safe_url,
                 dest=str(dest),
                 github_app=bool(auth_header),
-                **({"azure_repos": True} if azure_header else {}),
+                **azure_fields,
             )
         try:
             head = clone_repo(
@@ -2460,6 +2462,7 @@ class Worker:
                 target,
                 timeout=DEFAULT_CLONE_TIMEOUT_S,
                 auth_header=auth_header or azure_header,
+                auth_scope=url if azure_header else None,
             )
         except (CloneUrlError, GitError) as exc:
             if emitter is not None:
@@ -2530,6 +2533,7 @@ class Worker:
             branch = cur.stdout.strip() if cur.ok and cur.stdout.strip() != "HEAD" else ""
         auth_header = self._github_auth_header(cfg, url)
         azure_header = None if auth_header else self._azure_auth_header(url)  # ADR-0057
+        azure_fields: dict[str, Any] = {"azure_repos": True} if azure_header else {}
         if emitter is not None:
             emitter.emit(
                 "system",
@@ -2538,7 +2542,7 @@ class Worker:
                 branch=branch,
                 dest=str(git.path),
                 github_app=bool(auth_header),
-                **({"azure_repos": True} if azure_header else {}),
+                **azure_fields,
             )
 
         def refuse(why: str) -> FetchRefused:
@@ -2568,11 +2572,7 @@ class Worker:
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
         if auth_header or azure_header:
             env.update(
-                {
-                    "GIT_CONFIG_COUNT": "1",
-                    "GIT_CONFIG_KEY_0": "http.extraheader",
-                    "GIT_CONFIG_VALUE_0": auth_header or azure_header or "",
-                }
+                scoped_auth_env(auth_header or azure_header or "", url if azure_header else None)
             )
         argv = [
             git.git_binary,

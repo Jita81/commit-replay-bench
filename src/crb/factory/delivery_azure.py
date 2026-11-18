@@ -131,6 +131,18 @@ def _url(base: str, path: str, **query: str) -> str:
     return f"{base}{path}?{params}"
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuses every redirect: urllib would copy the ``Authorization`` header to whatever
+    host a 3xx names, and turn a redirected POST into a GET."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+#: The default opener: a 3xx is an :class:`AzureReposError` with its status, never followed.
+_OPENER = urllib.request.build_opener(_NoRedirect())
+
+
 def _call(
     url: str,
     credentials: GitCredentials,
@@ -153,7 +165,7 @@ def _call(
             "Content-Type": "application/json",
         },
     )
-    opener = urlopen or urllib.request.urlopen
+    opener = urlopen or _OPENER.open
     try:
         with opener(req, timeout=timeout) as resp:
             raw = resp.read()

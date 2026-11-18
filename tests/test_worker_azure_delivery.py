@@ -317,15 +317,18 @@ def test_azure_clone_header_goes_through_env_not_argv(
     monkeypatch.setattr(core_git.subprocess, "run", fake_run)
     monkeypatch.setattr(core_git.GitRepo, "is_repo", lambda self: True)
     monkeypatch.setattr(core_git.GitRepo, "rev_parse", lambda self, *a, **k: "abc123")
-    core_git.clone_repo(REMOTE, tmp_path / "dest", auth_header=header)
+    core_git.clone_repo(REMOTE, tmp_path / "dest", auth_header=header, auth_scope=REMOTE)
 
     assert len(seen) == 2
     for call in seen:
         argv = " ".join(call["argv"])
         assert TOKEN not in argv and BASIC not in argv
-        assert call["env"]["GIT_CONFIG_COUNT"] == "1"
-        assert call["env"]["GIT_CONFIG_KEY_0"] == "http.extraheader"
+        # scoped to the remote, and no redirect may carry it to another host
+        assert call["env"]["GIT_CONFIG_COUNT"] == "2"
+        assert call["env"]["GIT_CONFIG_KEY_0"] == f"http.{REMOTE}.extraheader"
         assert call["env"]["GIT_CONFIG_VALUE_0"] == header
+        assert call["env"]["GIT_CONFIG_KEY_1"] == "http.followRedirects"
+        assert call["env"]["GIT_CONFIG_VALUE_1"] == "false"
 
 
 def test_worker_azure_events_carry_no_token(

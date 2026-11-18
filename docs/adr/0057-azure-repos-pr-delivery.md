@@ -45,6 +45,9 @@ passes the gap check cannot end in a pull request:
    token. The token is read from the secret store at each push, clone and fetch and never
    kept; it travels only as `Authorization: Basic base64(":" + token)`, never in a URL, and
    every error text is redacted and has the token and its base64 forms removed.
+   For git the header is scoped to the remote's own URL on push, clone and fetch, and clone
+   and fetch follow no redirect. The REST client follows no redirect either: a 3xx is a
+   refusal with its status, so the header never reaches a host a redirect names.
 3. **Opening is idempotent without a retry.** Azure answers 409 when an active pull request
    already joins the same source and target. The client then searches for active pull
    requests on that pair and adopts the one match; zero or more than one is a refusal. The

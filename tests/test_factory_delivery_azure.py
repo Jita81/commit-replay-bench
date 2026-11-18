@@ -476,3 +476,51 @@ def test_close_of_a_pr_recorded_in_another_azure_repo_is_refused() -> None:
             repo_id="/repos/billing",
         )
     assert forge.calls == []
+
+
+def test_a_redirect_is_refused_and_the_token_never_reaches_the_second_host() -> None:
+    """The default opener follows no 3xx: urllib would otherwise copy the Authorization
+    header to the host the redirect names."""
+    import http.server
+    import threading
+
+    seen: list[tuple[str, str | None]] = []
+
+    def serve(location: str | None) -> http.server.HTTPServer:
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                seen.append((self.server.name, self.headers.get("Authorization")))  # type: ignore[attr-defined]
+                if location:
+                    self.send_response(302)
+                    self.send_header("Location", location)
+                else:
+                    self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, *a: object) -> None:
+                return None
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv
+
+    other = serve(None)
+    other.name = "other"  # type: ignore[attr-defined]
+    first = serve(f"http://127.0.0.1:{other.server_port}/elsewhere")
+    first.name = "first"  # type: ignore[attr-defined]
+    try:
+        with pytest.raises(az.AzureReposError) as err:
+            az._call(
+                f"http://127.0.0.1:{first.server_port}/x",
+                _creds(),
+                what="probe",
+                timeout=5,
+                urlopen=None,
+            )
+    finally:
+        first.shutdown()
+        other.shutdown()
+    assert err.value.status == 302
+    assert [name for name, _ in seen] == ["first"]
+    assert TOKEN not in str(err.value)
