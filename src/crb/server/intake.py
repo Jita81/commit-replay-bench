@@ -100,6 +100,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -2942,6 +2943,19 @@ def manufacture_run_id(repo: str, tracker: str, key: str, content: str) -> str:
     return uuid.uuid5(uuid.NAMESPACE_URL, name).hex
 
 
+def attempt_share(cap: float, max_rework: int) -> float:
+    """One attempt's cost cap: an equal share of the run's ``cap`` over the first build
+    and each rework. It is rounded DOWN to a millionth of a dollar, so the worker's
+    reserve for the item (``item_reserve``: the share once per attempt) never passes the
+    cap. Rounded to the nearest, $2 over 3 attempts gave $0.6667 each, a reserve of
+    $2.0001, and the run stopped before it built. It stays above 0, since a budget of 0
+    means no cap at all; below a millionth the share is the exact quotient."""
+    attempts = 1 + max(0, max_rework)
+    exact = Decimal(repr(float(cap))) / attempts
+    share = float(exact.quantize(Decimal("0.000001"), rounding=ROUND_DOWN))
+    return share if share > 0 else float(cap) / attempts
+
+
 def auto_manufacture_for(
     settings: Any,
     sessions: sessionmaker[Session],
@@ -2994,7 +3008,7 @@ def auto_manufacture_for(
             deliver=True,
             max_rework=rework,
             # each attempt gets an equal share, so the first build cannot spend the rework's
-            budget=RunBudget(max_cost_usd=round(cap / (rework + 1), 4)),
+            budget=RunBudget(max_cost_usd=attempt_share(cap, rework)),
         )
         run = new_run(body, actor=approved_by.removeprefix(OPERATOR_PREFIX) or "intake")
         run.id = run_id
@@ -3243,6 +3257,7 @@ __all__ = [
     "Ticket",
     "already_handled",
     "apply_outcome_map",
+    "attempt_share",
     "auto_manufacture_for",
     "build_tracker",
     "intake_lease",

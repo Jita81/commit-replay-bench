@@ -721,6 +721,40 @@ def test_the_run_delivers_keeps_its_rework_and_shares_the_cap(
     assert auto.find_run({**_REQUEST, "content_revision": "c-2"}) == ""
 
 
+@pytest.mark.parametrize(
+    ("cap", "rework"),
+    [(2.0, 2), (5.0, 2), (20.0, 2), (1.0, 5), (7.0, 5), (0.0001, 5), (6.0, 2), (0.3, 0)],
+)
+def test_the_spend_cap_admits_the_item_the_run_was_queued_for(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cap: float, rework: int
+) -> None:
+    """Spend review: the share was rounded to the nearest $0.0001, so $2 over 3 attempts
+    gave $0.6667 each. The worker reserved $2.0001 for the item and stopped the run before
+    it built, at $0 spent, and the sweep never tried that content again. The share must
+    round down, and stay above 0, which a budget reads as no cap."""
+    from crb.server.spend_cap import Spend, SpendCap, item_reserve
+
+    monkeypatch.setattr(sv, "submit_refusals", lambda db, s, body, run: None)
+    sessions = _store(tmp_path)
+    auto = _real(
+        tmp_path,
+        sessions,
+        auto_manufacture_max_cost_usd=cap,
+        auto_manufacture_max_rework=rework,
+    )
+    auto.queue_run(_REQUEST)
+    (run,) = _runs(sessions)
+    p = run.params_json
+    share = float(p["budget"]["max_cost_usd"])
+    assert 0 < share <= cap / (rework + 1)
+    spend_cap = SpendCap.from_params(p)
+    assert spend_cap is not None and spend_cap.cap_usd == cap
+    nothing = Spend.of_rows([])
+    reserve, attempts = item_reserve([share], nothing, max_rework=int(p["max_rework"]))
+    assert attempts == rework + 1 and reserve <= cap
+    assert spend_cap.check(nothing, reserve=reserve, unit="item", attempts=attempts) is None
+
+
 def test_two_passes_that_race_on_one_key_queue_one_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

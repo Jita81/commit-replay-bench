@@ -46,7 +46,9 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
 4. **What it queues.** A `factory` run on `CRB_INTAKE__AUTO_MANUFACTURE_RUNG` with
    `deliver: true` and `max_rework` from `CRB_INTAKE__AUTO_MANUFACTURE_MAX_REWORK`. The run's
    whole cap is `CRB_INTAKE__AUTO_MANUFACTURE_MAX_COST_USD`, and each attempt gets an equal
-   share of it. `params.intake_item` names the item, and the worker builds that item only.
+   share of it. The share is rounded down to a millionth of a dollar, so the worker's reserve
+   for the item never passes the cap. `params.intake_item` names the item, and the worker
+   builds that item only.
    `params.intake_auto` holds the key fields and who acted. The run meets the one submit gate
    `POST /runs` applies, and the factory params `POST /runs` pins. `POST /runs` cannot set
    either intake field.
