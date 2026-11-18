@@ -145,7 +145,9 @@ def rows_of_rung(
 ) -> list[GradeRow]:
     """Every repository's rows of one builder, model, mode, process step and ladder rung, in
     chain (``seq``) order — what a mapping quote prices from (ADR-0058): one filtered read,
-    never a full-ledger read per repository."""
+    never a full-ledger read per repository. An imported row is someone else's measurement
+    (P-321) and is dropped, as in ``rows_of_runs``: a quote is priced only from rows this
+    deployment measured."""
     q = (
         select(Grade)
         .where(
@@ -157,7 +159,8 @@ def rows_of_rung(
         )
         .order_by(Grade.seq)
     )
-    return [_from_model(m) for m in session.execute(q).scalars()]
+    rows = (_from_model(m) for m in session.execute(q).scalars())
+    return [r for r in rows if not r.imported]
 
 
 class AttemptSettled(RuntimeError):

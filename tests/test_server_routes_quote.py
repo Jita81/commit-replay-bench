@@ -82,7 +82,9 @@ def _cells(body: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {c["label"]: c for c in body["cells"]}
 
 
-def _beta_rows(env: Env, *, arm: str = "", n: int = 4, **labels: str) -> None:
+def _beta_rows(
+    env: Env, *, arm: str = "", n: int = 4, imported: bool = False, **labels: str
+) -> None:
     """``n`` rows for BETA in test.add/XS by the seed's builder and model, through the write
     path, alternating $0.01 / $0.03 and 30 s / 90 s; ``labels`` overlay the seed's own."""
     if arm:
@@ -113,7 +115,11 @@ def _beta_rows(env: Env, *, arm: str = "", n: int = 4, **labels: str) -> None:
         )
         for i in range(n)
     ]
-    DbLedger(env.factory).append_many(rows)
+    ledger = DbLedger(env.factory)
+    if imported:
+        ledger.import_rows(rows, imported_by="admin-1", imported_at="2026-11-18T00:00:00+00:00")
+    else:
+        ledger.append_many(rows)
 
 
 def test_quote_serves_mined_cells_with_repo_basis(env: Env) -> None:
@@ -175,6 +181,15 @@ def test_quote_uses_other_repository_rows_when_repo_has_none(env: Env) -> None:
     assert c["tasks_to_run"] == 1
     assert c["cost_usd"]["expected"] == pytest.approx(0.02)
     assert c["minutes"]["expected"] == pytest.approx(1.0)
+
+
+def test_quote_never_prices_from_imported_rows(env: Env) -> None:
+    """An imported row is someone else's measurement: it prices no cell, in either tier."""
+    _beta_rows(env, imported=True)
+    assert all(r.imported for r in DbLedger(env.factory).rows(repo=BETA))
+    c = _cells(env.get(f"{BASE}&cells=test.add:XS:5").json())["test.add/XS"]
+    assert c["basis"]["tier"] not in (q.TIER_DEPLOYMENT, q.TIER_REPO)
+    assert c["basis"]["n_rows"] == 0
 
 
 def test_quote_declared_band_echoed_and_tagged(env: Env) -> None:
