@@ -1363,9 +1363,10 @@ export interface QuoteRun {
   first_look: number
 }
 
-/** One axis of a quote cell or total. `null` where work would run and the server has no
- * basis for it, never `0`. A cell that would run no task is `0` on every bound, whatever
- * its basis tier. */
+/** One axis (cost or minutes) of a quote cell. A bound is `null` where work would run and
+ * the server has no basis for it, never `0`. A declared band fills `low` and `high` and
+ * leaves `expected` `null`: no mid-point, not no basis. A cell that would run no task is
+ * `0` on every bound, whatever its basis tier. */
 export interface QuoteRange {
   low: number | null
   expected: number | null
