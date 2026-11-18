@@ -104,7 +104,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -173,7 +173,7 @@ from crb.intake.jira import JiraConfig, JiraTracker
 from crb.server.factory_state import FactoryHome
 from crb.server.routes.runs import submit_refusals
 from crb.server.schemas import RunCreateRequest
-from crb.store.jobs import KIND_GAP_PROBE, JobQueue
+from crb.store.jobs import KIND_GAP_PROBE, TERMINAL_STATUSES, JobQueue
 from crb.store.models import LEASE_ROW_PREFIX, Repo, Run, WorkerRow
 
 log = logging.getLogger("crb.server.intake")
@@ -236,7 +236,8 @@ GAP_PROBE_PENDING_ADVICE = (
 )
 GAP_PROBE_FAILED_ADVICE = (
     "The trial build of this ticket did not finish, so nothing was registered. Edit the "
-    "ticket to ask for another trial build, or switch the gap probe off."
+    "ticket to ask for another trial build, or switch the gap probe off and use Post the "
+    "feedback again (then Register it, if it waits for approval)."
 )
 
 
@@ -269,7 +270,29 @@ def gap_probe_for(settings: Any, sessions: sessionmaker[Session], repo: str) -> 
     builder, _, rest = rung_label.partition(":")
     model, _, provider = rest.partition("@")
 
+    def live_probe(request: Mapping[str, Any]) -> str:
+        # a run queued for this ticket's content whose request never reached the chain (the
+        # process died between the two writes): reused, so no pass queues a second paid probe.
+        # One that already ran to its end is reused too (the request then names a run with no
+        # result after it, which fails closed); only a run cancelled before it started is not
+        same = ("tracker", "key", "content_revision")
+        with sessions() as db:
+            for run in db.scalars(
+                select(Run).where(
+                    Run.repo == repo,
+                    Run.kind == KIND_GAP_PROBE,
+                    or_(Run.status.not_in(TERMINAL_STATUSES), Run.started != ""),
+                )
+            ):
+                params = dict(run.params_json or {})
+                if all(str(params.get(k, "")) == str(request.get(k, "")) for k in same):
+                    return str(run.id)
+        return ""
+
     def enqueue(request: Mapping[str, Any]) -> str:
+        existing = live_probe(request)
+        if existing:
+            return existing
         params = {
             **dict(request),
             "rung": rung_label,
@@ -1802,6 +1825,13 @@ def _handle_ticket(
         ready=feedback.ready_to_register,
         awaiting_registration=awaiting,
         **return_note,
+        # ADR-0059: the probe state this pass acted on, so a result written during the pass
+        # is not taken as acted on by a read that judged it pending (only with a probe)
+        **(
+            {"gap_probe_run_id": probe.run_id, "gap_probe_state": probe.state}
+            if probe.run_id
+            else {}
+        ),
     )
     return row
 
@@ -2052,7 +2082,7 @@ def _request_gap_probe(
             approved_by_name=approved_by_name or approved_by,
             run_id=run_id,
         )
-    except Exception:
+    except BaseException:
         # the run is queued but the chain does not name it: the next pass would find no
         # request and queue a second paid probe, so this one is cancelled before it spends
         if gap_probe.cancel is not None:

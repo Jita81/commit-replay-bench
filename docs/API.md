@@ -795,7 +795,9 @@ due (ADR-0056) it may also carry `return_pending: true` — the move failed for 
 passes, so the revision is not finished with and the next pass tries again; with
 `content_changed: true` beside it, a person edited the ticket before the move, so it was not
 moved and the next pass assesses it again — or
-`return_skipped: true` with `state_now` — a person moved the ticket first), `intake.feedback.posted`
+`return_skipped: true` with `state_now` — a person moved the ticket first; with a gap probe
+(ADR-0059) it carries `gap_probe_run_id` and `gap_probe_state`, the probe the pass acted on),
+`intake.feedback.posted`
 (`label`, `marker`, `open_questions`, `route`), `intake.awaiting_approval` (`tracker`, `key`, `revision`,
 `content_revision`, `author`, `item` — a ready draft waiting for an operator, ADR-0022),
 `intake.registered` (`key`, `how: frozen|evolved`, `supersedes`, `url`, `approved_by` —

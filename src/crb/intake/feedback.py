@@ -249,8 +249,16 @@ def _class_block(draft: Draft) -> list[str]:
     ]
 
 
-def _questions_block(draft: Draft, readiness: Readiness) -> list[str]:
+def _questions_block(
+    draft: Draft, readiness: Readiness, asked: Sequence[OpenGap] = ()
+) -> list[str]:
     if readiness.ready and not readiness.gaps:
+        if asked:
+            return [
+                "**What is missing**",
+                "",
+                "No catalogue question is open; a trial build raised the questions below.",
+            ]
         return [
             "**What is missing**",
             "",
@@ -439,7 +447,7 @@ def render_feedback(
         "",
         *_class_block(draft),
         "",
-        *_questions_block(draft, readiness),
+        *_questions_block(draft, readiness, asked),
         "",
         *([*_gap_question_lines(asked), ""] if asked else []),
         *_entry_block(draft, entry, arms),
@@ -485,8 +493,9 @@ def _gap_question_lines(asked: Sequence[OpenGap]) -> list[str]:
     lines = [
         "**What a trial build had to guess**",
         "",
-        "crb built this ticket once, privately, before registering it. Nothing from that "
-        "build is kept or delivered. The builder had to decide these things on its own. "
+        "crb built this ticket once, privately, before registering it. Its code is thrown "
+        "away and nothing from it is delivered; only the questions below are kept. The "
+        "builder had to decide these things on its own. "
         "Answer each one in the ticket, then save it: the changed ticket is read again.",
         "",
     ]

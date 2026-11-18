@@ -69,10 +69,14 @@ The question loop was read on the bench before it was built here:
    never read as "no questions". A request whose run has ended or vanished without a result
    is recorded failed once, judged on the chain read again after the run is seen ended, so a
    probe that finished during a pass is never recorded failed. A run queued whose request
-   could not be recorded is cancelled, so no pass queues a second. On a sealed worker
-   the probe refuses exactly as a factory run does. Before it is queued, the run meets the
-   one submit gate `POST /runs` applies, so a probe whose builder has no credential or whose
-   model has no price is refused and never queued.
+   could not be recorded is cancelled; that stops its spend when the cancel lands while it
+   is still queued. A pass that finds a probe run already queued for the same content reuses
+   it rather than queue a second, so a process that died between the two writes leaves one
+   run, not two. That holds when the run already ended too: the request then names a run
+   with no result after it and fails closed. Only a run cancelled before it started is not
+   reused. On a sealed worker the probe refuses exactly as a factory run does. Before it is
+   queued, the run meets the one submit gate `POST /runs` applies, so a probe whose builder
+   has no credential or whose model has no price is refused and never queued.
 8. **Cost recording.** The probe's spend is the `cost_usd` of its `gap_probe.build` step
    event, which `GET /runs/{id}` sums as the run's served cost; its finished and failed
    events carry it too. No ledger row is written, so a probe never reaches a cell or route.
@@ -84,8 +88,8 @@ The question loop was read on the bench before it was built here:
 
 - **ADR-0017, "The ticket is the backlog item"**, "registered through exactly the path the
   API uses", now reads as: registered through exactly the path the API uses, after, where
-  `CRB_INTAKE__GAP_PROBE` is on, one trial build of that content reported no decision it
-  had to guess.
+  `CRB_INTAKE__GAP_PROBE` is on, one trial build of that content produced no question that
+  step 4 keeps.
 
 ## Consequences
 

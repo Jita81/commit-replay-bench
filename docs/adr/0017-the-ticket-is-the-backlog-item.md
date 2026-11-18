@@ -39,7 +39,7 @@ day. The two have to be reconciled without weakening the first.
 `<tracker>-<key>` (`ado-4711`, `jira-abc-123`), registered through exactly the path the
 API uses (`FactoryHome.register_backlog` / `register_evolution`). Nothing is typed twice.
 (Amended by ADR-0059: where `CRB_INTAKE__GAP_PROBE` is on, only after one trial build of that
-content reported no decision it had to guess.)
+content left no question to ask.)
 
 **The column is the consent gate.** Moving a ticket into one watched column is the request
 to manufacture. Nothing outside that column is read, ever.

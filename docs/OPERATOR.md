@@ -1156,7 +1156,7 @@ registered from a partial read.
 | `refused` | the tracker refused a write — usually a workflow transition it does not allow, or a permission the credential lacks; or a ticket whose key cannot become an item id, which costs that ticket and nothing else | nothing was changed on the ticket; fix the workflow or the permission, or clear `CRB_INTAKE__OUTCOME_MAP`. With `step=return` it was the move back to `CRB_INTAKE__RETURN_STATE` (ADR-0056): the gap comment and the label are on the ticket, only the move was not made; allow that move in the tracker's workflow, or clear the setting. A normal pass does not try it again at that revision; it is tried again when the ticket next changes, or at once with *Post the feedback again* |
 | `column_too_large` | the column holds more tickets than one pass may read (`CRB_INTAKE__MAX_PER_POLL`), or the pass ran past `CRB_INTAKE__POLL_BUDGET_S` | narrow the area path or the JQL so the column holds the work that is genuinely ready, or raise the bound; a pass that ran out of time serves what it read and the rest are read next time |
 | `gap_probe_pending` | a trial build of the ticket is running (ADR-0059) | nothing: the next pass reads its result |
-| `gap_probe_failed` | the trial build did not finish (reclaimed, unpriced, cost unknown, raised, or its run ended without a result) | nothing was registered; edit the ticket to ask for another trial build, or switch `CRB_INTAKE__GAP_PROBE` off |
+| `gap_probe_failed` | the trial build did not finish (reclaimed, unpriced, cost unknown, raised, or its run ended without a result) | nothing was registered; edit the ticket to ask for another trial build, or switch `CRB_INTAKE__GAP_PROBE` off and use *Post the feedback again* (then Register it, if it waits for approval) |
 | `no_public_url` | this deployment does not know its own address, so a link on a ticket would not open | set `CRB_PUBLIC_URL` to the address people use to reach the product, on the API and the worker |
 | `lease_lost` | one tracker call took longer than the pass's lease lives, and another pass took the repository over | nothing: the pass renews its lease around every tracker call, so this needs one call slower than the lease; the pass stopped before its next call and the other pass carries on. If it recurs, the tracker is answering very slowly — raise `CRB_INTAKE__POLL_BUDGET_S`, which lengthens the lease with it |
 
@@ -1494,7 +1494,7 @@ CRB_INTAKE__RETURN_STATE=""                   # EMPTY by default: a ticket with 
 CRB_INTAKE__GAP_PROBE=false                   # OFF by default: no trial build before registering (ADR-0059)
 CRB_INTAKE__GAP_PROBE_RUNG=""                 # required when on; a claude_code rung only
 CRB_INTAKE__GAP_PROBE_MAX_QUESTIONS=5         # 1..10, at most the gap limit
-CRB_INTAKE__GAP_PROBE_MAX_COST_USD=2.0        # each trial build's spend cap
+CRB_INTAKE__GAP_PROBE_MAX_COST_USD=2.0        # each trial build's spend cap, 0.0001..1e6
 CRB_PUBLIC_URL=https://crb.example.com        # THIS deployment's address (required, see below)
 ```
 
@@ -1626,7 +1626,11 @@ set. A failed trial build registers nothing (`gap_probe_failed`); edit the ticke
 another. One trial build runs per ticket content, so this product's own comments, labels and
 moves never start a second. Start-up refuses the probe without a rung, on a builder other than
 `claude_code`, or with `CRB_INTAKE__REQUIRE_APPROVAL=false`. A probe's spend is its run's
-served cost (`GET /runs/{id}`); it writes no ledger row, so it never reaches a route.
+served cost (`GET /runs/{id}`); it writes no ledger row, so it never reaches a route. In
+production a worker that refuses unsealed builds (ADR-0023) refuses every probe run, so each
+approved ticket stops `gap_probe_failed`. Start the worker with `CRB_ALLOW_UNSEALED_PROD=1`,
+with `CRB_ALLOW_UNSEALED_PROD_BY` naming an active admin and `CRB_ALLOW_UNSEALED_PROD_REASON`
+saying why (G-663), to run probes on purpose.
 
 ## 12. The prevention loop
 

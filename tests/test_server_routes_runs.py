@@ -734,8 +734,6 @@ class TestCredentialPresence:
         build."""
         import ast
 
-        queue_calls = {"enqueue", "stage_queued"}
-
         import crb.server as server_pkg
 
         exempt = {
@@ -751,26 +749,9 @@ class TestCredentialPresence:
         ungated: list[str] = []
         for path in sorted(root.rglob("*.py")):
             rel = path.relative_to(root).as_posix()
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for fn in ast.walk(tree):
-                if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
-                    continue
-                calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)]
-                # ``.enqueue(`` commits a run; ``stage_queued(`` adds one to the caller's own
-                # transaction (the Learn queue, EI-1) — both put a run on the queue
-                enqueues = any(
-                    (isinstance(c.func, ast.Attribute) and c.func.attr in queue_calls)
-                    or (isinstance(c.func, ast.Name) and c.func.id in queue_calls)
-                    for c in calls
-                )
-                if not enqueues:
-                    continue
-                seen.add((rel, fn.name))
-                gated = any(
-                    isinstance(c.func, ast.Name) and c.func.id == "submit_refusals" for c in calls
-                )
-                if not gated and (rel, fn.name) not in exempt:
-                    ungated.append(f"{rel}::{fn.name}")
+            found, bare = _enqueue_scan(ast.parse(path.read_text(encoding="utf-8")))
+            seen |= {(rel, name) for name in found}
+            ungated += [f"{rel}::{name}" for name in bare if (rel, name) not in exempt]
         assert ungated == [], f"these enqueue a run without submit_refusals: {ungated}"
         # the gated routes were found, and every exemption still names a real call site
         assert {
@@ -779,6 +760,27 @@ class TestCredentialPresence:
             ("intake.py", "gap_probe_for"),
         } <= seen
         assert set(exempt) <= seen
+
+    def test_the_enqueue_scan_does_not_credit_a_function_with_a_nested_gate(self) -> None:
+        """Review: the scan walked into nested defs, so a function that queued a run
+        directly was credited with a ``submit_refusals`` call made by a function nested in
+        it, and P-160's ratchet had a hole."""
+        import ast
+
+        src = (
+            "def f():\n"
+            "    q.enqueue(x)\n"
+            "    def g():\n"
+            "        submit_refusals()\n"
+            "        q.enqueue(y)\n"
+            "def h():\n"
+            "    def k():\n"
+            "        submit_refusals()\n"
+            "        q.enqueue(z)\n"
+        )
+        seen, ungated = _enqueue_scan(ast.parse(src))
+        assert ungated == ["f"]
+        assert {"f", "g", "h", "k"} <= seen
 
     def test_the_stored_token_is_never_read_only_its_presence(
         self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -1669,3 +1671,50 @@ def test_the_suite_never_sees_the_hosts_claude_cli(monkeypatch: pytest.MonkeyPat
     assert "no `claude` CLI on PATH" in credential_missing("cli", secrets_dir=Path("/nonexistent"))
     monkeypatch.setattr(claude_code, "claude_cli_on_path", lambda: True)
     assert credential_missing("cli", secrets_dir=Path("/nonexistent")) == ""
+
+
+def _own_calls(fn: Any) -> list[Any]:
+    """The calls in ``fn``'s own body: not in a function, lambda or class nested in it."""
+    import ast
+
+    out: list[Any] = []
+    stack = list(ast.iter_child_nodes(fn))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef):
+            continue
+        if isinstance(node, ast.Call):
+            out.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
+def _enqueue_scan(tree: Any) -> tuple[set[str], list[str]]:
+    """P-160's scan of one module: the functions that put a run on the queue anywhere in
+    their body (nested functions included), and the functions that call ``.enqueue(`` or
+    ``stage_queued(`` in their OWN body without calling ``submit_refusals`` there too. A gate
+    in a nested function never covers the function that encloses it."""
+    import ast
+
+    queue_calls = {"enqueue", "stage_queued"}
+
+    def queues(c: Any) -> bool:
+        # ``.enqueue(`` commits a run; ``stage_queued(`` adds one to the caller's own
+        # transaction (the Learn queue, EI-1) — both put a run on the queue
+        return (isinstance(c.func, ast.Attribute) and c.func.attr in queue_calls) or (
+            isinstance(c.func, ast.Name) and c.func.id in queue_calls
+        )
+
+    seen: set[str] = set()
+    ungated: list[str] = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        if any(queues(c) for c in ast.walk(fn) if isinstance(c, ast.Call)):
+            seen.add(fn.name)
+        own = _own_calls(fn)
+        if any(queues(c) for c in own) and not any(
+            isinstance(c.func, ast.Name) and c.func.id == "submit_refusals" for c in own
+        ):
+            ungated.append(fn.name)
+    return seen, ungated

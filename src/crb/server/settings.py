@@ -717,7 +717,9 @@ class IntakeSettings(BaseModel):
     #: The most questions one probe posts (1..10, never more than a context set's gap cap).
     gap_probe_max_questions: int = Field(default=5, ge=1, le=10)
     #: The probe build's own spend cap; a probe whose cost is unknown counts as failed.
-    gap_probe_max_cost_usd: float = Field(default=2.0, gt=0)
+    #: Bounded as a run's ``max_cost_usd`` is, at the builder's four-decimal precision, so a
+    #: cap no probe run could be queued under is refused at start-up.
+    gap_probe_max_cost_usd: float = Field(default=2.0, ge=0.0001, le=1_000_000)
     #: The rung that probes, ``claude_code:<model>``; empty while the probe is off.
     gap_probe_rung: str = ""
 
@@ -781,7 +783,14 @@ class IntakeSettings(BaseModel):
         if self.gap_probe_max_questions > MAX_GAPS:
             raise ValueError(f"gap_probe_max_questions cannot exceed {MAX_GAPS}")
         if rung:
-            builder = parse_rung(rung).builder
+            # one canonical label, so the run queued and the gate it meets read the rung
+            # this check read (parse_rung strips each part; a reader that splits does not)
+            parsed = parse_rung(rung)
+            rung = f"{parsed.builder}:{parsed.model}" + (
+                f"@{parsed.provider}" if parsed.provider else ""
+            )
+            self.gap_probe_rung = rung
+            builder = parsed.builder
             if builder != GAP_PROBE_BUILDER:
                 raise ValueError(
                     f"gap_probe_rung {rung!r} names builder {builder!r}; only "

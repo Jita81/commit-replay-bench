@@ -149,9 +149,11 @@ def probe_state(
 
 def unresolved_request(events: Sequence[Any], tracker: str, key: str) -> bool:
     """Whether ticket ``key``'s latest probe request is not yet acted on: it has no result
-    on the chain, or no ``intake.read`` of the ticket came after its result. The poll treats
-    such a ticket as not finished with, whichever act asked for the probe — the Register act
-    writes no read, so without this its probe's result would never be acted on."""
+    on the chain, or no ``intake.read`` of the ticket came after its result. A read that
+    judged this run still pending does not count: its result landed during that pass. The
+    poll treats such a ticket as not finished with, whichever act asked for the probe — the
+    Register act writes no read, so without this its probe's result would never be acted
+    on."""
     listed = list(events)
     for i in range(len(listed) - 1, -1, -1):
         e = listed[i]
@@ -173,7 +175,12 @@ def unresolved_request(events: Sequence[Any], tracker: str, key: str) -> bool:
         if result is None:
             return True
         return not any(
-            _matches(later, EV_INTAKE_READ, tracker, key) for later in listed[result + 1 :]
+            _matches(later, EV_INTAKE_READ, tracker, key)
+            and not (
+                str(later.payload.get("gap_probe_run_id", "")) == run_id
+                and later.payload.get("gap_probe_state") == STATE_PENDING
+            )
+            for later in listed[result + 1 :]
         )
     return False
 
@@ -199,7 +206,10 @@ def parse_guesses(raw: Any, n: int) -> list[OpenGap]:
         if not isinstance(entry, Mapping):
             continue
         decision = str(entry.get("decision", "")).strip()
-        question = str(entry.get("question", "")).strip()
+        raw_question = entry.get("question")
+        if not isinstance(raw_question, str):
+            continue
+        question = raw_question.strip()
         if decision not in GAP_DECISIONS or not question or not _one_line(question):
             continue
         question = redact(question)

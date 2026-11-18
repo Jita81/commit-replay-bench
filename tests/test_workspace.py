@@ -31,6 +31,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import pytest
+
 from crb.core.git import GitRepo
 from crb.core.spec import Language, RepoConfig
 from crb.core.workspace import (
@@ -78,6 +80,28 @@ def test_context_manager_removes_worktree(pyrepo: pr.PyRepo, tmp_path: Path) -> 
         assert str(dest) in pyrepo.repo.run("worktree", "list", check=True).stdout
     assert not dest.exists()
     assert str(dest) not in pyrepo.repo.run("worktree", "list", check=True).stdout
+
+
+@pytest.mark.parametrize("make", ["create", "at_ref"])
+def test_a_worktree_whose_preparation_raised_is_removed(
+    make: str, pyrepo: pr.PyRepo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review: a ``_post_create`` that raised left the worktree registered and on disk,
+    because the caller's ``with`` block (and its removal) was never entered."""
+
+    def boom(self: Workspace, config: RepoConfig) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Workspace, "_post_create", boom)
+    dest = tmp_path / "ws"
+    with pytest.raises(OSError, match="disk full"):
+        if make == "create":
+            Workspace.create(pyrepo.repo, pyrepo.feat_sha, dest, config=pyrepo.config)
+        else:
+            Workspace.at_ref(pyrepo.repo, "HEAD", dest, config=pyrepo.config)
+    assert not dest.exists()
+    listed = pyrepo.repo.run("worktree", "list", "--porcelain", check=True).stdout
+    assert str(dest) not in listed
 
 
 def test_overlay_tests_brings_the_red_target_in(pyrepo: pr.PyRepo, tmp_path: Path) -> None:

@@ -272,7 +272,15 @@ from crb.builders.adapter import (
     run_arm_for,
     rungs_from_entries,
 )
-from crb.builders.base import STOP_DONE, Budget, BuildBrief, Builder, EscalationLadder, Rung
+from crb.builders.base import (
+    STOP_DONE,
+    Budget,
+    BuildBrief,
+    Builder,
+    BuildOutcome,
+    EscalationLadder,
+    Rung,
+)
 from crb.builders.brief import ARM_S1, ContextEntry, S1Arm
 from crb.builders.budget import budget_for_rung, load_pricing, parse_rung
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
@@ -1632,7 +1640,7 @@ class Worker:
             classes=class_set_state.draft_stamper(self.factory, repo),
             # ADR-0059: None (off) unless CRB_INTAKE__GAP_PROBE — then an approved ready
             # ticket is built once, unseen, before it is registered
-            gap_probe=gap_probe_for(self.settings, self.factory, repo),
+            gap_probe=gap_probe_for(self._gap_probe_settings(), self.factory, repo),
         )
 
     def _return_state(self) -> str:
@@ -4321,6 +4329,13 @@ class Worker:
         new.params_json = {**dict(new.params_json or {}), "chained_from": run.id}
         return body, new
 
+    def _gap_probe_settings(self) -> SimpleNamespace:
+        """The settings ``gap_probe_for`` is handed on the timed poll (ADR-0059): what
+        :meth:`_chain_gate_settings` gives ``submit_refusals``, plus ``intake`` (the probe's
+        switch, rung and caps). The probe's run is a blind build, so the gate's last check,
+        the login, reads ``settings.builder`` — which ``WorkerSettings`` does not have."""
+        return SimpleNamespace(**vars(self._chain_gate_settings()), intake=self.settings.intake)
+
     def _chain_gate_settings(self) -> SimpleNamespace:
         """The settings ``submit_refusals`` is handed for a request :meth:`_chain_request`
         makes — not the whole gate: the ``qualify_first: false`` branch reads
@@ -4661,24 +4676,29 @@ class Worker:
         budget = Budget(max_cost_usd=float(p.get("max_cost_usd") or 0.0))
         builder = builder_for_rung(rung, gap_probe=True)
         dest = opaque_dest(self.scratch_dir, "probe")
+        built: BuildOutcome | None = None
         try:
             with Workspace.at_ref(
                 ctx.git, ctx.git.rev_parse("HEAD"), dest, config=ctx.config
             ) as ws:
-                outcome = builder.build(ws, brief, budget)
+                built = builder.build(ws, brief, budget)
+                # inside the block: a worktree teardown that raises must not lose the spend
+                ctx.emit(
+                    "build",
+                    GAP_PROBE_BUILD_ACTION,
+                    cost_usd=built.cost_usd,
+                    tokens_in=built.tokens_in,
+                    tokens_out=built.tokens_out,
+                )
+            outcome = built
         except SandboxUnavailable:
             raise
         except Exception as exc:  # recorded, never retried at this content
             return failed(
-                FAIL_BUILD_ERROR, redact_and_cap(f"{type(exc).__name__}: {exc}", max_chars=300)
+                FAIL_BUILD_ERROR,
+                redact_and_cap(f"{type(exc).__name__}: {exc}", max_chars=300),
+                cost=built.cost_usd if built is not None else 0.0,
             )
-        ctx.emit(
-            "build",
-            GAP_PROBE_BUILD_ACTION,
-            cost_usd=outcome.cost_usd,
-            tokens_in=outcome.tokens_in,
-            tokens_out=outcome.tokens_out,
-        )
         if not outcome.cost_known:
             return failed(FAIL_COST_UNKNOWN, cost=outcome.cost_usd)
         if "assumptions" not in outcome.extra or outcome.stop_reason != STOP_DONE or outcome.errors:

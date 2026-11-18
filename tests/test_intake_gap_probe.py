@@ -212,6 +212,8 @@ def test_parse_guesses_keeps_plain_known_questions_and_drops_the_guess() -> None
         {"decision": "name", "question": "x" * (gp.MAX_QUESTION_CHARS + 1)},
         {"decision": "name", "question": ""},
         {"question": "no decision"},
+        {"decision": "name", "question": None},
+        {"decision": "name", "question": 42},
         "not a mapping",
     ],
 )
@@ -228,7 +230,11 @@ def test_parse_guesses_drops_casefold_duplicates_and_caps_at_n() -> None:
         *({"decision": "value", "question": f"Which limit, number {i}?"} for i in range(9)),
     ]
     out = gp.parse_guesses(raw, 3)
-    assert len(out) == 3 and out[0].question == "What is it called?"
+    assert [g.question for g in out] == [
+        "What is it called?",
+        "Which limit, number 0?",
+        "Which limit, number 1?",
+    ]
     assert gp.parse_guesses(raw, 0) == [] and gp.parse_guesses("junk", 5) == []
     assert gp.MAX_QUESTION_CHARS == 240
 
@@ -288,6 +294,9 @@ def test_settings_refuse_an_unattended_probe() -> None:
         {"gap_probe_max_questions": 11},
         {"gap_probe_max_cost_usd": 0},
         {"gap_probe_max_cost_usd": -1.0},
+        {"gap_probe_max_cost_usd": float("inf")},
+        {"gap_probe_max_cost_usd": 0.00001},
+        {"gap_probe_max_cost_usd": 1_000_001.0},
     ],
 )
 def test_settings_refuse_out_of_range_bounds(kw: dict[str, Any]) -> None:
@@ -298,6 +307,19 @@ def test_settings_refuse_out_of_range_bounds(kw: dict[str, Any]) -> None:
 def test_settings_accept_a_complete_probe() -> None:
     s = _settings(gap_probe=True, gap_probe_rung=" claude_code:claude-sonnet-5 ")
     assert s.gap_probe_rung == "claude_code:claude-sonnet-5"
+
+
+@pytest.mark.parametrize(
+    ("raw", "label"),
+    [
+        ("claude_code : claude-sonnet-5", "claude_code:claude-sonnet-5"),
+        (" claude_code: claude-sonnet-5 @ anthropic ", "claude_code:claude-sonnet-5@anthropic"),
+    ],
+)
+def test_settings_store_the_probe_rung_as_one_canonical_label(raw: str, label: str) -> None:
+    """Review: the check stripped each part but the label was stored as typed, so the run
+    queued under it named builder ``'claude_code '``, not the one validated."""
+    assert _settings(gap_probe=True, gap_probe_rung=raw).gap_probe_rung == label
 
 
 # --- the run kind -----------------------------------------------------------------------
@@ -407,6 +429,8 @@ def test_with_the_probe_off_the_poll_writes_exactly_what_it_wrote_before(
     assert ta.calls == tb.calls and ta.comments == tb.comments and ta.labels == tb.labels
     assert _strip(a) == _strip(b)
     assert not _probe_events(a)
+    reads = [e.payload for e in a.events() if e.kind == sv.EV_READ]
+    assert reads and all("gap_probe_run_id" not in p and "gap_probe_state" not in p for p in reads)
 
 
 # --- the poll ---------------------------------------------------------------------------
@@ -521,6 +545,24 @@ def test_a_failed_probe_fails_closed_and_is_never_retried(home: FactoryHome) -> 
         assert row.stopped == sv.REASON_GAP_PROBE_FAILED
     assert len(queue.requests) == 1 and home.load_backlog() is None
     assert sv.EV_REGISTERED not in _kinds(home)
+
+
+def test_switching_the_probe_off_alone_never_registers_a_failed_ticket(
+    home: FactoryHome,
+) -> None:
+    """Review: the failed row's advice once said only "switch the gap probe off", but an
+    unforced pass at the same revision serves the cached failed row; the advice must name
+    the re-post."""
+    queue = Queue()
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, gap_probe=queue.probe())
+    queue.status["probe-1"] = "failed"
+    _poll(home, tracker, gap_probe=queue.probe())
+    (row,) = _poll(home, tracker, gap_probe=None).rows
+    assert row.stopped == sv.REASON_GAP_PROBE_FAILED
+    assert home.load_backlog() is None
+    assert "Post the feedback again" in sv.GAP_PROBE_FAILED_ADVICE
+    assert row.stopped_advice == sv.GAP_PROBE_FAILED_ADVICE
 
 
 @pytest.mark.parametrize("status", [None, "failed", "cancelled", "succeeded"])
@@ -866,6 +908,34 @@ def test_the_probe_dispatches_through_the_worker_and_writes_no_ledger_row(
         assert s.execute(select(func.count()).select_from(Grade)).scalar_one() == 0
 
 
+class _TeardownFails(_Workspaces):
+    @contextmanager
+    def at_ref(self, git: Any, ref: str, dest: Path, config: Any = None) -> Any:
+        from crb.core.git import GitError
+
+        self.opened.append(dest)
+        yield SimpleNamespace(path=dest)
+        raise GitError("git worktree remove timed out")
+
+
+def test_a_probe_whose_worktree_teardown_raised_still_records_its_spend(
+    tmp_path: Path, seams: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review: the build step event was emitted only after the workspace closed, so a
+    teardown that raised after a priced build lost the spend from the run's served cost."""
+    import crb.server.worker as w
+
+    monkeypatch.setattr(w, "Workspace", _TeardownFails())
+    worker = _worker(tmp_path)
+    ctx, emitted = _ctx()
+    status, counts, _ = worker._run_gap_probe(ctx)
+    assert status == "failed" and counts == {"gap_probe": gp.FAIL_BUILD_ERROR}
+    builds = [kw for stage, action, kw in emitted if action == gp.GAP_PROBE_BUILD_ACTION]
+    assert [b["cost_usd"] for b in builds] == [0.37]
+    (failed,) = _chain(worker)
+    assert failed.payload["cost_usd"] == 0.37
+
+
 def test_the_served_cost_of_a_probe_run_is_its_build_step_events(tmp_path: Path) -> None:
     from crb.server.routes.runs import run_out
     from crb.store import init_db, make_engine, make_session_factory
@@ -980,6 +1050,38 @@ def test_a_probe_that_finishes_during_a_poll_pass_is_never_recorded_failed(
     assert row.stopped != sv.REASON_GAP_PROBE_FAILED
 
 
+class _StillRunningQueue(_LateQueue):
+    """The result lands during the pass while the run is still ``running``: the pass judges
+    the probe pending and writes its read AFTER the result."""
+
+    def run_status(self, run_id: str) -> str | None:
+        if self.armed:
+            self.armed = False
+            _finish(self.home, self, self.questions)
+            self.status[run_id] = "running"
+        return Queue.run_status(self, run_id)
+
+
+def test_a_read_that_judged_the_probe_pending_does_not_act_on_its_result(
+    home: FactoryHome,
+) -> None:
+    """Review: a read written after a mid-pass result counted as acting on it, so the next
+    pass at the same revision served the cached pending row and never registered."""
+    queue = _StillRunningQueue(home, [])
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, gap_probe=queue.probe())
+    queue.armed = True
+    (row,) = _poll(home, tracker, gap_probe=queue.probe()).rows
+    assert row.stopped == sv.REASON_GAP_PROBE_PENDING
+    read = [e for e in home.events() if e.kind == sv.EV_READ][-1]
+    assert read.payload["gap_probe_state"] == gp.STATE_PENDING
+    assert not sv.already_handled(
+        list(home.events()), "fake", "4711", read.payload["revision"], probing=True
+    )
+    report = _poll(home, tracker, gap_probe=queue.probe())
+    assert report.registered == 1 and len(queue.requests) == 1
+
+
 def test_a_register_act_racing_a_finishing_probe_is_not_refused_as_failed(
     home: FactoryHome,
 ) -> None:
@@ -1044,6 +1146,121 @@ def test_a_register_act_whose_request_cannot_be_recorded_cancels_its_run(
     with pytest.raises(sv.ApprovalRefused) as err:
         _register(home, tracker, queue)
     assert err.value.code == "register_refused" and queue.cancelled == ["probe-1"]
+
+
+def _interrupt_the_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    from crb.factory.evidence import FactoryEvidence
+
+    real = FactoryEvidence.append
+
+    def append(self: Any, kind: str, item_id: str = "", **payload: Any) -> Any:
+        if kind == EV_INTAKE_GAP_PROBE_REQUESTED:
+            raise KeyboardInterrupt
+        return real(self, kind, item_id, **payload)
+
+    monkeypatch.setattr(FactoryEvidence, "append", append)
+
+
+def test_an_interrupt_between_queue_and_request_still_cancels_the_run(
+    home: FactoryHome, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review: the cancel guard caught only ``Exception``, so an interrupt between the two
+    writes left a paid run that no request names."""
+    queue = Queue()
+    with monkeypatch.context() as m:
+        _interrupt_the_request(m)
+        with pytest.raises(KeyboardInterrupt):
+            _poll(home, _tracker(_ticket()), gap_probe=queue.probe())
+    assert queue.cancelled == ["probe-1"]
+
+
+def test_a_run_whose_request_died_with_the_process_is_reused_not_queued_again(
+    home: FactoryHome, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review: a process that died after queueing the probe and before recording its
+    request (nothing cancels then) left the next pass to queue a second paid probe."""
+    import dataclasses
+
+    from crb.store.models import Run
+
+    monkeypatch.setattr(sv, "submit_refusals", lambda *a, **k: None)
+    sessions = _queue_with_repo(tmp_path)
+    probe = sv.gap_probe_for(_deployment(**_ON), sessions, "alpha")
+    assert probe is not None
+    tracker = _tracker(_ticket())
+    with monkeypatch.context() as m:
+        _interrupt_the_request(m)
+        with pytest.raises(KeyboardInterrupt):
+            _poll(home, tracker, gap_probe=dataclasses.replace(probe, cancel=None))
+    _poll(home, tracker, gap_probe=probe)
+    with sessions() as s:
+        runs = s.query(Run).filter(Run.kind == KIND_GAP_PROBE).all()
+        assert len(runs) == 1
+        (request,) = [e for e in home.events() if e.kind == EV_INTAKE_GAP_PROBE_REQUESTED]
+        assert request.payload["run_id"] == runs[0].id
+
+
+def test_a_run_that_ended_before_its_request_was_recorded_is_named_not_queued_again(
+    home: FactoryHome, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review: only a run still queued or running was reused, so an orphan a worker had
+    already finished before the next pass left that pass to queue a second paid probe."""
+    import dataclasses
+
+    from crb.store.models import Run
+
+    monkeypatch.setattr(sv, "submit_refusals", lambda *a, **k: None)
+    sessions = _queue_with_repo(tmp_path)
+    probe = sv.gap_probe_for(_deployment(**_ON), sessions, "alpha")
+    assert probe is not None
+    tracker = _tracker(_ticket())
+    with monkeypatch.context() as m:
+        _interrupt_the_request(m)
+        with pytest.raises(KeyboardInterrupt):
+            _poll(home, tracker, gap_probe=dataclasses.replace(probe, cancel=None))
+    with sessions() as s:
+        (orphan,) = s.query(Run).filter(Run.kind == KIND_GAP_PROBE).all()
+        orphan.status, orphan.started, orphan.finished = "succeeded", "t1", "t2"
+        s.commit()
+    report = _poll(home, tracker, gap_probe=probe)
+    with sessions() as s:
+        runs = s.query(Run).filter(Run.kind == KIND_GAP_PROBE).all()
+        assert len(runs) == 1
+        (request,) = [e for e in home.events() if e.kind == EV_INTAKE_GAP_PROBE_REQUESTED]
+        assert request.payload["run_id"] == runs[0].id
+    # the request names a run with no result after it: fails closed, nothing registered
+    assert report.registered == 0
+    (row,) = _poll(home, tracker, gap_probe=probe).rows
+    assert row.stopped == sv.REASON_GAP_PROBE_FAILED and home.load_backlog() is None
+
+
+def test_the_timed_polls_probe_meets_the_whole_submit_gate_and_is_queued(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review: the timed poll handed ``WorkerSettings`` to the probe, and the submit gate's
+    login check reads ``settings.builder``, which it lacks: every probe that cleared the free
+    refusals raised ``AttributeError`` and none was ever queued."""
+    import crb.server.worker as w
+    from crb.server.routes import runs as runs_route
+    from crb.store.jobs import JobQueue
+    from crb.store.models import Repo
+
+    worker = _worker(tmp_path, intake=_settings(**_ON))
+    with worker.factory() as s:
+        s.add(Repo(name="alpha", language="python", runner="pytest", config_json={}))
+        s.commit()
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(w, "poll_repository", lambda repo, **kw: seen.update(kw))
+    monkeypatch.setattr(runs_route, "credential_refusal", lambda run, settings: None)
+    logins: list[dict[str, Any]] = []
+    monkeypatch.setattr(runs_route, "login_refusal", lambda *a, **k: logins.append(k))
+    worker._poll_one("alpha", object(), sv.ListenerState(enabled=True))
+    probe = seen["gap_probe"]
+    assert probe is not None
+    run_id = probe.enqueue({"key": "4711", "approved_by": "operator:ada"})
+    run = JobQueue(worker.factory).get(run_id)
+    assert run is not None and run.kind == KIND_GAP_PROBE
+    assert logins and logins[0]["ttl_s"] == worker.settings.builder_login_ttl_s
 
 
 def test_the_deployed_probe_cancels_a_queued_run(
