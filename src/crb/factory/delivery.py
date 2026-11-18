@@ -614,6 +614,7 @@ def git_push_fn(
     refspec: str,
     credentials: GitCredentials,
     expected: str | None = None,
+    follow_redirects: bool = True,
 ) -> None:
     """Push ``refspec`` (``branch:branch``, never ``HEAD``) with a one-shot auth
     header. The token is never written to ``.git/config`` and never put on the argv: the
@@ -621,18 +622,21 @@ def git_push_fn(
     ``GIT_CONFIG_KEY_n`` / ``GIT_CONFIG_VALUE_n`` (:func:`crb.core.git.git_config_env` — an
     argv is readable by every user on the host through ``/proc`` and ``ps``; D1,
     docs/SECURITY.md §3.3). ``expected`` (a re-delivery) is the commit the remote branch
-    must still point at — see :func:`force_with_lease_arg`."""
+    must still point at — see :func:`force_with_lease_arg`. ``follow_redirects=False`` adds
+    ``http.<remote>.followRedirects=false`` so git sends the header to no redirect target
+    (ADR-0057: the Azure Repos push carries a long-lived tracker token)."""
     src, _, dst = refspec.partition(":")
     if src != branch or dst != branch:
         raise DefaultBranchProtectionError(f"refspec {refspec!r} must be {branch}:{branch}")
+    pairs = {f"http.{credentials.remote}.extraheader": credentials.basic_auth_header()}
+    if not follow_redirects:
+        pairs[f"http.{credentials.remote}.followRedirects"] = "false"
     res = repo.run(
         "push",
         force_with_lease_arg(branch, expected),
         credentials.remote,
         refspec,
-        env=git_config_env(
-            {f"http.{credentials.remote}.extraheader": credentials.basic_auth_header()}
-        ),
+        env=git_config_env(pairs),
     )
     if not res.ok:
         raise DeliveryError(

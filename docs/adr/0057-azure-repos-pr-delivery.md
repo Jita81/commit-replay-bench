@@ -45,8 +45,10 @@ passes the gap check cannot end in a pull request:
    token. The token is read from the secret store at each push, clone and fetch and never
    kept; it travels only as `Authorization: Basic base64(":" + token)`, never in a URL, and
    every error text is redacted and has the token and its base64 forms removed.
-   For git the header is scoped to the remote's own URL on push, clone and fetch, and clone
-   and fetch follow no redirect. The REST client follows no redirect either: a 3xx is a
+   For git the header is scoped to the remote's own URL on push, clone and fetch, and push,
+   clone and fetch follow no redirect for that URL
+   (`http.<url>.followRedirects=false`, which an unscoped or host-wide setting cannot
+   switch back on). The REST client follows no redirect either: a 3xx is a
    refusal with its status, so the header never reaches a host a redirect names.
 3. **Opening is idempotent without a retry.** Azure answers 409 when an active pull request
    already joins the same source and target. The client then searches for active pull
@@ -55,8 +57,12 @@ passes the gap check cannot end in a pull request:
 4. **The repository key is `org/project/repo`.** `repository_of` returns the lower-cased
    `org/project/repo` for an Azure remote, so the re-delivery checks tell two repositories in
    one project apart. GitHub remotes give the same key as before.
-5. **The target branch is the clone's `origin/HEAD`.** When it cannot be read the run is
-   refused before any build; the product does not guess `main`.
+5. **The target branch is the remote's default branch.** A fetch never refreshes the
+   clone's `origin/HEAD`, so before each run the worker asks the remote which branch its
+   `HEAD` names (`git ls-remote --symref`, with the same scoped header), fetches that branch
+   and points `origin/HEAD` at it; the pull request targets `origin/HEAD`. When the remote
+   names none, or `origin/HEAD` cannot be read, the run is refused before any build; the
+   product does not guess `main`.
 6. **A long description is cut, and says so.** Over 4000 characters it is cut at a line
    boundary, an open code fence is closed, and one line says the text was cut at Azure
    DevOps's limit and that the full summary is in the evidence pack. The recorded body hash
@@ -78,8 +84,11 @@ passes the gap check cannot end in a pull request:
 - A new outbound flow, Azure Repos API, is listed in docs/SECURITY.md and docs/DEPLOYMENT.md
   and pinned by the egress test, off by default.
 - An Azure pull request link costs three tracker requests the first time and two on a
-  repeat. The first-pass request bound for intake does not count it, as it counts no pull
-  request link.
+  repeat [hypothesis]. Method: source inspection of the adapter's `link` verb. The first link
+  reads the pull request, reads the work item's relations and adds the link; a repeat finds
+  the link in the relations and adds none. tests/test_intake_adapters.py pins both sequences
+  against a scripted tracker; no live organisation has been counted. The first-pass request
+  bound for intake does not count it, as it counts no pull request link.
 - Azure shows the first 4000 characters of a long description; the evidence pack holds the
   rest.
 - Not in this change: the delivery preflight and the Factory screen (an Azure delivering run

@@ -2,7 +2,7 @@
 
 The factory delivers to a repository hosted on Azure Repos the same way it delivers to
 GitHub: the push is git's own (:func:`crb.factory.delivery.git_push_fn`, a one-shot header in
-the child's environment), and the pull request is opened, commented on and closed through
+the child's environment, with redirects off — :func:`azure_push_fn`), and the pull request is opened, commented on and closed through
 three functions with the same keyword-only signatures as the GitHub ones. ``deliver`` and
 ``close_pull_request`` do not know which forge they talk to.
 
@@ -56,11 +56,13 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from crb.core.git import GitRepo
 from crb.core.redact import redact
 from crb.factory.delivery import (
     AzureRepo,
     DeliveryError,
     GitCredentials,
+    git_push_fn,
     parse_azure_remote,
 )
 
@@ -181,7 +183,11 @@ def _call(
         data = json.loads(raw.decode("utf-8")) if raw else {}
     except ValueError:
         raise AzureReposError(f"Azure Repos {what} API answered with no JSON object") from None
-    return dict(data) if isinstance(data, Mapping) else {}
+    if not isinstance(data, Mapping):
+        # ``null`` or ``[]`` is not an answer to a call that returns an object: refused, so a
+        # caller never records a comment or a close Azure did not confirm
+        raise AzureReposError(f"Azure Repos {what} API answered with no JSON object")
+    return dict(data)
 
 
 def cap_description(body: str, limit: int = DESCRIPTION_LIMIT) -> str:
@@ -319,6 +325,27 @@ def _adopt_active(
     return rows[0]
 
 
+#: ``push_fn(repo, *, branch, refspec, credentials, expected=None)`` for Azure Repos.
+def azure_push_fn(
+    repo: GitRepo,
+    *,
+    branch: str,
+    refspec: str,
+    credentials: GitCredentials,
+    expected: str | None = None,
+) -> None:
+    """:func:`crb.factory.delivery.git_push_fn` with redirects off for the remote: the
+    tracker's long-lived token goes to no host a redirect names, as on clone and fetch."""
+    git_push_fn(
+        repo,
+        branch=branch,
+        refspec=refspec,
+        credentials=credentials,
+        expected=expected,
+        follow_redirects=False,
+    )
+
+
 #: ``azure_comment_pr_fn(*, remote, pr_number, body, credentials)`` — posts a comment as a
 #: new thread on the pull request.
 def azure_comment_pr_fn(
@@ -391,6 +418,7 @@ __all__ = [
     "azure_close_pr_fn",
     "azure_comment_pr_fn",
     "azure_open_pr_fn",
+    "azure_push_fn",
     "cap_description",
     "parse_azure_pr_url",
 ]

@@ -33,6 +33,7 @@ import json
 import urllib.error
 import urllib.parse
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -524,3 +525,43 @@ def test_a_redirect_is_refused_and_the_token_never_reaches_the_second_host() -> 
     assert err.value.status == 302
     assert [name for name, _ in seen] == ["first"]
     assert TOKEN not in str(err.value)
+
+
+@pytest.mark.parametrize("body", ["null", "[]", '"text"'])
+def test_a_non_object_answer_is_refused_not_read_as_empty(body: str) -> None:
+    """``null`` or ``[]`` is no confirmation: the comment is refused, so a caller never
+    records one Azure did not answer for."""
+    with pytest.raises(az.AzureReposError, match="no JSON object"):
+        az.azure_comment_pr_fn(
+            remote=REMOTE,
+            pr_number=12,
+            body="n",
+            credentials=_creds(),
+            urlopen=Forge([(200, body)]),
+        )
+
+
+def test_azure_push_turns_redirects_off_for_the_remote() -> None:
+    """The push carries the tracker token, so git is told not to follow a redirect for that
+    remote, as on clone and fetch; GitHub's push keeps git's default."""
+    calls: list[dict[str, str]] = []
+
+    class _Repo:
+        def run(self, *args: str, env: dict[str, str]) -> Any:
+            calls.append(env)
+            return SimpleNamespace(ok=True, returncode=0, stderr="")
+
+    creds = _creds(WEB)
+    az.azure_push_fn(_Repo(), branch="crb/x", refspec="crb/x:crb/x", credentials=creds)  # type: ignore[arg-type]
+    dv.git_push_fn(_Repo(), branch="crb/x", refspec="crb/x:crb/x", credentials=creds)  # type: ignore[arg-type]
+    pairs = [
+        {
+            v: env[k.replace("KEY", "VALUE")]
+            for k, v in env.items()
+            if k.startswith("GIT_CONFIG_KEY_")
+        }
+        for env in calls
+    ]
+    assert pairs[0][f"http.{WEB}.followRedirects"] == "false"
+    assert f"http.{WEB}.followRedirects" not in pairs[1]
+    assert TOKEN not in repr(pairs[0].keys())

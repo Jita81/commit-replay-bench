@@ -10,11 +10,16 @@ What it does: Pins that with the switch off (the default) nothing changes and th
               gets the Azure seams (in ``_delivery_seams``, what the factory run's
               ``FactorySpec`` takes) and a provider that reads the token at each push; that a
               remote in another organisation gets no token; that the header goes to git
-              through the environment, never argv; that no event carries the token; and that
-              a missing ``origin/HEAD`` refuses the run rather than guessing ``main``.
+              through the environment, never argv, with redirects off for that remote (an
+              inherited URL-specific ``true`` included) on clone, fetch and push; that no
+              event carries the token; that the remote's current default branch, not a stale
+              ``origin/HEAD``, is fetched and targeted; and that a missing one refuses the run
+              rather than guessing ``main``.
 How:          A ``Worker`` built with ``__new__`` and only its settings, the token reader
               replaced by a function; a fake clone answering ``git.run``; ``subprocess.run``
-              monkeypatched to capture the fetch's argv and environment. No network, no git.
+              monkeypatched to capture the lookup's and fetch's argv and environment. No
+              network; real git only to read back one effective setting (``config
+              --get-urlmatch``).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0057-azure-repos-pr-delivery.md
 Works with:   src/crb/server/worker.py (``_azure_target``, ``_azure_auth_header``,
@@ -31,6 +36,9 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
+import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -43,6 +51,7 @@ from crb.factory.delivery_azure import (
     azure_close_pr_fn,
     azure_comment_pr_fn,
     azure_open_pr_fn,
+    azure_push_fn,
 )
 from crb.observability.events import Emitter, MemorySink
 from crb.server import worker as w
@@ -108,11 +117,48 @@ def _clone_on(tmp_path: Path, branch: str = "master", *, origin_head: bool = Tru
         ("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}^{{commit}}"): "abc123",
         ("rev-parse", "--abbrev-ref", "HEAD"): branch,
     }
+    for b in (branch, "develop"):  # the fetch points origin/HEAD at the branch it fetched
+        answers[("symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{b}")] = ""
+    answers[("rev-parse", "--verify", "--quiet", "refs/remotes/origin/develop^{commit}")] = "def456"
+    answers[("checkout", "--quiet", "-B", "develop", "refs/remotes/origin/develop")] = ""
     if origin_head:
         answers[("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")] = (
             f"origin/{branch}"
         )
     return _FakeClone(tmp_path, answers)
+
+
+class _LiveClone(_FakeClone):
+    """A fake clone whose ``origin/HEAD`` moves when the worker points it somewhere, and
+    which records every ``git.run``."""
+
+    def __init__(self, path: Path, answers: dict[tuple[str, ...], str]) -> None:
+        super().__init__(path, answers)
+        self.runs: list[tuple[str, ...]] = []
+
+    def run(self, *args: str) -> Any:
+        self.runs.append(args)
+        if args[:2] == ("symbolic-ref", "refs/remotes/origin/HEAD") and len(args) == 3:
+            self._answers[("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")] = (
+                args[2].removeprefix("refs/remotes/")
+            )
+        return super().run(*args)
+
+
+def _git_answers(default: str = "master") -> Any:
+    """A ``subprocess.run`` that answers ``ls-remote --symref`` with ``default`` as the
+    remote's HEAD and every other git command with success, recording each call."""
+    seen: list[dict[str, Any]] = []
+
+    def fake_run(argv: list[str], **kw: Any) -> Any:
+        seen.append({"argv": list(argv), "env": dict(kw.get("env") or {})})
+        if "clone" in argv:
+            (Path(argv[-1]) / ".git").mkdir(parents=True)
+        out = f"ref: refs/heads/{default}\tHEAD\nabc123\tHEAD\n" if "ls-remote" in argv else ""
+        return SimpleNamespace(returncode=0, stderr="", stdout=out)
+
+    fake_run.seen = seen  # type: ignore[attr-defined]
+    return fake_run
 
 
 # --- the switch -------------------------------------------------------------------------
@@ -178,6 +224,7 @@ def test_factory_run_seams_azure_when_switch_on_and_no_github_app(tmp_path: Path
     assert reads.reads == 0  # the token is read at the push, not here
     assert set(seams) == {
         "creds",
+        "push_fn",
         "open_pr_fn",
         "comment_pr_fn",
         "close_pr_fn",
@@ -302,15 +349,10 @@ def test_azure_clone_header_goes_through_env_not_argv(
     header = worker._azure_auth_header(REMOTE)
     assert header == f"Authorization: Basic {BASIC}"
 
-    seen: list[dict[str, Any]] = []
+    fake_run = _git_answers()
+    seen: list[dict[str, Any]] = fake_run.seen
 
-    def fake_run(argv: list[str], **kw: Any) -> Any:
-        seen.append({"argv": list(argv), "env": dict(kw.get("env") or {})})
-        if "clone" in argv:
-            (Path(argv[-1]) / ".git").mkdir(parents=True)
-        return SimpleNamespace(returncode=0, stderr="", stdout="")
-
-    # the fetch before a factory run
+    # the default-branch lookup and the fetch before a factory run
     monkeypatch.setattr(w.subprocess, "run", fake_run)
     worker._fetch_default_branch("ledger", {}, _clone_on(tmp_path), REMOTE, None)  # type: ignore[arg-type]
     # and the first clone
@@ -319,7 +361,11 @@ def test_azure_clone_header_goes_through_env_not_argv(
     monkeypatch.setattr(core_git.GitRepo, "rev_parse", lambda self, *a, **k: "abc123")
     core_git.clone_repo(REMOTE, tmp_path / "dest", auth_header=header, auth_scope=REMOTE)
 
-    assert len(seen) == 2
+    assert [c["argv"][3] if c["argv"][1] == "-C" else c["argv"][1] for c in seen] == [
+        "ls-remote",
+        "fetch",
+        "clone",
+    ]
     for call in seen:
         argv = " ".join(call["argv"])
         assert TOKEN not in argv and BASIC not in argv
@@ -327,7 +373,7 @@ def test_azure_clone_header_goes_through_env_not_argv(
         assert call["env"]["GIT_CONFIG_COUNT"] == "2"
         assert call["env"]["GIT_CONFIG_KEY_0"] == f"http.{REMOTE}.extraheader"
         assert call["env"]["GIT_CONFIG_VALUE_0"] == header
-        assert call["env"]["GIT_CONFIG_KEY_1"] == "http.followRedirects"
+        assert call["env"]["GIT_CONFIG_KEY_1"] == f"http.{REMOTE}.followRedirects"
         assert call["env"]["GIT_CONFIG_VALUE_1"] == "false"
 
 
@@ -336,9 +382,7 @@ def test_worker_azure_events_carry_no_token(
 ) -> None:
     worker, _ = _worker(tmp_path)
     sink = MemorySink()
-    monkeypatch.setattr(
-        w.subprocess, "run", lambda argv, **kw: SimpleNamespace(returncode=0, stderr="", stdout="")
-    )
+    monkeypatch.setattr(w.subprocess, "run", _git_answers())
     with caplog.at_level(logging.DEBUG):
         worker._fetch_default_branch(
             "ledger",
@@ -361,3 +405,75 @@ def test_azure_default_branch_from_origin_head_else_refused(tmp_path: Path) -> N
     with pytest.raises(w.FetchRefused, match="origin/HEAD") as err:
         worker._azure_delivery(REMOTE, _clone_on(tmp_path, origin_head=False))  # type: ignore[arg-type]
     assert "'main'" not in str(err.value) and TOKEN not in str(err.value)
+
+
+def test_redirects_stay_off_for_the_remote_over_an_inherited_url_specific_true(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A URL-specific ``http.<url>.followRedirects`` beats an unscoped one, so the switch
+    is scoped to the remote the header is: an inherited ``true`` for the host loses."""
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not installed")
+    inherited = tmp_path / "gitconfig"
+    inherited.write_text('[http "https://dev.azure.com/"]\n\tfollowRedirects = true\n')
+    for name in [k for k in os.environ if k.startswith("GIT_CONFIG")]:
+        monkeypatch.delenv(name)
+    env = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": str(inherited),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        **core_git.scoped_auth_env("Authorization: Basic eA==", REMOTE),
+    }
+    p = subprocess.run(
+        [git, "config", "--get-urlmatch", "http.followRedirects", f"{REMOTE}/info/refs"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        cwd=tmp_path,
+    )
+    assert p.stdout.strip() == "false", p.stderr
+
+
+def test_azure_push_seam_keeps_redirects_off(tmp_path: Path) -> None:
+    """The Azure delivery pushes through ``azure_push_fn`` (redirects off); the GitHub path
+    sets no ``push_fn`` and keeps git's own push."""
+    worker, _ = _worker(tmp_path)
+    seams = worker._delivery_seams({}, REMOTE, _clone_on(tmp_path), deliver=True)  # type: ignore[arg-type]
+    assert seams["push_fn"] is azure_push_fn
+    off, _ = _worker(tmp_path, switch=False)
+    assert "push_fn" not in off._delivery_seams({}, REMOTE, _clone_on(tmp_path), deliver=True)  # type: ignore[arg-type]
+
+
+def test_stale_origin_head_is_refreshed_from_the_remote_before_fetch_and_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The clone's ``origin/HEAD`` says master; the remote's default is now develop. The
+    fetch brings develop, and the pull request targets develop — never the stale master."""
+    worker, _ = _worker(tmp_path)
+    clone = _LiveClone(tmp_path, dict(_clone_on(tmp_path, "master")._answers))
+    fake_run = _git_answers("develop")
+    monkeypatch.setattr(w.subprocess, "run", fake_run)
+    worker._fetch_default_branch("ledger", {}, clone, REMOTE, None)  # type: ignore[arg-type]
+    fetch = next(c["argv"] for c in fake_run.seen if "fetch" in c["argv"])
+    assert fetch[-1] == "+refs/heads/develop:refs/remotes/origin/develop"
+    azure = worker._azure_delivery(REMOTE, clone)  # type: ignore[arg-type]
+    assert azure is not None and azure.default_branch == "develop"
+
+
+def test_remote_default_branch_unknown_refuses_before_any_fetch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worker, _ = _worker(tmp_path)
+    seen: list[list[str]] = []
+
+    def fail(argv: list[str], **kw: Any) -> Any:
+        seen.append(list(argv))
+        return SimpleNamespace(returncode=128, stderr=f"fatal: {REMOTE} unreachable", stdout="")
+
+    monkeypatch.setattr(w.subprocess, "run", fail)
+    with pytest.raises(w.FetchRefused, match="ls-remote failed") as err:
+        worker._fetch_default_branch("ledger", {}, _clone_on(tmp_path), REMOTE, None)  # type: ignore[arg-type]
+    assert [a for a in seen if "fetch" in a] == []
+    assert TOKEN not in str(err.value)

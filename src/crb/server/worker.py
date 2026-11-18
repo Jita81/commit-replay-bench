@@ -405,7 +405,12 @@ from crb.factory.delivery import (
     github_open_pr_fn,
     parse_azure_remote,
 )
-from crb.factory.delivery_azure import azure_close_pr_fn, azure_comment_pr_fn, azure_open_pr_fn
+from crb.factory.delivery_azure import (
+    azure_close_pr_fn,
+    azure_comment_pr_fn,
+    azure_open_pr_fn,
+    azure_push_fn,
+)
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
 from crb.factory.standard import Readers, cell_signed
 from crb.factory.testfirst import (
@@ -851,6 +856,7 @@ class _AzureDelivery:
 
     creds: _AzureReposProvider
     default_branch: str
+    push_fn: Callable[..., None] = azure_push_fn
     open_pr_fn: Callable[..., tuple[str, int]] = azure_open_pr_fn
     comment_pr_fn: Callable[..., None] = azure_comment_pr_fn
     close_pr_fn: Callable[..., None] = azure_close_pr_fn
@@ -2330,8 +2336,9 @@ class Worker:
     def _azure_delivery(self, remote: str, git: GitRepo) -> _AzureDelivery | None:
         """The Azure Repos seams for a delivering run (ADR-0057), or None when
         :meth:`_azure_target` refuses the remote. The pull request targets the clone's
-        ``origin/HEAD``; when that cannot be read the run is refused before any build,
-        rather than guessing a branch name."""
+        ``origin/HEAD``, which the fetch before the run (:meth:`_fetch_default_branch`) has
+        just pointed at the remote's current default branch; when that cannot be read the
+        run is refused before any build, rather than guessing a branch name."""
         repo = self._azure_target(remote)
         if repo is None:
             return None
@@ -2352,7 +2359,7 @@ class Worker:
         self, cfg: Mapping[str, Any], remote: str, git: GitRepo, *, deliver: bool
     ) -> dict[str, Any]:
         """The delivery half of a factory run's ``FactorySpec``: ``creds``, the three pull
-        request seams and ``target_default_branch``.
+        request seams and ``target_default_branch`` (and, for Azure, ``push_fn``).
 
         The GitHub App's installation comes first (ADR-0014); with none, the switch on and
         the remote on Azure Repos in the board's own organisation, the tracker's token pushes
@@ -2365,6 +2372,7 @@ class Worker:
         if azure is not None:
             return {
                 "creds": azure.creds,
+                "push_fn": azure.push_fn,  # redirects off: the token follows none
                 "open_pr_fn": azure.open_pr_fn,
                 "comment_pr_fn": azure.comment_pr_fn,
                 "close_pr_fn": azure.close_pr_fn,
@@ -2503,6 +2511,37 @@ class Worker:
             raise LookupError(f"repo {name!r}: clone_path_escapes: {str(path)!r} {where}")
         return opened
 
+    @staticmethod
+    def _remote_default_branch(git: GitRepo, url: str, env: Mapping[str, str]) -> tuple[str, str]:
+        """``(branch, "")`` — the branch the remote's ``HEAD`` names now, from
+        ``git ls-remote --symref <url> HEAD`` under ``env`` (the scoped header) — or
+        ``("", why)`` when the remote cannot be asked or names none (ADR-0057)."""
+        argv = [git.git_binary, "-C", str(git.path), "ls-remote", "--symref", url, "HEAD"]
+        try:
+            p = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=DEFAULT_FETCH_TIMEOUT_S,
+                check=False,
+                env=dict(env),
+            )
+        except subprocess.TimeoutExpired:
+            return (
+                "",
+                f"asking the remote for its default branch timed out after {DEFAULT_FETCH_TIMEOUT_S}s",
+            )
+        if p.returncode != 0:
+            stderr = redact_and_cap((p.stderr or "").replace(url, redact_url(url)), max_chars=300)
+            return "", f"git ls-remote failed rc={p.returncode}: {stderr}"
+        for line in (p.stdout or "").splitlines():
+            ref, _, name = line.partition("\t")
+            if name.strip() == "HEAD" and ref.startswith("ref: refs/heads/"):
+                branch = ref.removeprefix("ref: refs/heads/").strip()
+                if branch:
+                    return branch, ""
+        return "", "the remote names no default branch (HEAD)"
+
     def _fetch_default_branch(
         self,
         name: str,
@@ -2514,7 +2553,11 @@ class Worker:
         """F39: ``git fetch`` the row's URL into ``refs/remotes/origin/<default>`` and
         fast-forward the clone's default branch to it; returns the sha the branch is now
         at. The default branch is the link's (``config_json.github.default_branch``), else
-        the clone's ``origin/HEAD``, else the branch the clone is on. A linked repository
+        the clone's ``origin/HEAD``, else the branch the clone is on — for Azure Repos
+        (ADR-0057) the remote's own ``HEAD`` instead, asked each time
+        (:meth:`_remote_default_branch`; none is a refusal), with ``origin/HEAD`` then
+        pointed at it, because a fetch never refreshes it and the pull request targets
+        it. A linked repository
         fetches with the installation token in the environment (never argv, never on
         disk — as the clone does). ``repo.fetch.start`` / ``repo.fetch.done`` carry the
         redacted URL, the branch and the before / after shas. Any failure — the remote
@@ -2523,17 +2566,27 @@ class Worker:
         prove RED or open a pull request on a base the remote has moved past."""
         safe_url = redact_url(url)
         started = time.monotonic()
-        link = dict(cfg.get("github") or {})
-        branch = str(link.get("default_branch") or "").strip()
-        if not branch:
-            head = git.run("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
-            branch = head.stdout.strip().removeprefix("origin/") if head.ok else ""
-        if not branch:
-            cur = git.run("rev-parse", "--abbrev-ref", "HEAD")
-            branch = cur.stdout.strip() if cur.ok and cur.stdout.strip() != "HEAD" else ""
         auth_header = self._github_auth_header(cfg, url)
         azure_header = None if auth_header else self._azure_auth_header(url)  # ADR-0057
         azure_fields: dict[str, Any] = {"azure_repos": True} if azure_header else {}
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
+        if auth_header or azure_header:
+            env.update(
+                scoped_auth_env(auth_header or azure_header or "", url if azure_header else None)
+            )
+        link = dict(cfg.get("github") or {})
+        branch = str(link.get("default_branch") or "").strip()
+        no_branch_why = "no default branch is known for the clone"
+        if not branch and azure_header:
+            # ADR-0057: a fetch never refreshes origin/HEAD, and the pull request targets it,
+            # so the remote is asked which branch is its default now — never a stale clone's
+            branch, no_branch_why = self._remote_default_branch(git, url, env)
+        if not branch and not azure_header:
+            head = git.run("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+            branch = head.stdout.strip().removeprefix("origin/") if head.ok else ""
+        if not branch and not azure_header:
+            cur = git.run("rev-parse", "--abbrev-ref", "HEAD")
+            branch = cur.stdout.strip() if cur.ok and cur.stdout.strip() != "HEAD" else ""
         if emitter is not None:
             emitter.emit(
                 "system",
@@ -2566,14 +2619,9 @@ class Worker:
             return exc
 
         if not branch:
-            raise refuse("no default branch is known for the clone")
+            raise refuse(no_branch_why)
         before_res = git.run("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}")
         before = before_res.stdout.strip() if before_res.ok else ""
-        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
-        if auth_header or azure_header:
-            env.update(
-                scoped_auth_env(auth_header or azure_header or "", url if azure_header else None)
-            )
         argv = [
             git.git_binary,
             "-C",
@@ -2605,6 +2653,16 @@ class Worker:
         if not after_res.ok:
             raise refuse(f"the remote has no branch {branch!r}")
         after = after_res.stdout.strip()
+        if azure_header:
+            # the pull request target (:meth:`_azure_delivery`) is the branch fetched here
+            sym = git.run(
+                "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{branch}"
+            )
+            if not sym.ok:
+                raise refuse(
+                    f"cannot point origin/HEAD at {branch!r}: "
+                    f"{redact_and_cap(sym.stderr, max_chars=200)}"
+                )
         cur = git.run("rev-parse", "--abbrev-ref", "HEAD")
         on_branch = cur.ok and cur.stdout.strip() == branch
         fast_forwarded = False

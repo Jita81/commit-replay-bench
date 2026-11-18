@@ -135,7 +135,9 @@ def scoped_auth_env(auth_header: str, scope: str | None = None) -> dict[str, str
     """The ``GIT_CONFIG_*`` pairs that hand ``auth_header`` to ONE git command. With no
     ``scope`` it is ``http.extraheader`` (sent on every request the command makes). With a
     ``scope`` (a remote URL) it is ``http.<scope>.extraheader``, sent only to URLs under that
-    remote, and redirects are switched off, so the header cannot follow one to another host
+    remote, and redirects are switched off for that same remote (``http.<scope>.followRedirects``
+    — a URL-specific key wins over an unscoped one, so an inherited URL-specific ``true``
+    cannot switch them back on), so the header cannot follow one to another host
     (ADR-0057: a long-lived tracker token)."""
     if not scope:
         return {
@@ -147,7 +149,7 @@ def scoped_auth_env(auth_header: str, scope: str | None = None) -> dict[str, str
         "GIT_CONFIG_COUNT": "2",
         "GIT_CONFIG_KEY_0": f"http.{scope}.extraheader",
         "GIT_CONFIG_VALUE_0": auth_header,
-        "GIT_CONFIG_KEY_1": "http.followRedirects",
+        "GIT_CONFIG_KEY_1": f"http.{scope}.followRedirects",
         "GIT_CONFIG_VALUE_1": "false",
     }
 
