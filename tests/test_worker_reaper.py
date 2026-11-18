@@ -314,6 +314,14 @@ def test_reap_pass_is_budgeted_so_the_check_in_still_lands(h: Harness, tmp_path:
     stop = threading.Event()
     t = threading.Thread(target=h.worker.run_forever, args=(stop,), daemon=True)
     t.start()
+    # The first check-in writes the worker's row. On a slow machine it can land after the
+    # first sample, so wait for it (bounded by the same limit the ages are held to).
+    first_checkin = time.monotonic() + 3 * heartbeat_s
+    while time.monotonic() < first_checkin:
+        with h.factory() as s:
+            if s.get(WorkerRow, "w-test") is not None:
+                break
+        time.sleep(0.05)
     ages: list[float] = []
     deadline = time.monotonic() + 3 * heartbeat_s
     while time.monotonic() < deadline:
