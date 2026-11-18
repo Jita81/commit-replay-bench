@@ -164,6 +164,7 @@ from crb.server.intake import (
     needs_credential,
     poll_repository,
     register_approved,
+    return_state_for,
 )
 from crb.server.routes.capability import (
     CHECKS_CURRENT,
@@ -1582,6 +1583,8 @@ class IntakeConnectionOut(BaseModel):
     column: str = ""
     poll_s: int = 0
     outcome_map: dict[str, str] = Field(default_factory=dict)
+    #: ADR-0056 — the state a ticket with open questions is moved back to; empty is off.
+    return_state: str = ""
     configured: bool = False
     credential_set: bool = False
     credential_fingerprint: str = ""
@@ -1697,6 +1700,7 @@ def _intake_connection(settings: Any, secrets: Any) -> IntakeConnectionOut:
         column=cfg.column,
         poll_s=cfg.poll_s,
         outcome_map=dict(cfg.outcome_map),
+        return_state=str(getattr(cfg, "return_state", "") or ""),
         configured=cfg.enabled,
         credential_set=bool(status.present),
         credential_fingerprint=str(getattr(status, "fingerprint", "") or ""),
@@ -1774,6 +1778,7 @@ def put_intake(  # noqa: PLR0917 — FastAPI dependencies + path/body
     row = get_repo_or_404(db, repo)
     if body.enabled:
         _refuse_unless_ready_to_listen(settings, secrets)
+        _refuse_a_column_that_is_the_return_state(body.column, settings)
         _commit_switch(repo, body, operator=operator, db=db, settings=settings, row=row)
         return _intake_out(repo, settings, secrets, row)
     lease = intake_lease(factory, repo, ttl_s=_SWITCH_LEASE_S)
@@ -1832,6 +1837,24 @@ def _commit_switch(
         },
     )
     db.commit()
+
+
+def _refuse_a_column_that_is_the_return_state(column: str, settings: Any) -> None:
+    """ADR-0056: a repository may not watch the state tickets with open questions are moved
+    back to. Another repository's not-ready tickets would land in its column and be built by
+    a second factory. Start-up already refuses the deployment's own column; this is the same
+    rule for a repository's override (a column switched on before the setting was named is
+    caught at poll time, by ``return_state_for``)."""
+    wanted = str(getattr(settings.intake, "return_state", "") or "").strip()
+    named = (column or "").strip()
+    if wanted and named and named.casefold() == wanted.casefold():
+        raise ApiError(
+            422,
+            "intake_column_is_return_state",
+            f"{named!r} is where this deployment moves tickets with open questions back to "
+            "(CRB_INTAKE__RETURN_STATE): a listener watching it would pick up another "
+            "repository's returned tickets. Choose another column, or change the setting",
+        )
 
 
 def _refuse_unless_ready_to_listen(settings: Any, secrets: Any) -> None:
@@ -1956,6 +1979,9 @@ def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
         budget_s=budget_s,
         approval=ApprovalPolicy.from_settings(settings.intake),
         lease=intake_lease(factory, repo, ttl_s=2 * budget_s + 60),
+        # the SAME return state the worker's timed poll uses (ADR-0056), and off while any
+        # switched-on listener watches it
+        return_state=return_state_for(settings.intake.return_state, db, settings.intake.column),
         # the SAME store-bound entry-gate readers the worker's timed poll binds
         gate=_readers(db, settings, repo),
     )

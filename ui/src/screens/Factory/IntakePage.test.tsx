@@ -129,6 +129,16 @@ describe('IntakePage', () => {
     expect(document.body.textContent).not.toContain('tracker_token')
   })
 
+  it('shows the return state, or says it is off (ADR-0056)', async () => {
+    setup(OFF)
+    expect(await screen.findByText('When a ticket has open questions')).toBeInTheDocument()
+    expect(screen.getAllByText('the ticket is not moved').length).toBe(2)
+    cleanup()
+    setup({ ...OFF, connection: { ...CONNECTION, return_state: 'New' } })
+    expect(await screen.findByText('moved back to “New”')).toBeInTheDocument()
+    expect(HINTS['stat.intake.return_state']).toMatch(/never picked up/)
+  })
+
   it('switching the listener on sends the PUT and says what it will now do', async () => {
     const api = setup(OFF, { 'PUT /factory/alpha/intake': ON })
     const user = userEvent.setup()

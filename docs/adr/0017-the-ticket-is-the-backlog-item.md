@@ -1,6 +1,6 @@
 # ADR-0017 — The ticket is the backlog item; the column is the consent gate
 
-**Status:** Accepted (operator decision DL-051; built in wave 1, stream I) · **Superseded in part by [ADR-0022](0022-intake-approval-by-default.md)** (2026-09-25: the column is the request, an operator's Register act is the consent)
+**Status:** Accepted (operator decision DL-051; built in wave 1, stream I) · **Superseded in part by [ADR-0022](0022-intake-approval-by-default.md)** (2026-09-25: the column is the request, an operator's Register act is the consent) · **Amended by [ADR-0056](0056-a-not-ready-ticket-goes-back.md)** (2026-11-17: a configured return state for a ticket with open questions)
 **Date:** 2026-09-22
 **Apparatus impact:** none — nothing here changes what a belt means, how a cell is keyed
 or how a route is decided. Intake decides *which* items exist, never how one is graded.
@@ -70,8 +70,9 @@ honesty floor is intact — read from the map *before* any run
 `crb:needs-info`, `crb:ready`, `crb:not-deliverable`, `crb:queued`. Three further marked notes
 follow the item's life (queued, the pull request, the stop), so what the product writes is
 **four comments at most, each marked as its own**, the label, a link to the item and a link to
-the pull request, and the one configured state change — and the comment on the ticket says
-exactly that list, counted, rather than reassuring the reader that it writes little.
+the pull request, and the one configured state change (Amended by ADR-0056: and, where
+`CRB_INTAKE__RETURN_STATE` is set, one return of a ticket with open questions per changed
+revision) — and the comment on the ticket says exactly that list, counted, rather than reassuring the reader that it writes little.
 
 **How the marker is carried depends on the tracker, and both are found the same way.** Azure
 DevOps renders comments as HTML, so the marker is an HTML comment a reader never sees. Jira
@@ -135,7 +136,8 @@ idempotent and every failure must have a word a person can act on (`STOP_REASONS
 file-backed fake gated behind `CRB_ENABLE_FAKE_TRACKER=1` (`src/crb/intake/fake.py`).
 
 *What we must never do.* Edit any ticket field other than our own label, our own comment
-and the one configured state transition. Create a ticket. Read a column we were not
+and the one configured state transition (Amended by ADR-0056: or the configured return of a
+ticket with open questions). Create a ticket. Read a column we were not
 pointed at. Poll a repository whose listener nobody switched on. Put a credential in a URL,
 a log, an event or an error message. Force a workflow transition the tracker refused.
 
