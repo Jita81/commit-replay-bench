@@ -431,10 +431,14 @@ def test_an_unlistable_tests_directory_gives_a_note_not_a_crash(
             raise PermissionError(13, "denied")
         return real(path)
 
+    # no header and no explicit route: only the name guess could map this path
+    assert pre_push.tests_for(["docs/pre_push.md"])[0] == ["tests/test_pre_push.py"]
     monkeypatch.setattr(pre_push.os, "listdir", listdir)
-    tests, notes = pre_push.tests_for(["scripts/pre_push.py", "scripts/hooks/pre-push"])
-    assert "tests/test_pre_push.py" in tests  # the explicit mappings still select it
+    tests, notes = pre_push.tests_for(["docs/pre_push.md"])
+    assert tests == []
     assert any("could not be verified by name (PermissionError)" in n for n in notes)
+    # an explicit mapping still selects its test
+    assert pre_push.tests_for(["scripts/hooks/pre-push"])[0] == ["tests/test_pre_push.py"]
 
 
 def test_a_changed_file_that_maps_to_no_test_gets_a_note() -> None:

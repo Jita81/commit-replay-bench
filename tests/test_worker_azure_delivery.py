@@ -418,7 +418,8 @@ def test_redirects_stay_off_for_the_remote_over_an_inherited_url_specific_true(
     home = tmp_path / "home"
     home.mkdir()
     (home / ".gitconfig").write_text('[http "https://dev.azure.com/"]\n\tfollowRedirects = true\n')
-    base = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_CONFIG", "XDG_"))}
+    # no GIT_* at all: a hook's GIT_DIR would point the probe at the caller's repository
+    base = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "XDG_"))}
     base.update({"HOME": str(home), "GIT_CONFIG_NOSYSTEM": "1"})
 
     def effective(env: dict[str, str]) -> str:
