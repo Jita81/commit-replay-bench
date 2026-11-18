@@ -48,7 +48,8 @@ say what is left for a reading after the mapping.
 4. **One cost basis per cell, best first.** A candidate row is a row a first mapping would
    write: it matches the cell, the builder and the model, and is a sighted replay row on rung
    `r1` under the `S3` brief (a row from before 2.4 carries no arm and is kept at its own
-   apparatus). A later rung holds only tasks that failed the first, and another arm carries a
+   apparatus). An imported row is another deployment's measurement and is never a candidate.
+   A later rung holds only tasks that failed the first, and another arm carries a
    bigger brief, so neither is a first mapping's cost. Every candidate, this repository's and
    every other's, is read under the TARGET repository's checks arm and posture class (ADR-0024,
    ADR-0019 §8). `repo_cell` reads this repository's rows; `deployment_cell` (`[hypothesis]`,
