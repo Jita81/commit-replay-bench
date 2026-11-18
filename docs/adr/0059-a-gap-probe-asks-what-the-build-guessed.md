@@ -53,8 +53,10 @@ The question loop was read on the bench before it was built here:
    longer than 240 characters or repeats an earlier one (casefolded). Each question is
    redacted. At most `CRB_INTAKE__GAP_PROBE_MAX_QUESTIONS` are kept. The `guessed` answer
    is discarded, so a person is never shown the builder's guess as a default.
-5. **What the poll does with the result.** No questions: the ticket is registered under the
-   approval recorded on the request, with no second Register act and no second probe.
+5. **What the poll does with the result.** No questions, because the build reported no
+   guess (a build whose reported guesses were all dropped has failed, item 7): the ticket is
+   registered under the approval recorded on the request, with no second Register act and
+   no second probe.
    Questions: they are added to the existing readiness comment under its own marker, the
    label becomes `crb:needs-info` and the return (ADR-0056) applies; the four-comment bound
    is unchanged. Failure: the row stops `gap_probe_failed`, nothing is registered and the
@@ -89,8 +91,8 @@ The question loop was read on the bench before it was built here:
 
 - **ADR-0017, "The ticket is the backlog item"**, "registered through exactly the path the
   API uses", now reads as: registered through exactly the path the API uses, after, where
-  `CRB_INTAKE__GAP_PROBE` is on, one trial build of that content produced no question that
-  step 4 keeps.
+  `CRB_INTAKE__GAP_PROBE` is on, one trial build of that content reported no guess at
+  all. A build whose guesses were all dropped by step 4 is a failed probe, not a clean one.
 
 ## Consequences
 
