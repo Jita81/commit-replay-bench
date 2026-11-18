@@ -1060,6 +1060,8 @@ export const HINTS = {
     'How often the worker reads the watched column while the listener is on. Reading costs nothing: no builder is invoked and no model is called.',
   'stat.intake.outcome_map':
     'What happens to a ticket when the pull request this product opened is merged or closed. With nothing configured, the product never changes anybody’s ticket state.',
+  'stat.intake.return_state':
+    'Where a ticket with open questions goes after the product comments on it. With nothing configured it stays in the watched column; a deployment may name an earlier state, and the product moves only a ticket it never picked up.',
   'stat.intake.last_poll':
     'What the last read did: how many tickets were in the column, how many were read this time, how many were already handled at that revision, and how many became items.',
   'banner.acceptance.second_person':

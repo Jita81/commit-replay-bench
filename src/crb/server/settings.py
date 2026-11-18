@@ -688,6 +688,12 @@ class IntakeSettings(BaseModel):
     #: ``merged``/``closed`` → the state the ticket moves to. EMPTY BY DEFAULT: a
     #: deployment that configures nothing never moves anybody's ticket.
     outcome_map: dict[str, str] = Field(default_factory=dict)
+    #: ADR-0056 — the state a ticket with open questions (``crb:needs-info``) is moved back
+    #: to, after its gap comment and label are written. EMPTY BY DEFAULT: a deployment that
+    #: configures nothing leaves every ticket where it is. Only a ticket that was never
+    #: registered, and that is still in the watched column, is moved; start-up refuses a
+    #: state the product already treats as "forward" (the column, or an ``outcome_map`` state).
+    return_state: str = ""
     #: ADR-0022 — a ready ticket is a DRAFT until an operator registers it on the Intake
     #: screen (an evented act). ON BY DEFAULT: without it, anyone who can edit a ticket in
     #: the watched column puts work into the factory. ``false`` registers ready tickets
@@ -733,6 +739,23 @@ class IntakeSettings(BaseModel):
             raise ValueError(f"outcome_map keys must be 'merged' or 'closed', got {bad}")
         return v
 
+    @model_validator(mode="after")
+    def _return_is_not_forward(self) -> IntakeSettings:
+        # ADR-0056 item 6: the product cannot prove a named state is EARLIER in a team's
+        # workflow, but it can refuse the states it already treats as "after" — the watched
+        # column itself (a loop: moved back into the column it reads) and every outcome state.
+        back = self.return_state.strip()
+        self.return_state = back
+        if not back:
+            return self
+        forward = [self.column, *self.outcome_map.values()]
+        if any(back.casefold() == str(f).strip().casefold() for f in forward if str(f).strip()):
+            raise ValueError(
+                f"return_state {back!r} names the watched column or an outcome_map state; "
+                "a ticket with open questions must go back to a state before the column"
+            )
+        return self
+
     def redacted(self) -> dict[str, Any]:
         """What ``/settings`` may show. There is no secret in this model, but the shape
         matches ``BuilderSettings.redacted`` so a reader treats them alike."""
@@ -750,6 +773,7 @@ class IntakeSettings(BaseModel):
             "max_per_poll": self.max_per_poll,
             "poll_budget_s": self.poll_budget_s,
             "outcome_map": dict(self.outcome_map),
+            "return_state": self.return_state,
             "require_approval": self.require_approval,
             "approve_authors": list(self.approve_authors),
             "enabled": self.enabled,

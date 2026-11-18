@@ -183,6 +183,26 @@ def test_the_connection_is_served_without_the_credential(env: Env) -> None:
     assert conn["configured"] is True
     assert conn["credential_set"] is True
     assert "a-tracker-token-value" not in json.dumps(conn)
+    assert conn["return_state"] == ""  # ADR-0056: off unless a deployment names a state
+
+
+def test_the_connection_serves_the_return_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0056: the screen says where a ticket with open questions goes, from the setting."""
+    monkeypatch.setenv(FAKE_TRACKER_ENV, "1")
+    settings = make_settings(
+        tmp_path,
+        intake={
+            "tracker": "fake",
+            "url": "https://tracker.invalid",
+            "project": "Widgets",
+            "column": "Ready for manufacture",
+            "return_state": "New",
+        },
+    )
+    for env in _env_with(tmp_path, settings):
+        assert _get(env)["connection"]["return_state"] == "New"
 
 
 def test_switching_the_listener_on_records_who_threw_it_and_when(env: Env) -> None:
@@ -492,6 +512,36 @@ def test_switching_a_listener_on_with_no_public_address_is_refused(
         assert r.status_code == 422
         assert envelope(r)["code"] == "intake_no_public_url"
         assert "CRB_PUBLIC_URL" in envelope(r)["message"]
+        break
+
+
+def test_switching_a_listener_on_to_the_return_state_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ticket with open questions is moved back to the return state (ADR-0056). A listener
+    watching that state would read every returned ticket as new work, so the switch that
+    names it is refused — in any case, as the trackers match states — and a switch-off
+    naming it is still accepted."""
+    monkeypatch.setenv(FAKE_TRACKER_ENV, "1")
+    settings = make_settings(
+        tmp_path,
+        intake={
+            "tracker": "fake",
+            "url": "https://tracker.invalid",
+            "project": "Widgets",
+            "column": "Ready for manufacture",
+            "return_state": "New",
+        },
+    )
+    fake_tracker_path(tmp_path).write_text(json.dumps(_board()), encoding="utf-8")
+    for env in _env_with(tmp_path, settings):
+        login(env.client, "operator")
+        r = _switch(env, True, column=" new ")
+        assert r.status_code == 422
+        assert envelope(r)["code"] == "intake_column_is_return_state"
+        assert _get(env)["listener"]["enabled"] is False
+        assert _switch(env, False, column="New").status_code == 200
+        assert _switch(env, True, column="Another column").status_code == 200
         break
 
 

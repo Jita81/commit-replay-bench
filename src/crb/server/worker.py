@@ -443,6 +443,7 @@ from crb.server.intake import (
     item_url_for,
     poll_repository,
     post_outcomes_to_tickets,
+    return_state_for,
 )
 from crb.server.posture_gate import DEFAULT_ENV_STOP, PostureGate, resolve_run_posture
 from crb.server.prevention_state import current_checks_arm, learning_snapshot, learning_tick
@@ -1597,6 +1598,9 @@ class Worker:
             approval=ApprovalPolicy.from_settings(self.settings.intake),
             lease=intake_lease(self.factory, repo, ttl_s=2 * budget_s + 60),
             then=tell_the_tickets,
+            # ADR-0056: empty by default, so an unconfigured deployment moves no ticket back;
+            # and off while any switched-on listener watches that state (`return_state_for`)
+            return_state=self._return_state(),
             # the ticket feedback names the SAME entry-gate stop the next run's pre-build
             # check will: the store-bound readers, on the repository's own checks arm and
             # this deployment's posture class
@@ -1605,6 +1609,16 @@ class Worker:
             # ADR-0026 item 9: the organisation's routing class set classifies each ticket
             classes=class_set_state.draft_stamper(self.factory, repo),
         )
+
+    def _return_state(self) -> str:
+        """The return state this pass may move a ticket back to (ADR-0056): the setting, or
+        ``""`` while a switched-on listener watches it — the same rule the poll route asks."""
+        if not self.settings.intake.return_state:
+            return ""
+        with self.factory() as s:
+            return return_state_for(
+                self.settings.intake.return_state, s, self.settings.intake.column
+            )
 
     def _factory_run_active(self, repo: str) -> bool:
         """Is a factory run queued or running for ``repo``? A registration that arrives now

@@ -2091,6 +2091,8 @@ export interface IntakeConnection {
   require_approval?: boolean
   /** Tracker authors whose ready tickets skip the Register act (default empty). */
   approve_authors?: string[]
+  /** ADR-0056 — the state a ticket with open questions is moved back to; empty is off. */
+  return_state?: string
 }
 
 /** One ticket in the watched column, exactly as the last read saw it. */

@@ -467,3 +467,85 @@ def test_the_worker_tells_the_tickets_their_outcomes_while_it_holds_the_lease(
     assert stack.worker.poll_intake() == 1
     assert held == [True, True]
     assert not lease_held()
+
+
+# --- the return of a ticket with open questions (ADR-0056) ---------------------------------
+
+
+def _gappy_board(stack: Stack) -> None:
+    """The board's one ticket loses its expected behaviour: a Bug with an open question."""
+    board = json.loads(json.dumps(BOARD))
+    board["tickets"]["4711"]["acceptance_criteria"] = ["reproduction: open an empty cart"]
+    fake_tracker_path(stack.home).write_text(json.dumps(board), encoding="utf-8")
+
+
+def _board_ticket(stack: Stack) -> dict[str, Any]:
+    board = json.loads(fake_tracker_path(stack.home).read_text(encoding="utf-8"))
+    return dict(board["tickets"]["4711"])
+
+
+def test_a_configured_return_state_moves_a_gappy_ticket_off_the_watched_column(
+    tmp_path: Path,
+) -> None:
+    stack = Stack(tmp_path, _intake(return_state="New"))
+    _gappy_board(stack)
+    stack.add_repo("alpha", {"enabled": True})
+    assert stack.worker.poll_intake(now=1000.0) == 1
+
+    ticket = _board_ticket(stack)
+    assert ticket["state"] == "New"
+    assert c.LABEL_NEEDS_INFO in ticket["tags"]
+    assert (
+        "try to move this ticket back to “New”" in ticket["comments"][c.marker_for("fake", "4711")]
+    )
+    # it has left the column, so the next timed pass does not read it at all
+    stack.worker.poll_intake(now=2000.0)
+    assert IntakeStore(stack.home, "alpha").last_poll()["seen"] == 0  # type: ignore[index]
+    home = FactoryHome(stack.home, "alpha")
+    assert [e.payload["outcome"] for e in home.events() if e.kind == "intake.transitioned"] == [
+        "returned"
+    ]
+
+
+def test_no_ticket_is_moved_back_while_another_repository_listens_on_the_return_state(
+    tmp_path: Path,
+) -> None:
+    """Review finding: one repository's own column may be the deployment's return state. A
+    ticket moved back there would be read by that listener as new work, so while any enabled
+    listener watches the return state no ticket is moved back; the comment says nothing of a
+    move and the label still names the open questions."""
+    stack = Stack(tmp_path, _intake(return_state="New"))
+    _gappy_board(stack)
+    stack.add_repo("alpha", {"enabled": True})
+    stack.add_repo("beta", {"enabled": True, "column": "new"})
+    stack.worker.poll_intake(now=1000.0)
+
+    ticket = _board_ticket(stack)
+    assert ticket["state"] == "Ready" and c.LABEL_NEEDS_INFO in ticket["tags"]
+    assert "try to move" not in ticket["comments"][c.marker_for("fake", "4711")]
+    home = FactoryHome(stack.home, "alpha")
+    assert [e for e in home.events() if e.kind == "intake.transitioned"] == []
+
+
+def test_the_default_settings_move_no_gappy_ticket(tmp_path: Path) -> None:
+    stack = Stack(tmp_path, _intake())
+    _gappy_board(stack)
+    stack.add_repo("alpha", {"enabled": True})
+    stack.worker.poll_intake()
+    ticket = _board_ticket(stack)
+    assert ticket["state"] == "Ready" and c.LABEL_NEEDS_INFO in ticket["tags"]
+    assert "try to move" not in ticket["comments"][c.marker_for("fake", "4711")]
+
+
+def test_a_return_state_that_names_the_watched_column_or_an_outcome_state_is_refused_at_start_up() -> (
+    None
+):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="return_state"):
+        IntakeSettings(column="Ready", return_state="ready")
+    with pytest.raises(ValidationError, match="return_state"):
+        IntakeSettings(column="Ready", outcome_map={"merged": "Done"}, return_state=" Done ")
+    assert IntakeSettings(column="Ready", return_state=" New ").return_state == "New"
+    assert IntakeSettings().return_state == ""
+    assert IntakeSettings(return_state="New").redacted()["return_state"] == "New"

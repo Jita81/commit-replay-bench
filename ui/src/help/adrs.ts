@@ -77,6 +77,8 @@ export const ADR_TITLES: ReadonlyArray<readonly [string, string]> = [
   ['0053', 'Open requirement gaps: a stated set records its questions and a run refuses them'],
   ['0054', 'Accepted-plan context arm: pass rate when the builder is given a plan accepted before the build'],
   ['0055', 'Audited-bypass plan arm: a plan attested as drafted blind skips only the lookalike checks of the plan guard'],
+  ['0056', 'A ticket with open questions goes back to a state the team names'],
+  ['0057', 'Azure Repos pull request delivery, attached to the Azure DevOps ticket'],
 ]
 
 /** `ADR-0015` — the name a record carries in the /help/docs route. */

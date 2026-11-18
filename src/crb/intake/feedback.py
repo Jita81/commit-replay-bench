@@ -14,7 +14,9 @@ Before any money is spent, the ticket learns three things in its own thread:
    standard, a ceiling, a size split, an unsigned cell) with each measured arm's state, n
    and interval and the way forward. Never "built and withheld".
 4. **What the product will and will not do to the ticket.** One comment, one label, and
-   at most the one state transition the deployment configured.
+   at most the one state transition the deployment configured — and, only where the
+   deployment names a return state (ADR-0056), a ticket with open questions is moved back
+   to it, which the comment then says in one sentence, as an attempt.
 
 The renderer is pure and deterministic: the same draft, readiness and route render the
 same bytes, which is what makes a re-post a no-op (:func:`crb.intake.client.marker_for`
@@ -37,7 +39,8 @@ How:          String building over :class:`crb.factory.readiness.Readiness` and 
               ``cell_route`` mapping the API and the worker both serve; no I/O, no clock,
               no randomness — determinism is the idempotency.
 Layer:        intake — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md
+ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md,
+              docs/adr/0056-a-not-ready-ticket-goes-back.md
 Works with:   src/crb/intake/client.py (the labels and the marker),
               src/crb/intake/draft.py (the draft it describes),
               src/crb/factory/readiness.py (``open_questions`` and the gaps),
@@ -124,6 +127,9 @@ ROUTE_WORDS: dict[str, str] = {
 #: team configured it — makes one state change when the pull request is merged. Those, and
 #: nothing else, are the six verbs the adapter has (docs/adr/0017); the sentence must keep
 #: matching them, which is why a test counts them rather than looking for the word "never".
+#: The return of a ticket with open questions (ADR-0056) is NOT in this sentence: it is
+#: configured separately and is said in its own sentence, only on a comment where the move
+#: will be attempted, so an unconfigured deployment's comment keeps its exact bytes.
 _NON_GOALS = (
     "What this product writes on this ticket: up to four comments, each marked as its own "
     "(this one about what is missing, a note when the work is queued, a note when a pull "
@@ -390,6 +396,7 @@ def render_feedback(
     entry: Entry,
     cell_route: Mapping[str, Any] | None = None,
     arms: Sequence[ArmReading] = (),
+    returns_to: str = "",
 ) -> Feedback:
     """The gap feedback for one ticket: one marked comment and one label.
 
@@ -397,6 +404,9 @@ def render_feedback(
     — the same call the factory's pre-build check makes); ``arms`` the cell's measured arms.
     ``cell_route`` is the capability map's decision for the draft's (class × size) cell
     as the API and the worker both serve it, or ``None`` when nobody has measured it.
+    ``returns_to`` is the state the caller will move the ticket back to (ADR-0056): named in
+    one closing sentence only when the label is ``crb:needs-info``; empty, the bytes are
+    exactly what they were without it.
     """
     marker = marker_for(draft.tracker, draft.ticket.key)
     label = _label_for(readiness, cell_route, entry)
@@ -431,6 +441,12 @@ def render_feedback(
         "",
         _NON_GOALS,
     ]
+    if returns_to and label == LABEL_NEEDS_INFO:
+        body += [
+            "",
+            f"Because questions are open, crb will try to move this ticket back to "
+            f"“{returns_to}”. Answer them here and move it into the watched column again.",
+        ]
     return Feedback(
         text="\n".join(body).rstrip() + "\n",
         marker=marker,

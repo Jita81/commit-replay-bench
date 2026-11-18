@@ -406,3 +406,50 @@ def test_a_decision_rendered_straight_from_the_router_quotes_the_whole_interval(
     text = _render(_ready_ticket(), decision).text
     assert "to unknown" not in text
     assert f"{stats.ci.low * 100:.0f} % to {stats.ci.high * 100:.0f} %" in text
+
+
+# --- the return of a ticket with open questions (ADR-0056) ------------------------------
+
+
+def _three_labels() -> list[tuple[c.Ticket, Readers]]:
+    t = _ready_ticket()
+    gappy = c.Ticket(**{**t.to_dict(), "acceptance_criteria": ("method_path: POST /health",)})
+    return [
+        (gappy, PROVEN),  # crb:needs-info
+        (t, PROVEN),  # crb:ready
+        (t, Readers(standard_for=lambda cell: None)),  # crb:not-deliverable
+    ]
+
+
+def _render_returning(ticket: c.Ticket, readers: Readers, returns_to: str) -> fb.Feedback:
+    draft = d.draft_from(ticket, tracker="ado")
+    readiness = rd.assess(draft.item)
+    entry = gate_for(draft.item, readiness, readers)
+    return fb.render_feedback(
+        draft, readiness, entry=entry, cell_route=_deliver_route(), returns_to=returns_to
+    )
+
+
+def test_an_unset_return_state_renders_the_same_bytes() -> None:
+    labels = []
+    for ticket, readers in _three_labels():
+        before = _render(ticket, _deliver_route(), readers=readers)
+        after = _render_returning(ticket, readers, "")
+        assert after.text == before.text and after.label == before.label
+        labels.append(before.label)
+    assert labels == [c.LABEL_NEEDS_INFO, c.LABEL_READY, c.LABEL_NOT_DELIVERABLE]
+
+
+def test_a_set_return_state_says_where_the_ticket_goes_only_when_it_needs_info() -> None:
+    sentence = "Because questions are open, crb will try to move this ticket back to “New”."
+    for ticket, readers in _three_labels():
+        f = _render_returning(ticket, readers, "New")
+        if f.label == c.LABEL_NEEDS_INFO:
+            assert sentence in f.text
+            assert "move it into the watched column again" in f.text
+            assert f.text.endswith("watched column again.\n")
+        else:
+            assert "try to move" not in f.text
+            assert f.text == _render(ticket, _deliver_route(), readers=readers).text
+        # the sentence about the merge's one configured state change is untouched
+        assert "one state change when the pull request is merged" in f.text.lower()

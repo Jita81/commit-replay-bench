@@ -23,13 +23,17 @@ What it does: Pins that a first pass over a one-ticket column ending in registra
               and that the whole life of a ticket is at most four marked comments, two
               links, one label and one configured state change — the state change driven
               through ``apply_outcome_map`` (swept twice), and none at all where no outcome
-              map is configured.
+              map is configured. Where a deployment names a return state (ADR-0056), it also
+              pins that the return of a ticket with open questions costs TWO Azure DevOps
+              requests and THREE Jira requests (the read again before the move, then the
+              move), and happens at most once per changed revision.
 How:          ``httpx.MockTransport`` counts every request the adapter makes (no tracker is
               contacted, here or in CI) for the exact verb sequence ``poll_repository``
               makes; then a real ``FactoryHome`` under ``tmp_path`` plus
               ``fixtures.intake``'s ``FakeTracker``, whose ``calls`` list is the count.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md
+ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md,
+              docs/adr/0056-a-not-ready-ticket-goes-back.md
 Works with:   src/crb/intake/ado.py and src/crb/intake/jira.py (the per-verb request cost),
               src/crb/server/intake.py (the poll, the later moments and the outcome sweep
               it counts),
@@ -39,8 +43,8 @@ Works with:   src/crb/intake/ado.py and src/crb/intake/jira.py (the per-verb req
               docs/OPERATOR.md (§11's *Bounds on one pass* cites this file)
 Tested by:    tests/test_intake_write_bound.py
 Touch when:   never for a new repository; an adapter changes how many requests a verb costs, or the
-              poll gains a write — change the count here and in docs/API.md, docs/SECURITY.md §2 and
-              docs/OPERATOR.md §11 in the same change.
+              poll gains a write (the configured return of ADR-0056 is one) — change the count here
+              and in docs/API.md, docs/SECURITY.md §2 and docs/OPERATOR.md §11 in the same change.
 """
 
 from __future__ import annotations
@@ -358,3 +362,106 @@ def test_a_repeat_of_a_later_write_adds_no_fifth_comment(home: FactoryHome) -> N
             tracker, KEY, "fake-4711", "https://github.invalid/o/r/pull/7", evidence=evidence
         )
     assert len(tracker.comments[KEY]) == 3
+
+
+# --- the configured return of a ticket with open questions (ADR-0056) ---------------
+
+
+def test_a_return_costs_two_azure_devops_requests_and_three_jira_requests() -> None:
+    """The number docs/OPERATOR.md §11 and docs/SECURITY.md §2 quote for the return. The
+    product reads the ticket again just before the move, so a person's own move stands
+    (the service tests pin that the return is exactly ``read`` then ``transition``); then
+    Azure DevOps sets the state in one PATCH, and Jira lists the transitions on offer and
+    posts the one that lands on the named status."""
+    ado_counts: dict[str, int] = {}
+
+    def ado_handler(request: httpx.Request) -> httpx.Response:
+        name = f"{request.method} {request.url.path}"
+        ado_counts[name] = ado_counts.get(name, 0) + 1
+        return httpx.Response(
+            200,
+            json={"id": int(KEY), "rev": 3, "fields": {ado.FIELD_TITLE: "x", ado.FIELD_REV: 3}},
+        )
+
+    tracker = ado.AdoTracker(
+        ado.AdoConfig(organisation_url=ORG, project="Widgets", column="Ready"),
+        "pat-token",
+        client=httpx.Client(transport=httpx.MockTransport(ado_handler)),
+    )
+    tracker.read(KEY)
+    tracker.transition(KEY, "New")
+    assert ado_counts == {
+        f"GET /contoso/Widgets/_apis/wit/workitems/{KEY}": 1,
+        f"PATCH /contoso/Widgets/_apis/wit/workitems/{KEY}": 1,
+    }
+
+    jira_counts: dict[str, int] = {}
+
+    def jira_handler(request: httpx.Request) -> httpx.Response:
+        name = f"{request.method} {request.url.path}"
+        jira_counts[name] = jira_counts.get(name, 0) + 1
+        if request.method == "GET" and request.url.path.endswith("/transitions"):
+            return httpx.Response(
+                200, json={"transitions": [{"id": "11", "to": {"name": "To Do"}}]}
+            )
+        if request.method == "GET":
+            return httpx.Response(
+                200, json={"key": KEY, "fields": {"summary": "x", "status": {"name": "Ready"}}}
+            )
+        return httpx.Response(204)
+
+    jtracker = jira.JiraTracker(
+        jira.JiraConfig(site_url=SITE, project="WID", column="Ready", email="b@e.invalid"),
+        "api-token",
+        client=httpx.Client(transport=httpx.MockTransport(jira_handler)),
+    )
+    jtracker.read(KEY)
+    jtracker.transition(KEY, "to do")
+    assert jira_counts == {
+        f"GET /rest/api/3/issue/{KEY}": 1,
+        f"GET /rest/api/3/issue/{KEY}/transitions": 1,
+        f"POST /rest/api/3/issue/{KEY}/transitions": 1,
+    }
+
+
+def test_the_whole_life_of_a_returned_ticket_is_one_comment_one_label_one_return_per_revision(
+    home: FactoryHome,
+) -> None:
+    """Driven through the real poll with a return state: twice at one revision, then once
+    after a person edits the ticket and moves it forward again. One marker and one label
+    throughout, one return per changed revision and none on a repeat."""
+    gappy = c.Ticket(
+        **{**_ready_ticket().to_dict(), "acceptance_criteria": READY_AC[:1], "state": "Ready"}
+    )
+    tracker = FakeTracker({KEY: gappy})
+    tracker.column = [c.TicketRef(key=KEY, revision="1", title=gappy.title, changed="2026")]
+
+    def poll() -> None:
+        sv.poll_repository(
+            "alpha",
+            tracker=tracker,
+            listener=sv.ListenerState(enabled=True),
+            column="Ready",
+            home=home,
+            route_for=lambda item: None,
+            item_url=lambda item_id: f"https://crb.invalid/factory?item={item_id}",
+            gate=Readers(standard_for=lambda cell: Standard("S1@claude-sonnet-5", signed=True)),
+            return_state="New",
+        )
+
+    poll()
+    poll()  # the same revision: the chain's idempotency key, nothing is written
+    assert [verb for verb, _ in tracker.calls].count("transition") == 1
+    # a person answers one question and moves the ticket forward: a new revision
+    tracker.tickets[KEY] = c.Ticket(
+        **{**gappy.to_dict(), "acceptance_criteria": READY_AC[:2], "revision": "2"}
+    )
+    tracker.column = [c.TicketRef(key=KEY, revision="2", title=gappy.title, changed="2027")]
+    poll()
+
+    assert list(tracker.comments[KEY]) == [c.marker_for("fake", KEY)]
+    assert tracker.labels == {KEY: c.LABEL_NEEDS_INFO}
+    assert [verb for verb, _ in tracker.calls].count("transition") == 2
+    assert [verb for verb, _ in tracker.calls].count("comment") == 2  # one per revision
+    assert tracker.states == {KEY: "New"}
+    assert tracker.links == {}

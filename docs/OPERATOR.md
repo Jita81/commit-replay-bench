@@ -1153,7 +1153,7 @@ registered from a partial read.
 | `unauthorised` | the tracker rejected the credential (401/403) | mint a new token with permission to read work items and add comments, and store it |
 | `unreachable` | the tracker did not answer (timeout, 5xx, 429) | check the URL and that the deployment may reach it; the next poll retries on its own |
 | `column_gone` | the watched column or state no longer exists on that board | point the listener at a column that does (`PUT /factory/{repo}/intake` with `column`) |
-| `refused` | the tracker refused a write — usually a workflow transition it does not allow, or a permission the credential lacks; or a ticket whose key cannot become an item id, which costs that ticket and nothing else | nothing was changed on the ticket; fix the workflow or the permission, or clear `CRB_INTAKE__OUTCOME_MAP` |
+| `refused` | the tracker refused a write — usually a workflow transition it does not allow, or a permission the credential lacks; or a ticket whose key cannot become an item id, which costs that ticket and nothing else | nothing was changed on the ticket; fix the workflow or the permission, or clear `CRB_INTAKE__OUTCOME_MAP`. With `step=return` it was the move back to `CRB_INTAKE__RETURN_STATE` (ADR-0056): the gap comment and the label are on the ticket, only the move was not made; allow that move in the tracker's workflow, or clear the setting. A normal pass does not try it again at that revision; it is tried again when the ticket next changes, or at once with *Post the feedback again* |
 | `column_too_large` | the column holds more tickets than one pass may read (`CRB_INTAKE__MAX_PER_POLL`), or the pass ran past `CRB_INTAKE__POLL_BUDGET_S` | narrow the area path or the JQL so the column holds the work that is genuinely ready, or raise the bound; a pass that ran out of time serves what it read and the rest are read next time |
 | `no_public_url` | this deployment does not know its own address, so a link on a ticket would not open | set `CRB_PUBLIC_URL` to the address people use to reach the product, on the API and the worker |
 | `lease_lost` | one tracker call took longer than the pass's lease lives, and another pass took the repository over | nothing: the pass renews its lease around every tracker call, so this needs one call slower than the lease; the pass stopped before its next call and the other pass carries on. If it recurs, the tracker is answering very slowly — raise `CRB_INTAKE__POLL_BUDGET_S`, which lengthens the lease with it |
@@ -1485,9 +1485,10 @@ CRB_INTAKE__AREA_PATH="Widgets\\Payments"      # Azure DevOps only, optional
 CRB_INTAKE__POLL_S=300
 CRB_INTAKE__MAX_PER_POLL=200                  # a longer column is not read at all (see below)
 CRB_INTAKE__POLL_BUDGET_S=60                  # one pass may take this long, then it stops early
-CRB_INTAKE__OUTCOME_MAP='{"merged": "Done"}'  # EMPTY by default: no ticket is ever moved
+CRB_INTAKE__OUTCOME_MAP='{"merged": "Done"}'  # EMPTY by default: no outcome moves a ticket
 CRB_INTAKE__REQUIRE_APPROVAL=true             # the default: an operator registers each ticket
 CRB_INTAKE__APPROVE_AUTHORS='[]'              # EMPTY by default: nobody skips the Register act
+CRB_INTAKE__RETURN_STATE=""                   # EMPTY by default: a ticket with open questions stays in the column
 CRB_PUBLIC_URL=https://crb.example.com        # THIS deployment's address (required, see below)
 ```
 
@@ -1504,7 +1505,13 @@ ticket it registers (the column, the ticket, the readiness comment, the label, t
 item link) — `tests/test_intake_write_bound.py::test_a_first_pass_on_one_ready_ticket_costs_eleven_azure_devops_requests`
 and `::test_the_same_first_pass_costs_nine_jira_requests`, which also assert where each request
 goes; apparatus 2.2. A count, so no interval]**. Azure DevOps is the dearer of the two because
-three of its verbs read before they write. A pass runs in front of the worker's heartbeat and, for
+three of its verbs read before they write. Where `CRB_INTAKE__RETURN_STATE` is set, moving a
+ticket with open questions back costs **two** more Azure DevOps requests or **three** more
+Jira ones, because the ticket is read again just before the move so that a person who has
+already moved it keeps their move **[measured — n = 1 return × 2 adapters; method: every
+request counted through an `httpx.MockTransport` for the `read` and `transition` calls,
+`tests/test_intake_write_bound.py::test_a_return_costs_two_azure_devops_requests_and_three_jira_requests`;
+apparatus 2.6. A count, so no interval]**. A pass runs in front of the worker's heartbeat and, for
 *Re-read the column now*, inside an API request. So a column holding more than
 `CRB_INTAKE__MAX_PER_POLL` tickets is **not read at all**: the pass stops
 with `column_too_large` and says to narrow the area path or the JQL, because reading an
@@ -1562,7 +1569,18 @@ distinct markers the intake writes its comments under, read in the server's inta
 this commit; apparatus n/a]**, each marked as its own (what is missing, the
 queued note, the pull-request note, the note if the work stopped), one `crb:` label, a link
 to the item and a link to the pull request, and — only where the outcome map is configured —
-one state change. It edits no other field, never creates a ticket, and never reads a column it
+one state change. Where `CRB_INTAKE__RETURN_STATE` is set, a ticket with open questions
+(`crb:needs-info`) is also moved back to that state, once per changed revision, after its
+comment and label (ADR-0056); a ticket that cannot be delivered, or is ready, never moves
+back. The ticket is read again just before the move: if a person has already moved it, it
+stays where they put it and the comment no longer says it will be moved back; if a person has
+edited what the ticket says, it is not moved and the next pass assesses it again. A move the
+tracker refused is final at that revision for the timer's passes, even one that rebuilds a
+lost row; it is tried again when the ticket changes, or when an operator uses *Post the
+feedback again*. A move that failed for any other reason (the tracker did not answer, the
+pass ran out of time) is tried again on the next pass. No
+ticket is moved back while any switched-on listener watches the return state, and switching
+a listener on to that state is refused (`intake_column_is_return_state`). It edits no other field, never creates a ticket, and never reads a column it
 was not pointed at. What a ticket says reaches a pull request only as quoted text inside a
 code block, and the branch name is lower-case letters, digits and hyphens. **One pass at a
 time:** the worker's timer, *Re-read the column now* and *Register* each take the repository's
