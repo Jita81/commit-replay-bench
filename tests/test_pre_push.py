@@ -388,6 +388,59 @@ def test_changed_files_keeps_deleted_and_renamed_paths(
     ]
 
 
+def test_a_test_file_is_guessed_by_exact_case_only() -> None:
+    """docs/dod/PLAN.md must not map to ``tests/test_PLAN.py``: a case-insensitive file
+    system finds tests/test_plan.py under that name and pytest then refuses the path."""
+    tests, notes = pre_push.tests_for(["docs/dod/PLAN.md"])
+    assert tests == []
+    assert notes == ["docs/dod/PLAN.md maps to no test: only the ratchets and the full run read it"]
+
+
+def _case_blind_is_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``Path.is_file`` find a file under any case of its name, as macOS does."""
+    real = Path.is_file
+
+    def is_file(self: Path) -> bool:
+        if real(self):
+            return True
+        parent = self.parent
+        return parent.is_dir() and self.name.lower() in {n.lower() for n in os.listdir(parent)}
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+
+
+def test_a_wrong_case_guess_is_refused_where_lookup_ignores_case(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same refusal on any file system: with a lookup that ignores case, the old
+    ``is_file`` test alone would return ``tests/test_PLAN.py``."""
+    _case_blind_is_file(monkeypatch)
+    assert (pre_push.ROOT / "tests/test_PLAN.py").is_file()  # the lookup really is blind
+    tests, _notes = pre_push.tests_for(["docs/dod/PLAN.md"])
+    assert tests == []
+
+
+def test_an_unlistable_tests_directory_gives_a_note_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A guess that cannot be verified by name is not accepted, and selection goes on."""
+    real = os.listdir
+
+    def listdir(path: Any = ".") -> list[str]:
+        if Path(path) == pre_push.ROOT / "tests":
+            raise PermissionError(13, "denied")
+        return real(path)
+
+    # no header and no explicit route: only the name guess could map this path
+    assert pre_push.tests_for(["docs/pre_push.md"])[0] == ["tests/test_pre_push.py"]
+    monkeypatch.setattr(pre_push.os, "listdir", listdir)
+    tests, notes = pre_push.tests_for(["docs/pre_push.md"])
+    assert tests == []
+    assert any("could not be verified by name (PermissionError)" in n for n in notes)
+    # an explicit mapping still selects its test
+    assert pre_push.tests_for(["scripts/hooks/pre-push"])[0] == ["tests/test_pre_push.py"]
+
+
 def test_a_changed_file_that_maps_to_no_test_gets_a_note() -> None:
     tests, notes = pre_push.tests_for(["docs/CONTRIBUTING.md"])
     assert tests == []

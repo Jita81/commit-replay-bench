@@ -594,6 +594,9 @@ _NOT_A_STORED_CLONE = {
     ("server/worker.py", "_fetch_default_branch"): (
         "runs git fetch in the GitRepo that _load_repo already confined (git.path)"
     ),
+    ("server/worker.py", "_remote_default_branch"): (
+        "runs git ls-remote in the GitRepo that _load_repo already confined (git.path)"
+    ),
     ("server/routes/repos.py", "_history_at"): (
         "walks the path _clone_history already confined (its cached, resolved key)"
     ),

@@ -559,8 +559,12 @@ def build_tracker(
     *,
     client: httpx.Client | None = None,
     home: str | Path = "",
+    pull_request_links: bool = False,
 ) -> TrackerClient:
     """The adapter this deployment is configured for.
+
+    ``pull_request_links`` is ``CRB_FACTORY__AZURE_REPOS_DELIVERY`` (ADR-0057): only then does
+    the Azure DevOps adapter read a pull request to attach it as Azure's own link.
 
     Raises ``TrackerError(REASON_NOT_CONFIGURED)`` when no tracker is set and
     ``TrackerError(REASON_NO_SECRET)`` when one is set but no credential is stored — the
@@ -592,6 +596,7 @@ def build_tracker(
                 # one MORE than a pass may read, so an overflowing column is VISIBLE to
                 # the service (which stops the pass) instead of being silently truncated
                 max_refs=int(getattr(intake, "max_per_poll", DEFAULT_MAX_PER_POLL)) + 1,
+                pull_request_links=pull_request_links,
             ),
             token,
             client=client,

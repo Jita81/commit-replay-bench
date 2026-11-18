@@ -27,6 +27,9 @@ first (ADR-0019).
 **Non-goals.** Nothing here measures a builder or spends money (steps 1–4 of the guide are
 £0). It does not fix the repository's own test suite, propose configuration edits, or connect
 anything but GitHub — GitLab and Azure DevOps connectors are named and not built (DL-041, F21).
+An Azure Repos repository in the intake board's own organisation can be cloned and delivered
+to with the tracker token, off by default (ADR-0057), but it is not connected here: F21 stays
+partial.
 
 ## Definition of done
 

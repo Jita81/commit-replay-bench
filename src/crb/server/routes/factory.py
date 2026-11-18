@@ -1915,6 +1915,7 @@ def _consented_tracker(
             settings.intake,
             secrets.get(TRACKER_TOKEN_SECRET) or "",
             home=settings.home,
+            pull_request_links=settings.factory.azure_repos_delivery,  # ADR-0057
         )
     except TrackerError as exc:
         raise ApiError(502, "tracker_error", f"{exc.detail or exc.reason} — {exc.advice}") from exc

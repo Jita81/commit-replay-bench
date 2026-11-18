@@ -656,8 +656,16 @@ def tests_for(paths: Sequence[str]) -> tuple[list[str], list[str]]:
             tested_by = code_map.read_header(path).fields.get("Tested by", "")
             named.update(re.findall(r"tests/[\w/.-]+?\.py", tested_by))
         guess = f"tests/test_{path.stem}.py"
+        # Exact-case match: on a case-insensitive file system ``is_file`` alone finds
+        # tests/test_plan.py for docs/dod/PLAN.md, and pytest then refuses the wrong-case path.
         if (ROOT / guess).is_file():
-            named.add(guess)
+            try:
+                exact = Path(guess).name in os.listdir(ROOT / "tests")
+            except OSError as e:
+                exact = False  # an unverified guess is never accepted
+                notes.append(f"{guess} could not be verified by name ({type(e).__name__})")
+            if exact:
+                named.add(guess)
         if rel.startswith(f"{HOOKS_DIR}/"):
             named.add("tests/test_pre_push.py")
         mapped = {n for n in named if (ROOT / n).is_file()}

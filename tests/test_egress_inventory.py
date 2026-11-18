@@ -15,8 +15,8 @@ What it does: Discovers every endpoint-shaped setting (the ``Settings`` model wa
               of writers from the rows whose "What is sent" cell names a write (P-107),
               and pins the write-verb list both ways (every usual write word counts, a
               send-and-read row does not); fails when the delivery paragraph under the
-              table does not name every write seam of ``crb.factory.delivery`` and the
-              re-delivery's re-pointed branch (P-111);
+              table does not name every write seam of ``crb.factory.delivery`` and
+              ``crb.factory.delivery_azure`` and the re-delivery's re-pointed branch (P-111);
               pins that a setting name is found whatever quote it is written in (P-110);
               pins that the provisioning row says what a fetch sends and what it never
               sends.
@@ -26,11 +26,13 @@ How:          ``pydantic`` field walk plus a regular expression over ``src/crb``
               flow, and one for the verbs that change something outside.
 Layer:        tests — docs/ARCHITECTURE.md#71-security
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md (the provisioning flow),
-              docs/adr/0014-github-app-is-the-connection.md (the GitHub API flow)
+              docs/adr/0014-github-app-is-the-connection.md (the GitHub API flow),
+              docs/adr/0057-azure-repos-pr-delivery.md (the Azure Repos API flow)
 Works with:   docs/SECURITY.md (the boundary table), docs/DEPLOYMENT.md (§1 and §7),
               src/crb/server/settings.py (``Settings``, the walked model),
               src/crb/provision/fetch.py (the fetch the provisioning row describes),
-              src/crb/factory/delivery.py (the write seams the delivery paragraph names),
+              src/crb/factory/delivery.py and src/crb/factory/delivery_azure.py (the write
+              seams the delivery paragraph names),
               docs/PREVENTION.md (rows P-103, P-107, P-110 and P-111)
 Tested by:    tests/test_egress_inventory.py
 Touch when:   never for a new repository (a client repository adds no flow; its remote is
@@ -84,6 +86,9 @@ FLOWS: dict[str, Flow] = {
     # the address is the repository row's ``repos.url``, a column, not a setting
     "git remote": Flow("Repository clone and fetch", r"git remote|repository'?s? remote", ()),
     "GitHub API": Flow("GitHub API", r"GitHub API", ("CRB_GITHUB__API_URL",)),
+    # the address is the board's organisation (``CRB_INTAKE__URL``, the tracker's own flow);
+    # the switch is a bool, not an address (ADR-0057)
+    "Azure Repos API": Flow("Azure Repos API", r"Azure Repos", ()),
     "OIDC issuer": Flow("Sign-in", r"OIDC issuer", ("CRB_OIDC__ISSUER",)),
     "tracker (intake)": Flow("Intake", r"tracker", ("CRB_INTAKE__URL",)),
     "package mirror or registry (provisioning)": Flow(
@@ -418,15 +423,22 @@ def test_a_row_that_only_sends_and_reads_is_not_a_writer(cell: str) -> None:
     assert not _WRITE_VERB.search(cell), cell
 
 
-#: Each write seam of ``crb.factory.delivery`` (its ``#: ``<name>_fn(`` seam comments) and
-#: the words the delivery paragraph under the boundary table must use for it. A new seam
-#: fails the test below until it has an entry here and the paragraph says what it does.
+#: Each write seam of ``crb.factory.delivery`` and ``crb.factory.delivery_azure`` (their
+#: ``#: ``<name>_fn(`` seam comments) and the words the delivery paragraph under the boundary
+#: table must use for it. A new seam fails the test below until it has an entry here and the
+#: paragraph says what it does.
 _DELIVERY_WRITES: dict[str, tuple[str, ...]] = {
     "push_fn": ("pushes",),
     "open_pr_fn": ("opens a pull request", "opens the pull request"),
     "comment_pr_fn": ("comment",),
     "close_pr_fn": ("close",),
+    "azure_open_pr_fn": ("adopts",),
+    "azure_comment_pr_fn": ("comment thread",),
+    "azure_close_pr_fn": ("abandon",),
 }
+
+#: The modules whose seam comments the test below reads.
+_DELIVERY_MODULES: tuple[str, ...] = ("delivery.py", "delivery_azure.py")
 
 #: The re-delivery lease in ``deliver()``: a push with ``expected=`` moves an existing
 #: branch — and so the pull request's content — to a new commit.
@@ -440,12 +452,17 @@ def _delivery_paragraph() -> str:
 
 def test_the_delivery_paragraph_names_every_write_delivery_makes() -> None:
     """The delivery paragraph names every write delivery makes: each write seam of
-    ``crb.factory.delivery`` (push, open, comment, close), and the re-delivery's
-    force-with-lease push that re-points the same branch to a new commit and so changes what
-    the pull request contains (P-111)."""
-    source = (SRC / "factory" / "delivery.py").read_text(encoding="utf-8")
-    seams = set(re.findall(r"^#: ``(\w+_fn)\(", source, re.MULTILINE))
-    assert "push_fn" in seams, seams  # the seam reader still reads the module
+    ``crb.factory.delivery`` (push, open, comment, close) and ``crb.factory.delivery_azure``
+    (open, comment, abandon), and the re-delivery's force-with-lease push that re-points the
+    same branch to a new commit and so changes what the pull request contains (P-111)."""
+    sources = {m: (SRC / "factory" / m).read_text(encoding="utf-8") for m in _DELIVERY_MODULES}
+    seams = {
+        seam
+        for text in sources.values()
+        for seam in re.findall(r"^#: ``(\w+_fn)\(", text, re.MULTILINE)
+    }
+    assert {"push_fn", "azure_open_pr_fn"} <= seams, seams  # the reader still reads both
+    source = sources["delivery.py"]
     unmapped = sorted(seams - set(_DELIVERY_WRITES))
     assert unmapped == [], f"delivery has write seams {unmapped} this test does not map"
     text = _delivery_paragraph().lower()
