@@ -1353,6 +1353,102 @@ export interface ForecastBuild {
   unmeasured: string[]
 }
 
+/** `GET /quote/mapping` (ADR-0058): what a first mapping would run. */
+export interface QuoteRun {
+  kind: string
+  mode: string
+  ladder: string[]
+  attempts_per_task: number
+  look_rule: string
+  first_look: number
+}
+
+/** One axis (cost or minutes) of a quote cell. A bound is `null` where work would run and
+ * the server has no basis for it, never `0`. A declared band fills `low` and `high` and
+ * leaves `expected` `null`: no mid-point, not no basis. A cell that would run no task is
+ * `0` on every bound, whatever its basis tier. */
+export interface QuoteRange {
+  low: number | null
+  expected: number | null
+  high: number | null
+  method: string
+  reason: string
+}
+
+/** The one tier a quote cell is priced from: `repo_cell`, `deployment_cell`, `declared` or `unknown`. */
+export interface QuoteBasis {
+  tier: string
+  tag: string
+  n_rows: number
+  n_time_rows: number
+  n_repos: number
+  apparatus_version: string | null
+  cost_per_attempt: EconomicsEstimate | null
+  seconds_per_attempt: EconomicsEstimate | null
+  reason: string
+}
+
+/** One (class x size) cell of the mapping quote. `wilson_half_width_p50` is a projection, never a rate. */
+export interface QuoteCell {
+  capability_class: string
+  size: string
+  label: string
+  requested: number
+  available: number
+  tasks_to_run: number
+  shortfall: number
+  left_after: number
+  attempts: number
+  wilson_half_width_p50: number
+  cost_usd: QuoteRange
+  minutes: QuoteRange
+  basis: QuoteBasis
+}
+
+/** The quote's cells added up; each total names the cells it leaves out. */
+export interface QuoteTotals {
+  cells: number
+  cells_priced: number
+  cells_unknown: number
+  tasks_to_run: number
+  tasks_priced: number
+  cost_usd_low: number | null
+  cost_usd_expected: number | null
+  cost_usd_high: number | null
+  minutes_low: number | null
+  minutes_expected: number | null
+  minutes_high: number | null
+  unpriced: string[]
+  no_expected: string[]
+  untimed: string[]
+  note: string
+}
+
+/** `GET /quote/mapping` — a read-only projection of a first mapping, never evidence (ADR-0058). */
+export interface MappingQuote {
+  schema: string
+  repo: string
+  builder: string
+  model: string
+  run: QuoteRun
+  n_default: number
+  availability_source: string
+  availability_note: string
+  /** The caller's own band per attempt (USD), echoed; `null` when none was declared. */
+  declared: { low: number; high: number } | null
+  estimate_of: string
+  claim: string
+  time_basis: string
+  seen_note: string
+  basis_rows: string
+  precision_note: string
+  cells: QuoteCell[]
+  totals: QuoteTotals
+  /** `false` when the price table has no price for the model, `null` when it could not be read. */
+  model_priced: boolean | null
+  model_priced_reason: string
+}
+
 /** `GET /forecast/readiness` — ok + gaps punch-list. */
 export interface ForecastReadiness {
   repo: string

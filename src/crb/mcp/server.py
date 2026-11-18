@@ -384,6 +384,33 @@ def build_server(api: CrbApi) -> MCPServer[Any]:
     def crb_forecast(repo: str, mix: str) -> Any:
         return _safe(lambda: api.get("/forecast/build", repo=repo, mix=mix))
 
+    @s.tool(
+        annotations=READ,
+        description="Read-only quote of a first mapping of a repo by builder+model (GET /quote/mapping): per (class x size) cell the tasks that would run (capped at the gold-clean tasks available, with the shortfall and left_after = available minus the tasks to run; available still counts tasks already replayed, so left_after can overstate what is unseen for a reading), the Wilson half-width at p = 0.5 they would buy, and a cost and builder-time range from recorded rows (this repo, else other repos [hypothesis], else your declared 'low:high' USD per attempt, else null with a reason). cells = 'class:size:count,...' ('*' = every size; a size named on its own wins); n = tasks per cell when cells is empty (0 = the first look; n with cells is refused). It spends nothing; starting the run (crb_start_run) spends the operator's model budget. Figures are recorded product cost, not a provider invoice.",
+    )
+    def crb_mapping_quote(
+        repo: str,
+        builder: str,
+        *,
+        model: str = "",
+        n: int = 0,
+        cells: str = "",
+        pool: str = "",
+        declared: str = "",
+    ) -> Any:
+        return _safe(
+            lambda: api.get(
+                "/quote/mapping",
+                repo=repo,
+                builder=builder,
+                model=model or None,
+                n=n or None,
+                cells=cells or None,
+                pool=pool or None,
+                declared=declared or None,
+            )
+        )
+
     # --- ledger and sign-offs (read) ------------------------------------------------------------
     @s.tool(
         annotations=READ,

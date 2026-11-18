@@ -140,6 +140,29 @@ def rows_of_runs(session: Session, run_ids: Iterable[str]) -> list[GradeRow]:
     return [r for r in rows if not r.imported]
 
 
+def rows_of_rung(
+    session: Session, *, builder: str, model: str, mode: str, process_step: str, trial: str
+) -> list[GradeRow]:
+    """Every repository's rows of one builder, model, mode, process step and ladder rung, in
+    chain (``seq``) order — what a mapping quote prices from (ADR-0058): one filtered read,
+    never a full-ledger read per repository. An imported row is someone else's measurement
+    (P-321) and is dropped, as in ``rows_of_runs``: a quote is priced only from rows this
+    deployment measured."""
+    q = (
+        select(Grade)
+        .where(
+            Grade.builder == builder,
+            Grade.model == model,
+            Grade.mode == mode,
+            Grade.process_step == process_step,
+            Grade.trial == trial,
+        )
+        .order_by(Grade.seq)
+    )
+    rows = (_from_model(m) for m in session.execute(q).scalars())
+    return [r for r in rows if not r.imported]
+
+
 class AttemptSettled(RuntimeError):
     """The attempt a row belongs to is settled: its run was reclaimed, finished, or claimed
     by another worker, so the reading may already have read the commit as a miss (P-792 C1).

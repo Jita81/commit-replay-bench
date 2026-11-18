@@ -223,6 +223,7 @@ class TestFactory:
             "library",
             "oracle",
             "prevention",
+            "quote",
             "readings",
             "repos",
             "reviews",
