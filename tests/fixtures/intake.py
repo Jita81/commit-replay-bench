@@ -22,8 +22,9 @@ Works with:   src/crb/intake/client.py (the protocol it implements), tests/test_
               tests/test_intake_feedback.py (``a_ticket``), tests/test_intake_service.py (drives
               the service against this fake), tests/fixtures/__init__.py (the package marker)
 Tested by:    tests/test_intake_client.py
-Touch when:   a verb is added to the protocol — add it here first, then the adapters; never add
-              behaviour the real adapters do not have, or a suite passes against a fiction.
+Touch when:   never for a new repository; a verb is added to the protocol — add it here first,
+              then the adapters; never add behaviour the real adapters do not have, or a suite
+              passes against a fiction.
 """
 
 from __future__ import annotations
