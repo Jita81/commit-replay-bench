@@ -12,12 +12,13 @@ Navigation
 What it is:   The ``GET /quote/mapping`` route module — the read-only quote of a first mapping
               (a sighted single-rung replay): tasks, recorded cost, builder time and precision.
 What it does: Validates ``n`` / ``cells`` / ``pool`` / ``declared`` (422; ``n`` with ``cells``
-              is refused) and resolves the model (422 when the builder has no default); counts
-              the gold-clean tasks per cell; only when nothing is mined, falls back to the
-              cached change profile served as an upper bound (409 ``no_tasks`` with no profile
-              or with a ``pool``, which a profile cannot split, and when tasks are mined but
-              none is available and no cell is named); prices every cell from the core quote;
-              flags a model the price table cannot see.
+              is refused, and so is a declared bound over ``MAX_DECLARED_USD``) and resolves
+              the model (422 when the builder has no default); counts the gold-clean tasks per
+              cell; only when nothing is mined, falls back to the cached change profile served
+              as an upper bound (409 ``no_tasks`` with no profile or with a ``pool``, which a
+              profile cannot split, and when tasks are mined but none is available and no cell
+              is named); prices every cell from the core quote; flags a model the price table
+              cannot see.
 How:          ``get_repo_or_404`` → ``parse_mix`` for ``cells`` → a ``GROUP BY`` over ``tasks``
               (or ``cached_profile``) → one ``rows_of_rung`` read → ``rows_for_arm`` and
               ``filter_posture`` at the target repository → ``mapping_quote(...).to_dict()`` →
@@ -78,6 +79,9 @@ router = APIRouter(tags=["quote"])
 _ERR = {"model": ErrorEnvelope}
 
 MAX_TASKS_PER_CELL = 1000
+#: The largest declared bound per attempt (USD): scaled by every attempt of every cell and
+#: added into the totals, a larger bound could overflow to infinity.
+MAX_DECLARED_USD = 1_000_000.0
 POOLS = ("", POOL_STANDARD, POOL_HARD)
 
 
@@ -99,28 +103,42 @@ def parse_declared(declared: str) -> tuple[float, float] | None:
             f"declared {declared!r} must be low:high USD per attempt with 0 <= low <= high",
             declared=declared,
         )
+    if high > MAX_DECLARED_USD:
+        raise _bad(
+            f"declared {declared!r}: high must be at most {MAX_DECLARED_USD:.0f} USD per attempt",
+            declared=declared,
+        )
     return low, high
 
 
 def parse_cells(cells: str) -> dict[CellKey, int] | None:
     """``cells`` in the forecast's ``class:size:count`` grammar (``*`` = every size of the
-    class), each count 1 to :data:`MAX_TASKS_PER_CELL`; ``""`` → ``None`` (every cell)."""
+    class), each item's count and each cell's summed count 1 to :data:`MAX_TASKS_PER_CELL`;
+    ``""`` → ``None`` (every cell)."""
     if not cells:
         return None
+    parse_mix(cells)  # the grammar and the item cap, over the whole list
     parsed: dict[CellKey, int] = {}
-    for key, n in parse_mix(cells).items():
-        cell = parse_component_key(key)
-        parsed[cell] = parsed.get(cell, 0) + n
-    for (cls, size), n in parsed.items():
-        if not 1 <= n <= MAX_TASKS_PER_CELL:
-            raise _bad(
-                f"cells: {cls}:{size or '*'} asks for {n} tasks; expected 1 to "
-                f"{MAX_TASKS_PER_CELL}",
-                capability_class=cls,
-                size=size,
-                count=n,
-            )
+    for item in (p.strip() for p in cells.split(",") if p.strip()):
+        # one item at a time: parse_mix sums repeated keys, which would hide a 0 item
+        for key, n in parse_mix(item).items():
+            cell = parse_component_key(key)
+            _check_count(cell, n)
+            parsed[cell] = parsed.get(cell, 0) + n
+    for cell, n in parsed.items():
+        _check_count(cell, n)
     return parsed
+
+
+def _check_count(cell: CellKey, n: int) -> None:
+    cls, size = cell
+    if not 1 <= n <= MAX_TASKS_PER_CELL:
+        raise _bad(
+            f"cells: {cls}:{size or '*'} asks for {n} tasks; expected 1 to {MAX_TASKS_PER_CELL}",
+            capability_class=cls,
+            size=size,
+            count=n,
+        )
 
 
 def available_tasks(db: Session, repo: str, pool: str) -> dict[CellKey, int]:
@@ -275,6 +293,7 @@ def mapping_quote_route(
 
 
 __all__ = [
+    "MAX_DECLARED_USD",
     "MAX_TASKS_PER_CELL",
     "available_tasks",
     "basis_rows",

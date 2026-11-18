@@ -27,8 +27,9 @@ say what is left for a reading after the mapping.
 
 ## Decision
 
-1. **Read-only.** `GET /quote/mapping` (viewer) and the MCP reader `crb_mapping_quote` start
-   nothing, write nothing and call no model and no network. The response carries no timestamp,
+1. **Read-only.** `GET /quote/mapping` (viewer) starts nothing, writes nothing and calls no
+   model and no outbound network. The MCP reader `crb_mapping_quote` makes one HTTP request, to
+   this endpoint, and nothing more. The response carries no timestamp,
    so two reads of the same data give the same bytes. It prices a sighted replay, ladder
    `["r1"]`, one attempt per task, and says so in `run`.
 2. **The request.** `repo` and `builder` are required. `model` defaults as `POST /runs` does
@@ -36,8 +37,10 @@ say what is left for a reading after the mapping.
    1 to 1000. `cells` uses the forecast's `class:size:count` grammar (`*` means every size of
    the class; each count 1 to 1000; a size named on its own beats `class:*` for that size);
    empty means every cell with a task. `n` and `cells` together are refused (422): `cells`
-   names each cell's count. `pool` is `standard`, `hard` or empty. `declared` is the caller's
-   own `low:high` band in USD per attempt.
+   names each cell's count; a count of 0 on any item is refused, even when a repeated item
+   would bring the cell's sum to 1 or more. `pool` is `standard`, `hard` or empty. `declared` is
+   the caller's own `low:high` band in USD per attempt, with `high` at most 1,000,000 (422
+   above, so a band scaled by the attempts cannot overflow).
 3. **Tasks.** Per cell, the tasks to run are the smaller of the count asked for and the
    gold-clean tasks available, the pool a replay draws from. The response serves `shortfall`
    and `left_after`. Only when the repository has no mined task at all are the cached change
@@ -49,6 +52,7 @@ say what is left for a reading after the mapping.
    write: it matches the cell, the builder and the model, and is a sighted replay row on rung
    `r1` under the `S3` brief (a row from before 2.4 carries no arm and is kept at its own
    apparatus). An imported row is another deployment's measurement and is never a candidate.
+   A row with a negative cost is not a price and is left out.
    A later rung holds only tasks that failed the first, and another arm carries a
    bigger brief, so neither is a first mapping's cost. Every candidate, this repository's and
    every other's, is read under the TARGET repository's checks arm and posture class (ADR-0024,
@@ -65,7 +69,8 @@ say what is left for a reading after the mapping.
    Student-t 95% prediction interval for the sum of A new attempts. The method string and the
    per-attempt `mean_estimate` are served with it. A band from rows that are all the same has
    no width, and one from fewer than 5 rows is thin: its `reason` says so, because a narrow
-   band there is not certainty.
+   band there is not certainty. A cell with no task to run serves 0 for cost and minutes
+   whatever its tier, `unknown` included: nothing runs, so nothing is spent.
 6. **Time.** Minutes use the same formula on the same tier's rows with a recorded latency (2 or
    more, else `null`), divided by 60. Time never falls through to another tier. It is builder
    wall clock, summed as if run one after another; grading, set-up, mining and queue time are
@@ -78,6 +83,7 @@ say what is left for a reading after the mapping.
    `[hypothesis]`, routes nothing, licenses nothing and feeds no other reader. Totals add only
    the cells they count and name the rest; the expected total is `null` while any priced cell
    has no expected figure (a declared band), so it never sums fewer cells than low and high.
+   Low and high add each cell's bounds; the sum is not a calibrated joint 95% interval.
 
 ## Consequences
 
@@ -86,8 +92,9 @@ say what is left for a reading after the mapping.
 - The quote's accuracy has never been checked against a real mapping [gap]. The first real
   mapping should be compared with its own quote: is the recorded spend inside low to high?
   Until then every figure stays `[hypothesis]`.
-- Costs are right-skewed, so with few rows the normal-theory range can under-cover. The t factor
-  and the served row count are the hedges.
+- If per-attempt costs are right-skewed (their shape has not been measured [hypothesis]), the
+  normal-theory range can under-cover with few rows. The t factor and the served row count are
+  the hedges.
 - A fresh deployment gets `unknown` in every cell unless the caller declares a band. That is
   honest, but the first quote on a new install says "no basis".
 - `deployment_cell` assumes cost per attempt transfers between repositories, although their

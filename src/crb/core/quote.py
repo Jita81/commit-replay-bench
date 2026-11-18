@@ -148,8 +148,8 @@ SEEN_NOTE = (
 BASIS_ROWS = (
     "a basis row is a sighted replay attempt of this builder and model on rung r1 with the "
     "S3 brief (the commit's own tests), at the newest apparatus among the tier's rows, in this "
-    "repository's checks arm and posture class; a row with no known cost, or that metered "
-    "nothing (no cost and no token), is left out"
+    "repository's checks arm and posture class; a row with no known cost, a negative cost, "
+    "or that metered nothing (no cost and no token), is left out"
 )
 PRECISION_NOTE = (
     "wilson_half_width_p50 is the Wilson 95% half-width at an assumed p of 0.5 for the tasks "
@@ -158,8 +158,8 @@ PRECISION_NOTE = (
 TOTALS_NOTE = (
     "each total adds only the cells it counts (unpriced and untimed name the rest); "
     "cost_usd_expected is null while any priced cell has no expected figure (no_expected "
-    "names them); adding each cell's bounds gives a range wider than a joint 95% interval; "
-    "tasks run one after another"
+    "names them); low and high add each cell's bounds, which is not a calibrated joint 95% "
+    "interval; tasks run one after another"
 )
 
 #: The whole interface the quote may read from a row: no outcome. ``trial`` and
@@ -473,9 +473,12 @@ def _index(rows: Iterable[CostRow], builder: str, model: str) -> dict[CellKey, l
 
 
 def _metered(r: CostRow) -> bool:
-    """The row observed a cost: a known cost, and the builder metered something (a row with no
-    cost and no token — a refused call, an attempt that ended before it — observed nothing)."""
-    return r.cost_known and (r.cost_usd > 0 or r.tokens_in > 0 or r.tokens_out > 0)
+    """The row observed a cost: a known, finite, non-negative cost, and the builder metered
+    something (a row with no cost and no token — a refused call, an attempt that ended before
+    it — observed nothing). A negative cost is not a price and would invert the band."""
+    if not (r.cost_known and math.isfinite(r.cost_usd) and r.cost_usd >= 0):
+        return False
+    return r.cost_usd > 0 or r.tokens_in > 0 or r.tokens_out > 0
 
 
 def _newest(rows: list[CostRow]) -> tuple[str | None, list[CostRow]]:

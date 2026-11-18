@@ -206,12 +206,16 @@ def test_quote_declared_band_echoed_and_tagged(env: Env) -> None:
     [
         f"{BASE}&cells=bug.fix",
         f"{BASE}&cells=bug.fix:S:0",
+        # a zero item is refused before repeated items are summed
+        f"{BASE}&cells=bug.fix:S:0,bug.fix:S:2",
         f"{BASE}&cells=bug.fix:S:1001",
         f"{BASE}&n=0",
         f"{BASE}&n=1001",
         f"{BASE}&declared=0.5:0.1",
         f"{BASE}&declared=cheap",
         f"{BASE}&declared=-1:2",
+        # finite, but scaled by the attempts it would overflow to infinity
+        f"{BASE}&declared=1e308:1e308",
         f"{BASE}&pool=weird",
         f"{BASE}&n=5&cells=bug.fix:S:3",
         f"/quote/mapping?repo={ALPHA}&builder={BUILDER}",
@@ -320,7 +324,9 @@ def _keys(node: Any) -> Iterator[str]:
 
 def test_quote_response_carries_no_outcome_or_arm_field(env: Env) -> None:
     _beta_rows(env)
-    body = env.get(f"{BASE}&declared=0.01:0.02").json()
+    r = env.get(f"{BASE}&declared=0.01:0.02")
+    assert r.status_code == 200, r.text  # an error envelope would pass the walk vacuously
+    body = r.json()
     bad = {k for k in _keys(body) for part in FORBIDDEN_KEY_PARTS if part in k.lower()}
     assert not bad, bad
 
@@ -347,8 +353,9 @@ def test_quote_basis_is_the_first_mapping_arm_under_target_checks_and_posture(
 
 
 def test_quote_is_byte_stable_across_two_reads(env: Env) -> None:
-    a = env.get(BASE).content
-    b = env.get(BASE).content
+    ra, rb = env.get(BASE), env.get(BASE)
+    assert ra.status_code == rb.status_code == 200, (ra.text, rb.text)
+    a, b = ra.content, rb.content
     assert a == b and b"as_of" not in a
 
 

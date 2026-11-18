@@ -221,6 +221,27 @@ def test_row_that_metered_nothing_is_never_a_zero_basis() -> None:
     assert c["basis"]["tier"] == q.TIER_REPO and c["cost_usd"]["expected"] == 0
 
 
+def test_negative_cost_row_never_enters_a_basis() -> None:
+    # a negative cost with tokens is cost_known on the row, but it is not a price: two of
+    # them used to price a cell at low 0, expected -1, high -1, an inverted band
+    bad = [_ns(cost=-1.0) for _ in range(2)]
+    c = _cell(_quote(own_rows=bad, selection={("bug.fix", "S"): 1}))
+    assert c["basis"]["tier"] == q.TIER_UNKNOWN and c["cost_usd"]["low"] is None
+    # mixed with real rows, only the real rows count and the band stays ordered
+    c = _cell(_quote(own_rows=[*bad, *_rows(3, cost=0.2, sd=0.0)]))
+    assert c["basis"]["n_rows"] == 3
+    band = c["cost_usd"]
+    assert 0 <= band["low"] <= band["expected"] <= band["high"]
+
+
+def test_totals_note_never_claims_a_joint_interval() -> None:
+    # one priced cell with identical rows: the summed range has zero width, so it is not
+    # "wider than a joint 95% interval"; the note says only that it is not one
+    t = _quote(own_rows=_rows(3, cost=0.1, sd=0.0)).to_dict()["totals"]
+    assert t["cost_usd_low"] == t["cost_usd_high"]
+    assert "wider" not in t["note"] and "not a calibrated joint 95% interval" in t["note"]
+
+
 def test_newest_apparatus_only_never_pooled() -> None:
     rows = [_ns(apparatus="2.6", cost=9.0), *_rows(10, apparatus="2.5")]
     c = _cell(_quote(own_rows=rows, other_rows=_rows(3, cost=0.4, sd=0.0, repo="other")))
