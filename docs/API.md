@@ -787,7 +787,9 @@ and beside it the digest of the ticket's own content, which is what decides an e
 tracker moves its revision when this product writes on the ticket, so an UNCHANGED ticket read
 at a new revision is the same item and not an evolution of itself; where a move back was
 due (ADR-0056) it may also carry `return_pending: true` — the move failed for a reason that
-passes, so the revision is not finished with and the next pass tries again — or
+passes, so the revision is not finished with and the next pass tries again; with
+`content_changed: true` beside it, a person edited the ticket before the move, so it was not
+moved and the next pass assesses it again — or
 `return_skipped: true` with `state_now` — a person moved the ticket first), `intake.feedback.posted`
 (`label`, `marker`, `open_questions`, `route`), `intake.awaiting_approval` (`tracker`, `key`, `revision`,
 `content_revision`, `author`, `item` — a ready draft waiting for an operator, ADR-0022),
@@ -796,7 +798,8 @@ passes, so the revision is not finished with and the next pass tries again — o
 (`url` — the pull request link posted on the ticket), `intake.transitioned` (`outcome`, `state` —
 the configured state change after a merge; or `outcome` = `returned` with `from_state` and
 `revision` — a ticket with open questions moved back to `CRB_INTAKE__RETURN_STATE`, ADR-0056) and
-`intake.stopped` (`step` — `return` for a move back that did not happen —, `reason` ∈ `unreachable` |
+`intake.stopped` (`step` — `return` for a move back that did not happen, which also carries
+`tracker`, `revision` and `state` —, `reason` ∈ `unreachable` |
 `unauthorised` | `no_secret` | `refused` | `column_gone` | `not_configured` | `column_too_large` |
 `no_public_url` | `lease_lost`, `detail`). Every reason word is published here and is what `/health`, the
 intake screen and the trace all show. Switching a listener on or off is not on this chain: it

@@ -1320,8 +1320,9 @@ def _handle_ticket(
 
     ``return_state`` (ADR-0056): a ticket with open questions that was never registered and
     is still in ``column`` is moved back to it after its comment and label, once per
-    revision; the comment says so only when the move will be attempted (or was, at this
-    revision, so a re-post renders the same bytes).
+    revision; the comment says so only when the move is due (or was made or refused at this
+    revision, so a re-post renders the same bytes). A refusal at this revision is final on a
+    normal pass, including one that rebuilds a lost cache row; ``force`` tries it again.
     """
     policy = approval if approval is not None else ApprovalPolicy()
     del actor
@@ -1416,19 +1417,25 @@ def _handle_ticket(
     # comment still names the return, so a re-post at the same revision is a no-op.
     eligible = bool(return_state) and not previous_id
     returned_here = eligible and _returned_at(events, tracker.name, ticket.key, ticket.revision)
-    will_move = (
+    due = (
         eligible
         and not returned_here
         and _same(ticket.state, column)
         and not _same(ticket.state, return_state)
     )
+    # A refusal is final at its revision. Only an operator's forced re-post tries it again;
+    # a pass that rebuilds a lost cache row reads the refusal from the chain and keeps it.
+    refused_here = (
+        due and not force and _refused_at(events, tracker.name, ticket.key, ticket.revision)
+    )
+    will_move = due and not refused_here
     feedback = render_feedback(
         draft,
         readiness,
         entry=entry,
         cell_route=route,
         arms=arms,
-        returns_to=return_state if (will_move or returned_here) else "",
+        returns_to=return_state if (due or returned_here) else "",
     )
     already_registered = backlog is not None and backlog.get(draft.item.id) is not None
     # The label is decided before it is written, not adjusted afterwards: a ticket already
@@ -1588,6 +1595,9 @@ def _handle_ticket(
                 item_id=draft.item.id,
                 check_budget=check_budget,
             )
+    elif refused_here and label == LABEL_NEEDS_INFO:
+        # the row a lost cache rebuilds says what the refused pass said, and moves nothing
+        row = replace_row(row, stopped=REASON_REFUSED, stopped_advice=RETURN_STOP_ADVICE)
     evidence.append(
         EV_READ,
         draft.item.id,
@@ -1660,6 +1670,23 @@ def _returned_at(events: Sequence[Any], tracker: str, key: str, revision: str) -
     )
 
 
+def _refused_at(events: Sequence[Any], tracker: str, key: str, revision: str) -> bool:
+    """Whether the last move back of this ticket tried at this revision was REFUSED
+    (ADR-0056). The refusal's ``intake.stopped`` is the durable record, so a pass that
+    rebuilds a lost cache row does not try the move again. A later failure for a passing
+    reason at the same revision (after a forced re-post) supersedes it."""
+    for e in reversed(list(events)):
+        p = e.payload
+        if e.kind != EV_STOPPED or p.get("step") != "return":
+            continue
+        if str(p.get("tracker")) != tracker or str(p.get("key")) != key:
+            continue
+        if str(p.get("revision")) != revision:
+            continue
+        return str(p.get("reason")) == REASON_REFUSED
+    return False
+
+
 def _return_not_ready(
     row: IntakeRow,
     ticket: Ticket,
@@ -1674,13 +1701,17 @@ def _return_not_ready(
     """Move a ticket with open questions back to the deployment's return state (ADR-0056).
 
     Returns the row to serve and what the revision's ``intake.read`` must add: nothing when
-    the ticket moved or the tracker refused (both final at this revision), ``return_pending``
-    when the move failed for a reason that passes, so :func:`already_handled` lets the next
-    pass try again, and ``return_skipped`` when a person moved the ticket first.
+    the ticket moved or the tracker refused (both final at this revision; only a forced
+    re-post tries a refused move again), ``return_pending`` when the move failed for a
+    reason that passes, so :func:`already_handled` lets the next pass try again,
+    ``return_pending`` with ``content_changed`` when a person edited what was assessed, and
+    ``return_skipped`` when a person moved the ticket first.
 
     The ticket is read again just before the move, because the first read was several
     tracker calls ago: a person who dragged it out of the watched column while its comment
-    and label were written has made their move, and it is not overwritten. (Neither tracker
+    and label were written has made their move, and it is not overwritten; a person who
+    edited its content gets it assessed again on the next pass instead of moved on the old
+    assessment. (Neither tracker
     offers a conditional move through the six verbs, so a move in the instant between this
     read and the write is still possible; ADR-0056 *Gaps*.)
 
@@ -1690,9 +1721,20 @@ def _return_not_ready(
     """
     try:
         check_budget("return")
-        now_in = tracker.read(ticket.key).state
-        if not _same(now_in, column):
-            return replace_row(row, state=now_in), {"return_skipped": True, "state_now": now_in}
+        fresh = tracker.read(ticket.key)
+        if not _same(fresh.state, column):
+            return replace_row(row, state=fresh.state), {
+                "return_skipped": True,
+                "state_now": fresh.state,
+            }
+        if content_revision(fresh) != content_revision(ticket):
+            # a person edited the ticket while its comment and label were written: what was
+            # assessed is no longer what the ticket says, so nothing moves and the revision
+            # stays unfinished; the next pass assesses the ticket as it now reads
+            return replace_row(row, state=fresh.state), {
+                "return_pending": True,
+                "content_changed": True,
+            }
         check_budget("return")
         tracker.transition(ticket.key, return_state)
     except TrackerError as exc:
@@ -1700,7 +1742,9 @@ def _return_not_ready(
             EV_STOPPED,
             item_id,
             step="return",
+            tracker=tracker.name,
             key=ticket.key,
+            revision=ticket.revision,
             reason=exc.reason,
             detail=exc.detail,
             state=return_state,

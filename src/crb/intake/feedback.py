@@ -16,7 +16,7 @@ Before any money is spent, the ticket learns three things in its own thread:
 4. **What the product will and will not do to the ticket.** One comment, one label, and
    at most the one state transition the deployment configured — and, only where the
    deployment names a return state (ADR-0056), a ticket with open questions is moved back
-   to it, which the comment then says in one sentence.
+   to it, which the comment then says in one sentence, as an attempt.
 
 The renderer is pure and deterministic: the same draft, readiness and route render the
 same bytes, which is what makes a re-post a no-op (:func:`crb.intake.client.marker_for`
@@ -444,8 +444,8 @@ def render_feedback(
     if returns_to and label == LABEL_NEEDS_INFO:
         body += [
             "",
-            f"Because questions are open, this ticket is moved back to “{returns_to}”. "
-            "Answer them here and move it into the watched column again.",
+            f"Because questions are open, crb will try to move this ticket back to "
+            f"“{returns_to}”. Answer them here and move it into the watched column again.",
         ]
     return Feedback(
         text="\n".join(body).rstrip() + "\n",

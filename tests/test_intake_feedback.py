@@ -441,7 +441,7 @@ def test_an_unset_return_state_renders_the_same_bytes() -> None:
 
 
 def test_a_set_return_state_says_where_the_ticket_goes_only_when_it_needs_info() -> None:
-    sentence = "Because questions are open, this ticket is moved back to “New”."
+    sentence = "Because questions are open, crb will try to move this ticket back to “New”."
     for ticket, readers in _three_labels():
         f = _render_returning(ticket, readers, "New")
         if f.label == c.LABEL_NEEDS_INFO:
@@ -449,7 +449,7 @@ def test_a_set_return_state_says_where_the_ticket_goes_only_when_it_needs_info()
             assert "move it into the watched column again" in f.text
             assert f.text.endswith("watched column again.\n")
         else:
-            assert "moved back" not in f.text
+            assert "try to move" not in f.text
             assert f.text == _render(ticket, _deliver_route(), readers=readers).text
         # the sentence about the merge's one configured state change is untouched
         assert "one state change when the pull request is merged" in f.text.lower()

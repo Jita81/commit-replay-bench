@@ -1732,7 +1732,7 @@ def test_a_needs_info_ticket_is_commented_labelled_then_moved_back(home: Factory
     assert _verbs(tracker)[-4:] == ["comment", "label", "read", "transition"]
     assert tracker.states["4711"] == "New"
     text = tracker.comments["4711"][c.marker_for("fake", "4711")]
-    assert "response_shape" in text and "moved back to “New”" in text
+    assert "response_shape" in text and "try to move this ticket back to “New”" in text
     assert tracker.labels["4711"] == c.LABEL_NEEDS_INFO
     (moved,) = _returns(home)
     assert moved.payload["from_state"] == "Ready" and moved.payload["state"] == "New"
@@ -1767,7 +1767,7 @@ def test_a_ticket_no_longer_in_the_watched_column_is_not_moved(state: str, tmp_p
     _poll(home, tracker, route=_deliver(), return_state="New")
     assert "transition" not in _verbs(tracker) and _returns(home) == []
     text = tracker.comments["4711"][c.marker_for("fake", "4711")]
-    assert "moved back" not in text  # the comment never promises a move it will not make
+    assert "try to move" not in text  # the comment never promises a move it will not make
 
 
 def _refuse_the_return(verb: str, what: str) -> c.TrackerError | None:
@@ -1829,7 +1829,7 @@ def test_a_ready_or_queued_ticket_is_never_moved_back(home: FactoryHome) -> None
     second = _poll(home, tracker, route=_deliver(), return_state="New")
     assert second.rows[0].label == c.LABEL_NEEDS_INFO
     assert "transition" not in _verbs(tracker) and _returns(home) == []
-    assert "moved back" not in tracker.comments["4711"][c.marker_for("fake", "4711")]
+    assert "try to move" not in tracker.comments["4711"][c.marker_for("fake", "4711")]
 
 
 def test_a_budget_that_runs_out_before_the_return_starts_no_move_and_says_so(
@@ -1892,6 +1892,76 @@ def test_a_refused_return_is_final_at_its_revision_and_marks_nothing_pending(
     assert "return_pending" not in read.payload and "return_skipped" not in read.payload
 
 
+def test_a_forced_re_post_tries_a_refused_return_again(home: FactoryHome) -> None:
+    """Review finding: a refusal is final on the timer's passes, but *Post the feedback
+    again* (``force``) is an operator asking for the move again, so it is tried."""
+    tracker = _tracker(_gappy())
+    tracker.fail_when = _refuse_the_return
+    _poll(home, tracker, route=_deliver(), return_state="New")
+    assert _returns(home) == []
+
+    tracker.fail_when = None  # the operator fixed the workflow
+    report = _poll(home, tracker, route=_deliver(), return_state="New", force=True)
+    assert tracker.states["4711"] == "New"
+    (moved,) = _returns(home)
+    assert moved.payload["revision"] == "1"
+    assert not report.rows[0].stopped
+
+
+def test_a_lost_cache_after_a_refused_return_rebuilds_the_row_without_moving(
+    home: FactoryHome,
+) -> None:
+    """Review finding: a deleted intake-state.json makes the next pass read the ticket again
+    to rebuild its row. The refusal on the chain is still final at that revision, so the
+    move is not tried a second time, and the row says what the refused pass said."""
+    tracker = _tracker(_gappy())
+    attempts: list[str] = []
+
+    def refuse(verb: str, what: str) -> c.TrackerError | None:
+        if verb != "transition":
+            return None
+        attempts.append(what)
+        return c.TrackerError(c.REASON_REFUSED, "no")
+
+    tracker.fail_when = refuse
+    _poll(home, tracker, route=_deliver(), return_state="New")
+    comment = dict(tracker.comments["4711"])
+    sv.store_for(home).path.unlink()
+
+    report = _poll(home, tracker, route=_deliver(), return_state="New")
+    assert attempts == ["4711"]  # one transition call in all
+    assert tracker.comments["4711"] == comment  # the same words, no rewrite
+    (row,) = report.rows
+    assert row.stopped == c.REASON_REFUSED and row.stopped_advice == sv.RETURN_STOP_ADVICE
+    assert "try to move this ticket back to “New”" in row.feedback
+
+
+def test_a_ticket_edited_before_the_return_is_assessed_again_not_moved(
+    home: FactoryHome,
+) -> None:
+    """Review finding: the read just before the move kept only the state. A person who
+    edits the ticket's content while its comment and label are written has changed what
+    was assessed, so nothing moves and the revision is left for the next pass."""
+    tracker = _tracker(_gappy())
+
+    def edit_it(verb: str, what: str) -> c.TrackerError | None:
+        if verb == "label" and tracker.tickets["4711"].title != "Edited":
+            tracker.tickets["4711"] = dataclasses.replace(tracker.tickets["4711"], title="Edited")
+        return None
+
+    tracker.fail_when = edit_it
+    _poll(home, tracker, route=_deliver(), return_state="New")
+    assert "transition" not in _verbs(tracker) and _returns(home) == []
+    (read,) = [e for e in home.events() if e.kind == sv.EV_READ]
+    assert read.payload["return_pending"] is True and read.payload["content_changed"] is True
+
+    # the revision is not finished with, so the next pass assesses the edited ticket
+    tracker.fail_when = None
+    second = _poll(home, tracker, route=_deliver(), return_state="New")
+    assert second.skipped == 0 and second.rows[0].title == "Edited"
+    assert tracker.states["4711"] == "New" and len(_returns(home)) == 1
+
+
 def test_a_person_who_moves_the_ticket_first_is_not_overwritten(home: FactoryHome) -> None:
     """Review finding: the move came several tracker calls after the read. A person who
     drags the ticket to "In Progress" while the comment and label are written keeps their
@@ -1909,9 +1979,9 @@ def test_a_person_who_moves_the_ticket_first_is_not_overwritten(home: FactoryHom
     assert "transition" not in _verbs(tracker) and _returns(home) == []
     assert tracker.tickets["4711"].state == "In Progress"
     text = tracker.comments["4711"][c.marker_for("fake", "4711")]
-    assert "response_shape" in text and "moved back" not in text
+    assert "response_shape" in text and "try to move" not in text
     (row,) = report.rows
-    assert row.state == "In Progress" and not row.stopped and "moved back" not in row.feedback
+    assert row.state == "In Progress" and not row.stopped and "try to move" not in row.feedback
     (read,) = [e for e in home.events() if e.kind == sv.EV_READ]
     assert read.payload["return_skipped"] is True
     assert read.payload["state_now"] == "In Progress"
@@ -1937,7 +2007,7 @@ def test_a_column_that_is_the_return_state_moves_nothing(home: FactoryHome) -> N
     tracker = _tracker(_gappy(state="New"))
     _poll(home, tracker, route=_deliver(), column="New", return_state="New")
     assert "transition" not in _verbs(tracker) and _returns(home) == []
-    assert "moved back" not in tracker.comments["4711"][c.marker_for("fake", "4711")]
+    assert "try to move" not in tracker.comments["4711"][c.marker_for("fake", "4711")]
 
 
 def test_the_watched_column_is_matched_as_the_tracker_matches_it(home: FactoryHome) -> None:

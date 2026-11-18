@@ -33,16 +33,24 @@ next move is theirs, which means the ticket going back a column.
    with the existing `read` and `transition` verbs. The six verbs stay six. If the read again
    finds the ticket has left the watched column (a person moved it), there is no move: their
    move stands, `intake.read` carries `return_skipped: true` and `state_now`, and the comment
-   is written again without the sentence about the return.
+   is written again without the sentence about the return. If the read again finds the
+   ticket's own content changed (title, description, acceptance criteria, type, points or
+   classifier tags; not the product's label or comment), there is no move either:
+   `intake.read` carries `return_pending: true` and `content_changed: true`, so the next pass
+   assesses the ticket as it now reads.
 4. A move is `intake.transitioned` with `outcome` = `returned`, `from_state` and `revision`.
    A failed move is `intake.stopped` with `step` = `return`. The comment and label stay and
-   the row shows the stop. A refusal (`refused`) is final at that revision; it is tried again
-   only when the ticket changes. Any other failure (the tracker did not answer, the pass ran
+   the row shows the stop; the stop carries `tracker` and `revision`. A refusal (`refused`) is
+   final at that revision for every normal pass, including a pass that rebuilds a served row
+   the cache lost: that pass reads the refusal from the chain, rebuilds the comment and the
+   row, and makes no move. It is tried again when the ticket changes, or when an operator
+   forces *Post the feedback again*. Any other failure (the tracker did not answer, the pass ran
    out of time, the lease went) leaves `return_pending: true` on `intake.read`, so the next
    pass tries the move again at the same revision.
-5. The comment says so: when a move will be attempted, one sentence names the state the
-   ticket goes back to and asks for it to be moved into the watched column again. A re-post
-   at a revision already returned keeps the sentence, so the comment's bytes do not change.
+5. The comment says so: when a move is due, one sentence says the product will try to move
+   the ticket back to the named state and asks for it to be moved into the watched column
+   again. A re-post at a revision already returned, or refused, keeps the sentence, so the
+   comment's bytes do not change.
 6. Start-up refuses a return state equal to the watched column or to any `outcome_map` state.
    Switching a repository's listener on to a column equal to the return state is refused
    (`intake_column_is_return_state`). A listener switched on to that column before the
@@ -62,7 +70,8 @@ next move is theirs, which means the ticket going back a column.
   return.
 
 Everything else in ADR-0017 stands, including "Force a workflow transition the tracker
-refused": a refused return is recorded, never forced or retried with another state.
+refused": a refused return is recorded, never forced through the workflow or retried with
+another state. Trying the same move again on an operator's request is not forcing it.
 
 ## Consequences
 
@@ -73,8 +82,11 @@ sets nothing.
 who moves the ticket forward without answering gets it back again. People bound this,
 not the product. On both trackers the product's own label write moves the revision (Azure
 DevOps `System.Rev`, Jira `updated`), so a refused return is tried once more on the next
-poll, and then not again until a person changes the ticket. A return costs one more read:
-two Azure DevOps requests or three Jira ones.
+poll, and then not again until a person changes the ticket or an operator posts the
+feedback again. A return costs two Azure DevOps requests (the read again, then one PATCH of
+the state) or three Jira ones (the read again, a list of the transitions on offer, then the
+POST of the one that lands on the state) **[hypothesis — counted from the adapters' `read`
+and `transition` code in `src/crb/intake/`, not measured against a live tracker]**.
 
 *Gaps.* The product cannot check that the named state is earlier in the team's workflow
 (only that it is not the watched column or an outcome state). A repository that overrides the
@@ -82,10 +94,10 @@ watched column shares the deployment's return state. Azure DevOps board columns 
 state cannot be addressed. A person who moves the ticket in the moment between the read
 again and the move is still overwritten: closing that needs a conditional write (Azure
 DevOps's `test` operation on `System.Rev`), which would change the `transition` verb. The
-comment says the ticket is moved back before the move is made; when the tracker refuses it
-the comment is not written again, because a comment edit moves the revision and the
-product would then try, refuse and edit again on every pass. The served row and the chain
-carry the stop, and an operator acts on it.
+comment says the product will try to move the ticket back before the move is made; when the
+tracker refuses it the comment is not written again, because a comment edit moves the
+revision and the product would then try, refuse and edit again on every pass. The served
+row and the chain carry the stop, and an operator acts on it.
 
 ## Alternatives considered
 

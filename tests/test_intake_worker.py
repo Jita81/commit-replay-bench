@@ -495,7 +495,9 @@ def test_a_configured_return_state_moves_a_gappy_ticket_off_the_watched_column(
     ticket = _board_ticket(stack)
     assert ticket["state"] == "New"
     assert c.LABEL_NEEDS_INFO in ticket["tags"]
-    assert "moved back to “New”" in ticket["comments"][c.marker_for("fake", "4711")]
+    assert (
+        "try to move this ticket back to “New”" in ticket["comments"][c.marker_for("fake", "4711")]
+    )
     # it has left the column, so the next timed pass does not read it at all
     stack.worker.poll_intake(now=2000.0)
     assert IntakeStore(stack.home, "alpha").last_poll()["seen"] == 0  # type: ignore[index]
@@ -520,7 +522,7 @@ def test_no_ticket_is_moved_back_while_another_repository_listens_on_the_return_
 
     ticket = _board_ticket(stack)
     assert ticket["state"] == "Ready" and c.LABEL_NEEDS_INFO in ticket["tags"]
-    assert "moved back" not in ticket["comments"][c.marker_for("fake", "4711")]
+    assert "try to move" not in ticket["comments"][c.marker_for("fake", "4711")]
     home = FactoryHome(stack.home, "alpha")
     assert [e for e in home.events() if e.kind == "intake.transitioned"] == []
 
@@ -532,7 +534,7 @@ def test_the_default_settings_move_no_gappy_ticket(tmp_path: Path) -> None:
     stack.worker.poll_intake()
     ticket = _board_ticket(stack)
     assert ticket["state"] == "Ready" and c.LABEL_NEEDS_INFO in ticket["tags"]
-    assert "moved back" not in ticket["comments"][c.marker_for("fake", "4711")]
+    assert "try to move" not in ticket["comments"][c.marker_for("fake", "4711")]
 
 
 def test_a_return_state_that_names_the_watched_column_or_an_outcome_state_is_refused_at_start_up() -> (
