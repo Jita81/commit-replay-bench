@@ -80,6 +80,7 @@ export const ADR_TITLES: ReadonlyArray<readonly [string, string]> = [
   ['0056', 'A ticket with open questions goes back to a state the team names'],
   ['0057', 'Azure Repos pull request delivery, attached to the Azure DevOps ticket'],
   ['0058', 'Mapping quote: a read-only price, time and precision for a first mapping'],
+  ['0059', 'A gap probe asks what the build guessed'],
 ]
 
 /** `ADR-0015` — the name a record carries in the /help/docs route. */

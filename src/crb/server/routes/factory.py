@@ -159,6 +159,7 @@ from crb.server.intake import (
     IntakeStore,
     ListenerState,
     build_tracker,
+    gap_probe_for,
     intake_lease,
     item_url_for,
     needs_credential,
@@ -1985,6 +1986,8 @@ def poll_intake(  # noqa: PLR0917 — FastAPI dependencies + body
         return_state=return_state_for(settings.intake.return_state, db, settings.intake.column),
         # the SAME store-bound entry-gate readers the worker's timed poll binds
         gate=_readers(db, settings, repo),
+        # ADR-0059: None (off) unless CRB_INTAKE__GAP_PROBE
+        gap_probe=gap_probe_for(settings, factory, repo),
     )
     if report.busy:
         raise ApiError(
@@ -2021,6 +2024,10 @@ _REGISTER_REFUSALS = {
     "intake_busy",
     "factory_run_active",
     "register_refused",
+    # ADR-0059: the gap probe is running, failed, or asked questions at this content
+    "gap_probe_pending",
+    "gap_probe_failed",
+    "gap_probe_questions",
 }
 
 
@@ -2067,6 +2074,7 @@ def register_intake_ticket(
             approver_name=approver_name,
             run_active=lambda: _active_factory_run(db, repo) is not None,
             lease=intake_lease(factory, repo, ttl_s=2 * budget_s + 60),
+            gap_probe=gap_probe_for(settings, factory, repo),
         )
     except ApprovalRefused as exc:
         if exc.code == REASON_NO_PUBLIC_URL:  # the service's own guard behind the route's

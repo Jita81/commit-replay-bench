@@ -149,6 +149,13 @@ EV_INTAKE_STOPPED = "intake.stopped"
 #: A ready ticket drafted and WAITING for an operator's Register act (ADR-0022): the draft
 #: item, the ticket's revision and author — what the act registers, bound to what was read.
 EV_INTAKE_AWAITING = "intake.awaiting_approval"
+#: ADR-0059 — an approved ready ticket is built ONCE, unseen and undelivered, to find the
+#: decisions it left open: the probe was asked for (who approved it, the run, the content
+#: digest), it finished (the questions it raised, its cost) or it failed (why). Keyed on the
+#: content digest, never the tracker's revision, which this product's own writes move.
+EV_INTAKE_GAP_PROBE_REQUESTED = "intake.gap_probe.requested"
+EV_INTAKE_GAP_PROBE_FINISHED = "intake.gap_probe.finished"
+EV_INTAKE_GAP_PROBE_FAILED = "intake.gap_probe.failed"
 INTAKE_EVENT_KINDS: tuple[str, ...] = (
     EV_INTAKE_POLLED,
     EV_INTAKE_READ,
@@ -159,6 +166,9 @@ INTAKE_EVENT_KINDS: tuple[str, ...] = (
     EV_INTAKE_TRANSITIONED,
     EV_INTAKE_STOPPED,
     EV_INTAKE_AWAITING,
+    EV_INTAKE_GAP_PROBE_REQUESTED,
+    EV_INTAKE_GAP_PROBE_FINISHED,
+    EV_INTAKE_GAP_PROBE_FAILED,
 )
 EVENT_KINDS: tuple[str, ...] = (
     EV_BACKLOG_FROZEN,

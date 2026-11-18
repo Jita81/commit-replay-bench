@@ -181,6 +181,7 @@ from crb.core.execution import (
 from crb.core.ledger import AUTH_REFUSED
 from crb.core.redact import redact_and_cap
 from crb.core.secrets_file import SecretsError, SecretsInsecure, SecretsStore, fingerprint
+from crb.core.stated import GAP_DECISIONS
 from crb.core.workspace import Workspace
 
 #: The census's measured path (quality-floor essay): Sonnet 5 through the agentic CLI.
@@ -313,6 +314,39 @@ OUTPUT_SCHEMA: dict[str, Any] = {
     },
     "required": ["done", "summary"],
 }
+
+#: ADR-0059 — the gap probe's schema: :data:`OUTPUT_SCHEMA` plus the decisions the ticket left
+#: open that the build had to guess. Only a builder made with ``gap_probe=True`` sends it, so
+#: every other build's ``--json-schema`` is byte-for-byte what it was.
+GAP_PROBE_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        **OUTPUT_SCHEMA["properties"],
+        "assumptions": {
+            "type": "array",
+            "description": "each decision the ticket left open that you had to guess",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "decision": {"type": "string", "enum": sorted(GAP_DECISIONS)},
+                    "question": {
+                        "type": "string",
+                        "description": "one line: the question the ticket's author should answer",
+                    },
+                    "guessed": {"type": "string", "description": "what you chose"},
+                },
+                "required": ["decision", "question", "guessed"],
+            },
+        },
+    },
+    "required": ["done", "summary", "assumptions"],
+}
+
+#: The gap probe's one added system rule (ADR-0059).
+GAP_PROBE_RULE = (
+    "Wherever the ticket left a decision open (name, signature, error text, format, rule, "
+    "value), record it in assumptions."
+)
 
 #: Environment passed to the CLI. Nothing else from the operator's shell leaks in.
 _ENV_PASSTHROUGH: tuple[str, ...] = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TERM", "TZ")
@@ -990,13 +1024,16 @@ class ClaudeCodeBuilder:
         keep_transcript: bool = False,
         extra_args: tuple[str, ...] | list[str] = (),
         workdir_alias: str = "",
+        gap_probe: bool = False,
     ) -> None:
         """``model`` / ``auth`` resolve explicit value → worker environment
         (:data:`MODEL_ENV` / :data:`AUTH_ENV`) → :data:`DEFAULT_MODEL` / ``api_key``.
         ``bare`` defaults to ``True`` under ``auth="api_key"`` and to ``False`` under
         ``auth="cli"`` (``--bare`` forces API-key auth, so the two cannot combine).
         ``workdir_alias`` is set by the sealed-container path (:mod:`crb.builders.container`):
-        the worktree's path inside the container, translated back for the guards."""
+        the worktree's path inside the container, translated back for the guards.
+        ``gap_probe`` (ADR-0059, off by default): ask for the ``assumptions`` the build made
+        and return them in ``BuildOutcome.extra["assumptions"]``."""
         model = model.strip() or default_model()
         auth_source = "explicit" if auth else AUTH_ENV
         auth = auth.strip() or default_auth()
@@ -1027,6 +1064,7 @@ class ClaudeCodeBuilder:
         self.keep_transcript = keep_transcript
         self.extra_args = tuple(str(a) for a in extra_args)
         self.workdir_alias = workdir_alias.rstrip("/")
+        self.gap_probe = bool(gap_probe)
 
     def describe(self) -> dict[str, Any]:
         """The apparatus stamp: model, tool set, effort, ``bare``/``auth`` posture, and the
@@ -1048,6 +1086,8 @@ class ClaudeCodeBuilder:
             d["extra_args"] = list(self.extra_args)
         if self.claude_binary:
             d["claude_binary"] = self.claude_binary
+        if self.gap_probe:
+            d["gap_probe"] = True
         return d
 
     def _binary(self) -> str:
@@ -1083,9 +1123,16 @@ class ClaudeCodeBuilder:
             "--disallowedTools",
             ",".join(DENY_RULES),
             "--append-system-prompt",
-            system_rules(budget, sighted=brief.sighted),
+            (
+                f"{system_rules(budget, sighted=brief.sighted)}\n{GAP_PROBE_RULE}"
+                if self.gap_probe
+                else system_rules(budget, sighted=brief.sighted)
+            ),
             "--json-schema",
-            json.dumps(OUTPUT_SCHEMA, separators=(",", ":")),
+            json.dumps(
+                GAP_PROBE_OUTPUT_SCHEMA if self.gap_probe else OUTPUT_SCHEMA,
+                separators=(",", ":"),
+            ),
             "--no-session-persistence",
             "--disable-slash-commands",
         ]
@@ -1315,6 +1362,14 @@ class ClaudeCodeBuilder:
             "returncode": rc,
             "api_retries": stats.api_retries[:20],
         }
+        if self.gap_probe:
+            so = (stats.result or {}).get("structured_output")
+            raw = so.get("assumptions") if isinstance(so, dict) else None
+            # untrusted: the probe's reader (crb.intake.gap_probe.parse_guesses) filters it.
+            # Set ONLY when the build answered: a stream with no structured answer has no
+            # key, so the worker reads it as a failed probe, never as "no questions"
+            if isinstance(raw, list):
+                extra["assumptions"] = list(raw)
         return finish(done=done and stop == STOP_DONE, summary=summary, stop=stop, extra=extra)
 
 
@@ -1624,6 +1679,8 @@ __all__ = [
     "DEFAULT_MODEL",
     "DENY_RULES",
     "FULL_TOOLS",
+    "GAP_PROBE_OUTPUT_SCHEMA",
+    "GAP_PROBE_RULE",
     "KNOWN_MODELS",
     "MODEL_ENV",
     "OUTPUT_SCHEMA",

@@ -92,6 +92,9 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from crb.builders.budget import parse_rung
+from crb.core.stated import MAX_GAPS
+from crb.intake.gap_probe import GAP_PROBE_BUILDER
 from crb.provision.config import (
     DEFAULT_GO_IMAGE,
     DEFAULT_NODE_IMAGE,
@@ -704,6 +707,21 @@ class IntakeSettings(BaseModel):
     #: JSON list (``CRB_INTAKE__APPROVE_AUTHORS='["ada@contoso.com"]'``); compared
     #: case-insensitively; recorded as ``approved_by: allowlist:<author>``.
     approve_authors: list[str] = Field(default_factory=list)
+    #: ADR-0059 — before an approved ready ticket is registered, build it ONCE (unseen,
+    #: undelivered, worktree discarded) and post the decisions the builder had to guess as
+    #: questions. OFF BY DEFAULT: it spends model budget on every approved ticket. Start-up
+    #: refuses it without ``gap_probe_rung``, on a builder other than ``claude_code`` (the
+    #: only one that reports its guesses), and with ``require_approval`` off (every probe
+    #: is then spent by nobody's act).
+    gap_probe: bool = False
+    #: The most questions one probe posts (1..10, never more than a context set's gap cap).
+    gap_probe_max_questions: int = Field(default=5, ge=1, le=10)
+    #: The probe build's own spend cap; a probe whose cost is unknown counts as failed.
+    #: Bounded as a run's ``max_cost_usd`` is, at the builder's four-decimal precision, so a
+    #: cap no probe run could be queued under is refused at start-up.
+    gap_probe_max_cost_usd: float = Field(default=2.0, ge=0.0001, le=1_000_000)
+    #: The rung that probes, ``claude_code:<model>``; empty while the probe is off.
+    gap_probe_rung: str = ""
 
     @property
     def enabled(self) -> bool:
@@ -756,6 +774,39 @@ class IntakeSettings(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _gap_probe_is_complete(self) -> IntakeSettings:
+        # ADR-0059: a probe that cannot report its guesses would pass every ticket (a
+        # silent k=0), and one nobody approves spends with no human act — both refused
+        rung = self.gap_probe_rung.strip()
+        self.gap_probe_rung = rung
+        if self.gap_probe_max_questions > MAX_GAPS:
+            raise ValueError(f"gap_probe_max_questions cannot exceed {MAX_GAPS}")
+        if rung:
+            # one canonical label, so the run queued and the gate it meets read the rung
+            # this check read (parse_rung strips each part; a reader that splits does not)
+            parsed = parse_rung(rung)
+            rung = f"{parsed.builder}:{parsed.model}" + (
+                f"@{parsed.provider}" if parsed.provider else ""
+            )
+            self.gap_probe_rung = rung
+            builder = parsed.builder
+            if builder != GAP_PROBE_BUILDER:
+                raise ValueError(
+                    f"gap_probe_rung {rung!r} names builder {builder!r}; only "
+                    f"{GAP_PROBE_BUILDER} reports the decisions it guessed"
+                )
+        if not self.gap_probe:
+            return self
+        if not rung:
+            raise ValueError("gap_probe is on but gap_probe_rung is empty")
+        if not self.require_approval:
+            raise ValueError(
+                "gap_probe needs require_approval: an unattended probe spends on every "
+                "ready ticket with no person's act"
+            )
+        return self
+
     def redacted(self) -> dict[str, Any]:
         """What ``/settings`` may show. There is no secret in this model, but the shape
         matches ``BuilderSettings.redacted`` so a reader treats them alike."""
@@ -776,6 +827,10 @@ class IntakeSettings(BaseModel):
             "return_state": self.return_state,
             "require_approval": self.require_approval,
             "approve_authors": list(self.approve_authors),
+            "gap_probe": self.gap_probe,
+            "gap_probe_max_questions": self.gap_probe_max_questions,
+            "gap_probe_max_cost_usd": self.gap_probe_max_cost_usd,
+            "gap_probe_rung": self.gap_probe_rung,
             "enabled": self.enabled,
         }
 

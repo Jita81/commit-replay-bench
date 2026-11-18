@@ -91,6 +91,7 @@ Touch when:   never for a new repository (a board is linked in the repository's 
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import secrets
@@ -103,17 +104,20 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.evidence import utc_now_iso
+from crb.core.grade import MODE_BLIND
 from crb.core.spec import SIZE_TIER_NAMES
 from crb.factory.backlog import BacklogItem
 from crb.factory.evidence import (
     EV_INTAKE_AWAITING,
     EV_INTAKE_DELIVERED,
     EV_INTAKE_FEEDBACK,
+    EV_INTAKE_GAP_PROBE_FAILED,
+    EV_INTAKE_GAP_PROBE_REQUESTED,
     EV_INTAKE_POLLED,
     EV_INTAKE_QUEUED,
     EV_INTAKE_READ,
@@ -154,9 +158,23 @@ from crb.intake.feedback import (
     render_queued,
     render_refusal,
 )
+from crb.intake.gap_probe import (
+    NO_PROBE,
+    STATE_DONE,
+    STATE_FAILED,
+    STATE_NONE,
+    STATE_PENDING,
+    ProbeState,
+    probe_brief,
+    probe_state,
+    unresolved_request,
+)
 from crb.intake.jira import JiraConfig, JiraTracker
 from crb.server.factory_state import FactoryHome
-from crb.store.models import LEASE_ROW_PREFIX, Repo, WorkerRow
+from crb.server.routes.runs import submit_refusals
+from crb.server.schemas import RunCreateRequest
+from crb.store.jobs import KIND_GAP_PROBE, TERMINAL_STATUSES, JobQueue
+from crb.store.models import LEASE_ROW_PREFIX, Repo, Run, WorkerRow
 
 log = logging.getLogger("crb.server.intake")
 
@@ -172,6 +190,8 @@ EV_DELIVERED = EV_INTAKE_DELIVERED
 EV_TRANSITIONED = EV_INTAKE_TRANSITIONED
 EV_STOPPED = EV_INTAKE_STOPPED
 EV_AWAITING = EV_INTAKE_AWAITING
+EV_GAP_PROBE_REQUESTED = EV_INTAKE_GAP_PROBE_REQUESTED
+EV_GAP_PROBE_FAILED = EV_INTAKE_GAP_PROBE_FAILED
 INTAKE_EVENTS: tuple[str, ...] = INTAKE_EVENT_KINDS
 
 #: The bounds a pass is run with when a caller names none. They are the SETTINGS' defaults
@@ -204,6 +224,126 @@ RETURN_STOP_ADVICE = (
     "again when the ticket next changes, or with Post the feedback again. If the tracker "
     "refused, check that its workflow allows that move from the watched column."
 )
+
+#: ADR-0059 — what a row says while its gap probe runs, and once it failed. A failed probe
+#: is final at the ticket's content: nothing is registered, and only an edit to the ticket
+#: (a new content) asks for another probe.
+REASON_GAP_PROBE_PENDING = "gap_probe_pending"
+REASON_GAP_PROBE_FAILED = "gap_probe_failed"
+GAP_PROBE_PENDING_ADVICE = (
+    "A trial build of this ticket is running to find what it leaves open. The next pass "
+    "reads its result: questions go on the ticket, or the ticket is registered."
+)
+GAP_PROBE_FAILED_ADVICE = (
+    "The trial build of this ticket did not finish, so nothing was registered. Edit the "
+    "ticket to ask for another trial build, or switch the gap probe off and use Post the "
+    "feedback again (then Register it, if it waits for approval)."
+)
+
+
+@dataclass(frozen=True)
+class GapProbe:
+    """The gap probe's seams (ADR-0059): queue one probe run for a request, and read a
+    run's status (``None`` when it does not exist). ``None`` in place of this object is the
+    probe switched off, and the poll and the Register act behave exactly as without it."""
+
+    enqueue: Callable[[Mapping[str, Any]], str]
+    run_status: Callable[[str], str | None]
+    max_questions: int = 5
+    #: cancel a queued probe run whose request could not be recorded, so a pass that then
+    #: finds no request never leaves a second paid probe running beside the first
+    cancel: Callable[[str], None] | None = None
+
+
+def gap_probe_for(settings: Any, sessions: sessionmaker[Session], repo: str) -> GapProbe | None:
+    """The deployment's gap probe for ``repo``, or ``None`` while ``CRB_INTAKE__GAP_PROBE`` is
+    off. The worker's timed poll, the poll route and the Register act all build it here, so
+    the run they queue is one shape: kind ``gap_probe`` (never client-creatable), blind,
+    on the configured rung, with the configured spend cap. Before it is queued the run
+    meets ``submit_refusals``, the one gate ``POST /runs`` applies (P-160): a probe whose
+    builder has no credential or whose model has no price is refused, never queued."""
+    intake: Any = getattr(settings, "intake", None)
+    if intake is None or not bool(getattr(intake, "gap_probe", False)):
+        return None
+    queue = JobQueue(sessions)
+    rung_label = str(intake.gap_probe_rung)
+    builder, _, rest = rung_label.partition(":")
+    model, _, provider = rest.partition("@")
+
+    def live_probe(request: Mapping[str, Any]) -> str:
+        # a run queued for this ticket's content whose request never reached the chain (the
+        # process died between the two writes): reused, so no pass queues a second paid probe.
+        # One that already ran to its end is reused too (the request then names a run with no
+        # result after it, which fails closed); only a run cancelled before it started is not
+        same = ("tracker", "key", "content_revision")
+        with sessions() as db:
+            for run in db.scalars(
+                select(Run).where(
+                    Run.repo == repo,
+                    Run.kind == KIND_GAP_PROBE,
+                    or_(Run.status.not_in(TERMINAL_STATUSES), Run.started != ""),
+                )
+            ):
+                params = dict(run.params_json or {})
+                if all(str(params.get(k, "")) == str(request.get(k, "")) for k in same):
+                    return str(run.id)
+        return ""
+
+    def enqueue(request: Mapping[str, Any]) -> str:
+        existing = live_probe(request)
+        if existing:
+            return existing
+        params = {
+            **dict(request),
+            "rung": rung_label,
+            "max_cost_usd": float(intake.gap_probe_max_cost_usd),
+        }
+        run = Run(
+            repo=repo,
+            kind=KIND_GAP_PROBE,
+            mode=MODE_BLIND,
+            builder=builder,
+            model=model,
+            provider=provider,
+            ladder_json=[rung_label],
+            params_json=params,
+            actor=str(request.get("approved_by", "")) or "intake",
+        )
+        # the gate POST /runs applies, on the blind build this run is (the kind itself is
+        # not client-creatable, so the gate reads it as the blind build it runs)
+        body = RunCreateRequest(
+            repo=repo,
+            kind=MODE_BLIND,
+            mode=MODE_BLIND,
+            builder=builder,
+            model=model,
+            provider=provider,
+            ladder=[rung_label],
+            max_cost_usd=float(intake.gap_probe_max_cost_usd),
+        )
+        gate_run = Run(
+            repo=repo,
+            kind=MODE_BLIND,
+            mode=MODE_BLIND,
+            builder=builder,
+            model=model,
+            provider=provider,
+            ladder_json=[rung_label],
+            params_json=params,
+        )
+        with sessions() as db:
+            submit_refusals(db, settings, body, gate_run)
+        return str(queue.enqueue(run).id)
+
+    def run_status(run_id: str) -> str | None:
+        run = queue.get(run_id) if run_id else None
+        return None if run is None else str(run.status)
+
+    def cancel(run_id: str) -> None:
+        queue.request_cancel(run_id, actor="intake")
+
+    return GapProbe(enqueue, run_status, int(intake.gap_probe_max_questions), cancel)
+
 
 #: The advice on a row whose return did not happen for a reason that passes (the tracker
 #: did not answer, the pass ran out of time, another pass took the repository over). The
@@ -656,7 +796,9 @@ def _read_events(home: FactoryHome) -> list[Any]:
     return [e for e in home.events() if e.kind in INTAKE_EVENTS]
 
 
-def already_handled(events: Sequence[Any], tracker: str, key: str, revision: str) -> bool:
+def already_handled(
+    events: Sequence[Any], tracker: str, key: str, revision: str, *, probing: bool = False
+) -> bool:
     """Has this exact ticket revision already been read AND finished with?
 
     "Finished with" means the poll either registered it or decided it was not ready.
@@ -664,7 +806,13 @@ def already_handled(events: Sequence[Any], tracker: str, key: str, revision: str
     poll picks it up — that is how a queued registration is never lost. Nor is one whose
     move back (ADR-0056) failed for a reason that passes (``return_pending``): only a
     refusal is final at its revision.
+
+    With the gap probe on (``probing``, ADR-0059), a ticket whose latest probe request has not
+    been acted on is not finished with either, at any revision: the Register act asks for a
+    probe without writing a read, and the poll must still act on its result.
     """
+    if probing and unresolved_request(events, tracker, key):
+        return False
     for e in reversed(list(events)):
         p = e.payload
         if e.kind != EV_READ:
@@ -997,6 +1145,7 @@ def poll_repository(
     lease: IntakeLease | None = None,
     then: Callable[[PollReport, TrackerClient], None] | None = None,
     return_state: str = "",
+    gap_probe: GapProbe | None = None,
 ) -> PollReport:
     """Read the watched column once and do whatever each ticket has earned.
 
@@ -1015,6 +1164,9 @@ def poll_repository(
 
     ``return_state`` (ADR-0056, empty by default) is the state a never-registered ticket
     with open questions is moved back to, once per revision, after its comment and label.
+
+    ``gap_probe`` (ADR-0059, ``None`` — off — by default): an approved ready ticket is built
+    once before it is registered, and what the build had to guess is asked on the ticket.
 
     Never raises: a tracker failure is a :class:`PollReport` with ``stopped`` set and an
     ``intake.stopped`` event on the chain, and the next poll retries. Nothing is
@@ -1073,6 +1225,7 @@ def poll_repository(
             clock=clock,
             approval=approval if approval is not None else ApprovalPolicy(),
             return_state=return_state,
+            gap_probe=gap_probe,
         )
         if fenced is not None and fenced.lost:
             # another pass holds the repository now and writes its own view: this one's rows
@@ -1114,6 +1267,7 @@ def _poll_column(
     require_signed_cell: bool = False,
     classes: Callable[[Draft], Draft] | None = None,
     return_state: str = "",
+    gap_probe: GapProbe | None = None,
 ) -> PollReport:
     """One pass, with no side effect outside the tracker and the chain. See
     :func:`poll_repository`, which is this plus the served view."""
@@ -1198,6 +1352,7 @@ def _poll_column(
             approval=approval,
             column=column,
             return_state=return_state,
+            gap_probe=gap_probe,
         )
         if row is not None:
             report.rows.append(row)
@@ -1310,6 +1465,7 @@ def _handle_ticket(
     classes: Callable[[Draft], Draft] | None = None,
     column: str = "",
     return_state: str = "",
+    gap_probe: GapProbe | None = None,
 ) -> IntakeRow | None:
     """One ticket, end to end. Returns the row to serve, or ``None`` when it was skipped.
 
@@ -1328,10 +1484,16 @@ def _handle_ticket(
     revision; the comment says so only when the move is due (or was made or refused at this
     revision, so a re-post renders the same bytes). A refusal at this revision is final on a
     normal pass, including one that rebuilds a lost cache row; ``force`` tries it again.
+
+    ``gap_probe`` (ADR-0059): an approved ready ticket not yet on the record is probed once
+    per content before it is registered (:func:`_gap_probe_step`); the questions a finished
+    probe raised go in the readiness comment, which then asks for information.
     """
     policy = approval if approval is not None else ApprovalPolicy()
     del actor
-    if not force and already_handled(events, tracker.name, ref.key, ref.revision):
+    if not force and already_handled(
+        events, tracker.name, ref.key, ref.revision, probing=gap_probe is not None
+    ):
         cached = _row_from_state(home, ref)
         if cached is not None:
             report.skipped += 1
@@ -1434,6 +1596,21 @@ def _handle_ticket(
         due and not force and _refused_at(events, tracker.name, ticket.key, ticket.revision)
     )
     will_move = due and not refused_here
+    already_registered = backlog is not None and backlog.get(draft.item.id) is not None
+    # ADR-0059: keyed on the ticket's CONTENT, which this product's own writes never move,
+    # so a probe's comment, label and move cannot ask for another probe
+    probe = (
+        _probe_now(
+            home,
+            events,
+            tracker=tracker.name,
+            key=ticket.key,
+            content=draft.item.labels.get("content_revision", ""),
+            run_status=gap_probe.run_status,
+        )
+        if gap_probe is not None and not already_registered
+        else NO_PROBE
+    )
     feedback = render_feedback(
         draft,
         readiness,
@@ -1441,8 +1618,8 @@ def _handle_ticket(
         cell_route=route,
         arms=arms,
         returns_to=return_state if (due or returned_here) else "",
+        asked=probe.questions,
     )
-    already_registered = backlog is not None and backlog.get(draft.item.id) is not None
     # The label is decided before it is written, not adjusted afterwards: a ticket already
     # on the frozen record is QUEUED, and writing `crb:ready` first and `crb:queued` second
     # would show a reader of the board a state the product had already left behind.
@@ -1536,7 +1713,28 @@ def _handle_ticket(
                 detail=exc.detail,
             )
             row = _stopped(row, exc)
-    elif feedback.ready_to_register and policy.approver_for(ticket.author) is None:
+    elif (
+        feedback.ready_to_register
+        and gap_probe is not None
+        and probe.state != STATE_DONE
+        and not (probe.state == STATE_NONE and policy.approver_for(ticket.author) is None)
+    ):
+        # ADR-0059: approved, ready and not yet probed clean at this content — ask for the
+        # probe, or say it is running, or stop on its failure; nothing is registered here
+        row = _gap_probe_step(
+            draft,
+            probe,
+            gap_probe=gap_probe,
+            tracker=tracker,
+            evidence=evidence,
+            row=row,
+            approved_by=policy.approver_for(ticket.author) or "",
+        )
+    elif (
+        feedback.ready_to_register
+        and policy.approver_for(ticket.author) is None
+        and probe.state != STATE_DONE
+    ):
         # ADR-0022: a ready ticket is a DRAFT until an operator registers it. The draft goes
         # on the chain (what the act will register, bound to this revision and content) and
         # the row says it is waiting; nothing reaches the frozen record from here.
@@ -1556,7 +1754,13 @@ def _handle_ticket(
             report=report,
             row=row,
             check_budget=check_budget,
-            approved_by=policy.approver_for(ticket.author) or "",
+            # a probe that finished clean registers under the approval that asked for it
+            # (the operator's act or the policy): no second approval wait, no second probe
+            approved_by=(
+                probe.approved_by
+                if probe.state == STATE_DONE
+                else policy.approver_for(ticket.author) or ""
+            ),
             label=registered_label,
             not_built=not_built,
         )
@@ -1592,7 +1796,13 @@ def _handle_ticket(
             row = _unsay_the_return(
                 row,
                 render_feedback(
-                    draft, readiness, entry=entry, cell_route=route, arms=arms, returns_to=""
+                    draft,
+                    readiness,
+                    entry=entry,
+                    cell_route=route,
+                    arms=arms,
+                    returns_to="",
+                    asked=probe.questions,
                 ),
                 ticket_key=ticket.key,
                 tracker=tracker,
@@ -1615,6 +1825,13 @@ def _handle_ticket(
         ready=feedback.ready_to_register,
         awaiting_registration=awaiting,
         **return_note,
+        # ADR-0059: the probe state this pass acted on, so a result written during the pass
+        # is not taken as acted on by a read that judged it pending (only with a probe)
+        **(
+            {"gap_probe_run_id": probe.run_id, "gap_probe_state": probe.state}
+            if probe.run_id
+            else {}
+        ),
     )
     return row
 
@@ -1802,6 +2019,139 @@ def _unsay_the_return(
     return replace_row(row, feedback=plain.text)
 
 
+def _probe_now(
+    home: FactoryHome,
+    events: Sequence[Any],
+    *,
+    tracker: str,
+    key: str,
+    content: str,
+    run_status: Callable[[str], str | None],
+) -> ProbeState:
+    """:func:`probe_state` for a pass whose ``events`` were read when it began. The worker
+    writes the probe's result BEFORE it ends the run, so a run seen ended with no result in
+    that copy may have finished during the pass: the chain is read again before the probe
+    is judged dead, and a clean probe is never recorded failed."""
+    probe = probe_state(events, tracker, key, content, run_status)
+    if probe.state == STATE_FAILED and not probe.recorded:
+        probe = probe_state(_read_events(home), tracker, key, content, run_status)
+    return probe
+
+
+def _request_gap_probe(
+    item: BacklogItem,
+    *,
+    key: str,
+    revision: str,
+    content: str,
+    gap_probe: GapProbe,
+    tracker: TrackerClient,
+    evidence: Any,
+    approved_by: str,
+    approved_by_name: str = "",
+) -> str:
+    """Queue ONE probe run for ``item`` at ``content`` and record the request
+    (``intake.gap_probe.requested``, carrying the approval it was spent under). The caller
+    holds the repository's lease and has read the probe state as ``none``, so a second
+    request at the same content is not made."""
+    subject, message = probe_brief(
+        item.title, item.description, item.acceptance_criteria, item.structural_facts
+    )
+    run_id = gap_probe.enqueue(
+        {
+            "tracker": tracker.name,
+            "key": key,
+            "revision": revision,
+            "content_revision": content,
+            "item_id": item.id,
+            "approved_by": approved_by,
+            "subject": subject,
+            "message": message,
+            "max_questions": int(gap_probe.max_questions),
+        }
+    )
+    try:
+        evidence.append(
+            EV_GAP_PROBE_REQUESTED,
+            item.id,
+            tracker=tracker.name,
+            key=key,
+            revision=revision,
+            content_revision=content,
+            approved_by=approved_by,
+            approved_by_name=approved_by_name or approved_by,
+            run_id=run_id,
+        )
+    except BaseException:
+        # the run is queued but the chain does not name it: the next pass would find no
+        # request and queue a second paid probe, so this one is cancelled before it spends
+        if gap_probe.cancel is not None:
+            with contextlib.suppress(Exception):  # the original failure is the one raised
+                gap_probe.cancel(run_id)
+        raise
+    return run_id
+
+
+def _gap_probe_step(
+    draft: Draft,
+    probe: ProbeState,
+    *,
+    gap_probe: GapProbe,
+    tracker: TrackerClient,
+    evidence: Any,
+    row: IntakeRow,
+    approved_by: str,
+) -> IntakeRow:
+    """The poll's half of the gap probe (ADR-0059) for an approved ready ticket whose probe
+    has not finished clean: ``none`` asks for one, ``pending`` says it runs, ``failed``
+    stops the ticket — final at this content, nothing registered and no retry. A run that
+    ended without its result is recorded failed here, once."""
+    content = draft.item.labels.get("content_revision", "")
+    if probe.state == STATE_FAILED:
+        if not probe.recorded:
+            evidence.append(
+                EV_GAP_PROBE_FAILED,
+                draft.item.id,
+                tracker=tracker.name,
+                key=draft.ticket.key,
+                revision=draft.ticket.revision,
+                content_revision=content,
+                run_id=probe.run_id,
+                reason=probe.reason,
+            )
+        return replace_row(
+            row, stopped=REASON_GAP_PROBE_FAILED, stopped_advice=GAP_PROBE_FAILED_ADVICE
+        )
+    if probe.state == STATE_NONE:
+        try:
+            _request_gap_probe(
+                draft.item,
+                key=draft.ticket.key,
+                revision=draft.ticket.revision,
+                content=content,
+                gap_probe=gap_probe,
+                tracker=tracker,
+                evidence=evidence,
+                approved_by=approved_by,
+            )
+        except Exception as exc:  # refused, or queued then cancelled: nothing left to spend
+            evidence.append(
+                EV_STOPPED,
+                draft.item.id,
+                step="gap_probe",
+                key=draft.ticket.key,
+                reason=REASON_REFUSED,
+                detail=str(exc)[:300],
+            )
+            return replace_row(
+                row, stopped=REASON_REFUSED, stopped_advice=STOP_ADVICE[REASON_REFUSED]
+            )
+    assert probe.state in (STATE_NONE, STATE_PENDING)
+    return replace_row(
+        row, stopped=REASON_GAP_PROBE_PENDING, stopped_advice=GAP_PROBE_PENDING_ADVICE
+    )
+
+
 def _register_and_queue(
     draft: Draft,
     *,
@@ -1945,6 +2295,7 @@ def register_approved(
     approver_name: str = "",
     run_active: Callable[[], bool] = lambda: False,
     lease: IntakeLease | None = None,
+    gap_probe: GapProbe | None = None,
 ) -> IntakeRow:
     """The operator's Register act (ADR-0022): register the draft waiting for ticket
     ``key``, as the operator read it at ``revision``.
@@ -1963,6 +2314,13 @@ def register_approved(
     is updated without another poll. ``approver`` is the stable identity recorded as
     ``approved_by`` (the route passes ``operator:<account id>``); ``approver_name`` is the
     human-readable name recorded beside it as ``approved_by_name``.
+
+    With the gap probe on (``gap_probe``, ADR-0059) the act registers only a draft whose
+    probe finished clean at its content. With no probe yet it records the request under this
+    approval, queues one probe run and returns WITHOUT registering — the poll registers it
+    under this approval when the probe finds nothing, with no second act. A probe still
+    running (``gap_probe_pending``), one that failed (``gap_probe_failed``) or one that
+    asked questions (``gap_probe_questions``) is refused.
     """
     del repo
     if lease is not None and not lease.acquire():
@@ -1987,6 +2345,7 @@ def register_approved(
             approver=approver,
             approver_name=approver_name,
             run_active=run_active,
+            gap_probe=gap_probe,
         )
     finally:
         if lease is not None:
@@ -2003,6 +2362,7 @@ def _register_approved(
     approver: str,
     approver_name: str = "",
     run_active: Callable[[], bool],
+    gap_probe: GapProbe | None = None,
 ) -> IntakeRow:
     """:func:`register_approved` under the lease: every refusal is checked before the
     first write, so a refused act leaves the frozen record and the ticket untouched."""
@@ -2070,6 +2430,29 @@ def _register_approved(
         )
     item = BacklogItem.from_dict(dict(waiting.payload.get("item") or {}))
     evidence = home.evidence(actor=approver)
+    if gap_probe is not None:
+        probe = _probe_now(
+            home,
+            events,
+            tracker=tracker.name,
+            key=key,
+            content=now_content,
+            run_status=gap_probe.run_status,
+        )
+        if probe.state == STATE_NONE:
+            return _probe_on_approval(
+                item,
+                key=key,
+                revision=str(revision),
+                content=now_content,
+                gap_probe=gap_probe,
+                tracker=tracker,
+                home=home,
+                evidence=evidence,
+                approver=approver,
+                approver_name=approver_name,
+            )
+        _refuse_unless_probed_clean(key, probe)
     try:
         how = _register(home, item, actor=approver)
     except Exception as exc:  # a frozen-record refusal: say so, register nothing
@@ -2137,6 +2520,84 @@ def _register_approved(
     )
     if stopped is not None:
         row = _stopped(row, stopped)
+    try:
+        store.update_row(row)
+    except OSError:
+        log.warning("intake state not written", extra={"repo": home.repo})
+    return row
+
+
+def _refuse_unless_probed_clean(key: str, probe: ProbeState) -> None:
+    """Refuse the Register act on a probe that is running, failed or asked questions."""
+    if probe.state == STATE_PENDING:
+        raise ApprovalRefused(
+            REASON_GAP_PROBE_PENDING,
+            f"a trial build of ticket {key} is running: register it when its result is read",
+        )
+    if probe.state == STATE_FAILED:
+        raise ApprovalRefused(
+            REASON_GAP_PROBE_FAILED,
+            f"the trial build of ticket {key} did not finish, so it is not registered at this "
+            "content: edit the ticket to ask for another",
+        )
+    if probe.questions:
+        raise ApprovalRefused(
+            "gap_probe_questions",
+            f"a trial build of ticket {key} raised questions: they are on the ticket, and "
+            "the answered ticket is read again",
+        )
+
+
+def _probe_on_approval(
+    item: BacklogItem,
+    *,
+    key: str,
+    revision: str,
+    content: str,
+    gap_probe: GapProbe,
+    tracker: TrackerClient,
+    home: FactoryHome,
+    evidence: Any,
+    approver: str,
+    approver_name: str,
+) -> IntakeRow:
+    """The Register act's probe request (ADR-0059): queue one probe under this approval,
+    register nothing, and serve the row as probing. A queue that refuses raises
+    :class:`ApprovalRefused` before anything is recorded."""
+    try:
+        _request_gap_probe(
+            item,
+            key=key,
+            revision=revision,
+            content=content,
+            gap_probe=gap_probe,
+            tracker=tracker,
+            evidence=evidence,
+            approved_by=approver,
+            approved_by_name=approver_name,
+        )
+    except Exception as exc:
+        raise ApprovalRefused("register_refused", str(exc)[:300]) from exc
+    store = store_for(home)
+    base = next((r for r in store.rows() if r.key == key), None)
+    row = replace_row(
+        base
+        if base is not None
+        else IntakeRow(
+            key=key,
+            title=item.title,
+            url=item.labels.get("url", ""),
+            revision=revision,
+            label="",
+            state="",
+            item_id=item.id,
+            item_url="",
+            feedback="",
+        ),
+        awaiting_approval=False,
+        stopped=REASON_GAP_PROBE_PENDING,
+        stopped_advice=GAP_PROBE_PENDING_ADVICE,
+    )
     try:
         store.update_row(row)
     except OSError:

@@ -241,6 +241,7 @@ export const ACTION_HELP: Record<string, string> = {
   'campaign.released': 'The campaign’s next stage was released: its line rose to the pounds now released, never above the approved ceiling.',
   'campaign.admitted': 'A run filed under the campaign was admitted against its line: until it settles, its unspent cap is held, so the next run sees that much less left.',
   'reading.reserved': 'The run claimed the one attempt this commit gets on its arm of the reading before building it, so that attempt decides the commit: its graded row if one is written, and a miss (unobserved) if the run settles with no row — a kill, a cancel or a grade that never finished — never a re-run.',
+  'gap_probe.build': 'The one trial build of a ticket check finished; this line carries what it cost. Its worktree is discarded and nothing it built is kept.',
   'run.spend_cap': 'The run stopped itself at its spend cap, before an attempt or item that could have taken its spend past it; what it made is graded and kept.',
   'qualify.task': 'A task was measured in this posture — RED, a two-run baseline and the gold — with no model spend; the record says whether it qualified and, if not, why.',
   'qualify.done': 'The qualify run finished: how many tasks are proven in this posture and why the others are not.',

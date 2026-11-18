@@ -272,9 +272,17 @@ from crb.builders.adapter import (
     run_arm_for,
     rungs_from_entries,
 )
-from crb.builders.base import Budget, Builder, EscalationLadder, Rung
+from crb.builders.base import (
+    STOP_DONE,
+    Budget,
+    BuildBrief,
+    Builder,
+    BuildOutcome,
+    EscalationLadder,
+    Rung,
+)
 from crb.builders.brief import ARM_S1, ContextEntry, S1Arm
-from crb.builders.budget import budget_for_rung
+from crb.builders.budget import budget_for_rung, load_pricing, parse_rung
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
 from crb.builders.container import BuilderContainerSettings, UnconfirmedKill
 from crb.builders.labeller import make_labeller
@@ -411,6 +419,7 @@ from crb.factory.delivery_azure import (
     azure_open_pr_fn,
     azure_push_fn,
 )
+from crb.factory.evidence import EV_INTAKE_GAP_PROBE_FAILED, EV_INTAKE_GAP_PROBE_FINISHED
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
 from crb.factory.standard import Readers, cell_signed
 from crb.factory.testfirst import (
@@ -421,6 +430,16 @@ from crb.factory.testfirst import (
     canonical_model,
 )
 from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerClient, TrackerError
+from crb.intake.gap_probe import (
+    FAIL_BUILD_ERROR,
+    FAIL_COST_UNKNOWN,
+    FAIL_NOT_PROBE_BUILDER,
+    FAIL_RECLAIMED,
+    FAIL_UNPRICED,
+    GAP_PROBE_BUILD_ACTION,
+    GAP_PROBE_BUILDER,
+    parse_guesses,
+)
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.observability.metrics import parse_metrics_port
@@ -445,6 +464,7 @@ from crb.server.intake import (
     PollReport,
     apply_outcome_map,
     build_tracker,
+    gap_probe_for,
     intake_lease,
     item_url_for,
     poll_repository,
@@ -495,6 +515,7 @@ from crb.server.spend_cap import (
     Spend,
     SpendCap,
     item_reserve,
+    unpriced_rungs,
 )
 from crb.store import qualifications as store_qualifications
 from crb.store.db import init_db, make_engine, make_session_factory
@@ -510,6 +531,7 @@ from crb.store.jobs import (
     KIND_BLIND,
     KIND_CONTROLS,
     KIND_FACTORY,
+    KIND_GAP_PROBE,
     KIND_LABEL,
     KIND_MINE,
     KIND_ORACLE,
@@ -1356,6 +1378,7 @@ class Worker:
             KIND_LABEL: self._run_label,
             KIND_FACTORY: self._run_factory,
             KIND_QUALIFY: self._run_qualify,
+            KIND_GAP_PROBE: self._run_gap_probe,
         }
 
     # --- layout ---------------------------------------------------------------
@@ -1615,6 +1638,9 @@ class Worker:
             require_signed_cell=self.settings.factory.require_signed_cell,
             # ADR-0026 item 9: the organisation's routing class set classifies each ticket
             classes=class_set_state.draft_stamper(self.factory, repo),
+            # ADR-0059: None (off) unless CRB_INTAKE__GAP_PROBE — then an approved ready
+            # ticket is built once, unseen, before it is registered
+            gap_probe=gap_probe_for(self._gap_probe_settings(), self.factory, repo),
         )
 
     def _return_state(self) -> str:
@@ -4303,6 +4329,13 @@ class Worker:
         new.params_json = {**dict(new.params_json or {}), "chained_from": run.id}
         return body, new
 
+    def _gap_probe_settings(self) -> SimpleNamespace:
+        """The settings ``gap_probe_for`` is handed on the timed poll (ADR-0059): what
+        :meth:`_chain_gate_settings` gives ``submit_refusals``, plus ``intake`` (the probe's
+        switch, rung and caps). The probe's run is a blind build, so the gate's last check,
+        the login, reads ``settings.builder`` — which ``WorkerSettings`` does not have."""
+        return SimpleNamespace(**vars(self._chain_gate_settings()), intake=self.settings.intake)
+
     def _chain_gate_settings(self) -> SimpleNamespace:
         """The settings ``submit_refusals`` is handed for a request :meth:`_chain_request`
         makes — not the whole gate: the ``qualify_first: false`` branch reads
@@ -4581,6 +4614,120 @@ class Worker:
             checks_arm=checks_arm or current_checks_arm(self.factory, repo),
             posture_class=posture_class or self._deployment_posture_class(repo),
         )
+
+    def _run_gap_probe(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
+        """The gap probe (ADR-0059): build one approved ticket ONCE, blind, with
+        ``claude_code``, and record the decisions the builder reports it guessed as
+        ``intake.gap_probe.finished`` on the repository's factory chain — or
+        ``intake.gap_probe.failed``. The poll reads that result and acts on it.
+
+        Queued only by intake (the kind is not client-creatable). The worktree is always
+        discarded, the patch is never stored, and there is no push or pull-request seam, so
+        nothing a probe builds can be delivered. Its cost is the ``gap_probe.build`` step
+        event's, summed into the run's served cost; it writes no ledger row, so a probe never
+        reaches the routes or the served map. Fails closed: a reclaimed run, an unpriced rung,
+        a build that raised and a cost the builder could not report each record ``failed``."""
+        run = ctx.run
+        p = ctx.params
+        if self.settings.refuse_unsealed:
+            # ADR-0023: like a factory build, the probe runs the builder on the host
+            raise SandboxUnavailable(
+                "production refuses a gap probe run (ADR-0023): a probe build runs the builder "
+                "on the host and is not sealed yet; start the worker with "
+                f"{ALLOW_UNSEALED_PROD_ENV}=1 to run it on purpose"
+            )
+        evidence = FactoryHome(self.home, run.repo).evidence(actor=run.actor or "worker")
+        where = {
+            "tracker": str(p.get("tracker", "")),
+            "key": str(p.get("key", "")),
+            "revision": str(p.get("revision", "")),
+            "content_revision": str(p.get("content_revision", "")),
+            "run_id": run.id,
+        }
+        item_id = str(p.get("item_id", ""))
+
+        def failed(reason: str, detail: str = "", cost: float = 0.0) -> tuple[str, Any, str]:
+            evidence.append(
+                EV_INTAKE_GAP_PROBE_FAILED,
+                item_id,
+                **where,
+                reason=reason,
+                detail=detail[:300],
+                cost_usd=cost,
+            )
+            return STATUS_FAILED, {"gap_probe": reason}, f"gap probe failed: {reason}"
+
+        if ctx.claim > 0:
+            # a probe whose first claim was lost may already have spent: never build twice
+            return failed(FAIL_RECLAIMED)
+        rung = parse_rung(str(p.get("rung", "")))
+        if rung.builder != GAP_PROBE_BUILDER:
+            return failed(FAIL_NOT_PROBE_BUILDER)
+        if unpriced_rungs([(rung.builder, rung.model)], load_pricing()):
+            return failed(FAIL_UNPRICED)
+        brief = BuildBrief(
+            subject=str(p.get("subject", "")),
+            message=str(p.get("message", "")) or str(p.get("subject", "")),
+            repo=run.repo,
+            language=ctx.config.language,
+            mode=MODE_BLIND,
+            config=ctx.config,
+        )
+        budget = Budget(max_cost_usd=float(p.get("max_cost_usd") or 0.0))
+        builder = builder_for_rung(rung, gap_probe=True)
+        dest = opaque_dest(self.scratch_dir, "probe")
+        built: BuildOutcome | None = None
+        try:
+            with Workspace.at_ref(
+                ctx.git, ctx.git.rev_parse("HEAD"), dest, config=ctx.config
+            ) as ws:
+                built = builder.build(ws, brief, budget)
+                # inside the block: a worktree teardown that raises must not lose the spend
+                ctx.emit(
+                    "build",
+                    GAP_PROBE_BUILD_ACTION,
+                    cost_usd=built.cost_usd,
+                    tokens_in=built.tokens_in,
+                    tokens_out=built.tokens_out,
+                )
+            outcome = built
+        except SandboxUnavailable:
+            raise
+        except Exception as exc:  # recorded, never retried at this content
+            return failed(
+                FAIL_BUILD_ERROR,
+                redact_and_cap(f"{type(exc).__name__}: {exc}", max_chars=300),
+                cost=built.cost_usd if built is not None else 0.0,
+            )
+        if not outcome.cost_known:
+            return failed(FAIL_COST_UNKNOWN, cost=outcome.cost_usd)
+        if "assumptions" not in outcome.extra or outcome.stop_reason != STOP_DONE or outcome.errors:
+            # a build that ended without its structured answer (refused auth, a stream
+            # error, the spend cap, the wall clock) is a failed probe, never "no questions"
+            said = "; ".join(outcome.errors) or "no structured answer"
+            detail = f"stopped {outcome.stop_reason or 'unknown'}: {said}"
+            return failed(
+                FAIL_BUILD_ERROR, redact_and_cap(detail, max_chars=300), cost=outcome.cost_usd
+            )
+        reported = outcome.extra.get("assumptions")
+        questions = parse_guesses(reported, int(p.get("max_questions") or 5))
+        if not questions and (reported or not isinstance(reported, (list, tuple))):
+            # the build reported guesses and none can be asked (empty, multi-line, too
+            # long, an unknown decision): that is a failed probe, never "no questions"
+            return failed(
+                FAIL_BUILD_ERROR,
+                "reported guesses, none usable as a question",
+                cost=outcome.cost_usd,
+            )
+        evidence.append(
+            EV_INTAKE_GAP_PROBE_FINISHED,
+            item_id,
+            **where,
+            questions=[q.to_doc() for q in questions],
+            cost_usd=outcome.cost_usd,
+            tokens=outcome.tokens_in + outcome.tokens_out,
+        )
+        return STATUS_SUCCEEDED, {"gap_probe": "finished", "questions": len(questions)}, ""
 
     def _run_factory(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
         """Forward mode (P6): run the repo's FROZEN backlog through the governed loop

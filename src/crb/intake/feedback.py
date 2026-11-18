@@ -28,7 +28,8 @@ Navigation
 ----------
 What it is:   ``render_feedback`` (draft + readiness + cell route → one marked comment and
               one label) plus the short renderers for the later moments —
-              ``render_queued``, ``render_delivered``, ``render_refusal``.
+              ``render_queued``, ``render_delivered``, ``render_refusal``; and
+              ``asked=``, a gap probe's questions inside the same readiness comment.
 What it does: Turns the gate's open questions, the entry gate's stop and the map's decision
               into GOV.UK plain English a person who has never heard of this product can act
               on, and picks exactly one of the four ``crb:`` labels (``crb:not-deliverable``
@@ -40,7 +41,8 @@ How:          String building over :class:`crb.factory.readiness.Readiness` and 
               no randomness — determinism is the idempotency.
 Layer:        intake — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md,
-              docs/adr/0056-a-not-ready-ticket-goes-back.md
+              docs/adr/0056-a-not-ready-ticket-goes-back.md,
+              docs/adr/0059-a-gap-probe-asks-what-the-build-guessed.md
 Works with:   src/crb/intake/client.py (the labels and the marker),
               src/crb/intake/draft.py (the draft it describes),
               src/crb/factory/readiness.py (``open_questions`` and the gaps),
@@ -60,6 +62,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from crb.core.spec import UNCLASSIFIED
+from crb.core.stated import OpenGap
 from crb.factory.readiness import Readiness, open_questions, slots_for
 from crb.factory.standard import (
     REASON_CEILING,
@@ -246,8 +249,16 @@ def _class_block(draft: Draft) -> list[str]:
     ]
 
 
-def _questions_block(draft: Draft, readiness: Readiness) -> list[str]:
+def _questions_block(
+    draft: Draft, readiness: Readiness, asked: Sequence[OpenGap] = ()
+) -> list[str]:
     if readiness.ready and not readiness.gaps:
+        if asked:
+            return [
+                "**What is missing**",
+                "",
+                "No catalogue question is open; a trial build raised the questions below.",
+            ]
         return [
             "**What is missing**",
             "",
@@ -397,6 +408,7 @@ def render_feedback(
     cell_route: Mapping[str, Any] | None = None,
     arms: Sequence[ArmReading] = (),
     returns_to: str = "",
+    asked: Sequence[OpenGap] = (),
 ) -> Feedback:
     """The gap feedback for one ticket: one marked comment and one label.
 
@@ -407,9 +419,14 @@ def render_feedback(
     ``returns_to`` is the state the caller will move the ticket back to (ADR-0056): named in
     one closing sentence only when the label is ``crb:needs-info``; empty, the bytes are
     exactly what they were without it.
+
+    ``asked`` (ADR-0059) are the questions a gap probe raised: the decisions a build of this
+    ticket had to guess. They go in THIS comment, under its own marker, so the ticket's
+    comment bound does not move; the label is ``crb:needs-info`` and the draft is not ready
+    to register. Empty, the bytes are exactly what they were without it.
     """
     marker = marker_for(draft.tracker, draft.ticket.key)
-    label = _label_for(readiness, cell_route, entry)
+    label = LABEL_NEEDS_INFO if asked else _label_for(readiness, cell_route, entry)
     headline = {
         LABEL_READY: (
             "This ticket is ready to manufacture."
@@ -430,8 +447,9 @@ def render_feedback(
         "",
         *_class_block(draft),
         "",
-        *_questions_block(draft, readiness),
+        *_questions_block(draft, readiness, asked),
         "",
+        *([*_gap_question_lines(asked), ""] if asked else []),
         *_entry_block(draft, entry, arms),
         "",
         *_route_block(draft.item.capability_class, draft.item.size_estimate, cell_route),
@@ -452,12 +470,37 @@ def render_feedback(
         marker=marker,
         label=label,
         ready_to_register=(
-            readiness.ready and readiness.catalogued and entry.code not in _ASK_STOPS
+            readiness.ready and readiness.catalogued and entry.code not in _ASK_STOPS and not asked
         ),
-        open_questions=tuple(open_questions(readiness)),
+        open_questions=tuple(open_questions(readiness))
+        + tuple(
+            {
+                "ref": f"{draft.item.id}::gap_probe::{i}",
+                "severity": "blocking",
+                "reason": gap.question,
+            }
+            for i, gap in enumerate(asked, start=1)
+        ),
         cell_route=dict(cell_route) if cell_route else None,
         entry=entry.to_dict(),
     )
+
+
+def _gap_question_lines(asked: Sequence[OpenGap]) -> list[str]:
+    """The lines a gap probe's questions add to the readiness comment (ADR-0059): what a
+    trial build of this ticket had to decide on its own, asked of the person who wrote it.
+    The builder's guesses are never shown, so no answer reads as a default."""
+    lines = [
+        "**What a trial build had to guess**",
+        "",
+        "crb built this ticket once, privately, before registering it. Its code is thrown "
+        "away and nothing from it is delivered; only the questions below are kept. The "
+        "builder had to decide these things on its own. "
+        "Answer each one in the ticket, then save it: the changed ticket is read again.",
+        "",
+    ]
+    lines += [f"{i}. {gap.question} ({gap.decision})" for i, gap in enumerate(asked, start=1)]
+    return lines
 
 
 #: The entry stops a REGISTERED item waits under: on the record, labelled not deliverable,

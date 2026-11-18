@@ -100,6 +100,7 @@ def test_enqueue_fills_defaults_and_validates(queue: JobQueue) -> None:
         "label",
         "factory",
         "qualify",
+        "gap_probe",
     }
 
 

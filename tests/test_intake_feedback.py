@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from crb.core.stated import OpenGap
 from crb.factory import readiness as rd
 from crb.factory.standard import ArmReading, CellRef, Readers, Standard, gate_for
 from crb.intake import client as c
@@ -453,3 +454,39 @@ def test_a_set_return_state_says_where_the_ticket_goes_only_when_it_needs_info()
             assert f.text == _render(ticket, _deliver_route(), readers=readers).text
         # the sentence about the merge's one configured state change is untouched
         assert "one state change when the pull request is merged" in f.text.lower()
+
+
+# --- a gap probe's questions (ADR-0059) ----------------------------------------------
+
+
+def _render_asked() -> fb.Feedback:
+    t = _ready_ticket()
+    criteria = (*t.acceptance_criteria, "example_payload: {} -> 200 {status: ok}")
+    ticket = c.Ticket(**{**t.to_dict(), "acceptance_criteria": criteria})
+    draft = d.draft_from(ticket, tracker="ado")
+    readiness = rd.assess(draft.item)
+    assert readiness.ready and not readiness.gaps
+    entry = gate_for(draft.item, readiness, PROVEN)
+    return fb.render_feedback(
+        draft,
+        readiness,
+        entry=entry,
+        cell_route=_deliver_route(),
+        asked=(OpenGap("Which date format?", "format"),),
+    )
+
+
+def test_a_ready_ticket_with_probe_questions_does_not_say_nothing_is_missing() -> None:
+    """Review: a probe runs only on a ready ticket, so the catalogue block must not claim
+    every question is answered above a list of blocking trial-build questions."""
+    f = _render_asked()
+    assert f.label == c.LABEL_NEEDS_INFO
+    assert "Every question a good test" not in f.text
+    assert "a trial build raised the questions below" in f.text
+    assert "1. Which date format? (format)" in f.text
+
+
+def test_the_probe_block_does_not_claim_nothing_from_the_build_is_kept() -> None:
+    f = _render_asked()
+    assert "Nothing from that build is kept" not in f.text
+    assert "only the questions below are kept" in f.text

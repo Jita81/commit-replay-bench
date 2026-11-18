@@ -57,7 +57,7 @@ from crb.server.routes.runs import (
 )
 from crb.server.schemas import BUILD_KINDS, RUN_KINDS, RunCreateRequest
 from crb.server.settings import Settings
-from crb.store.jobs import STATUS_FAILED, STATUS_QUEUED, STATUS_SUCCEEDED
+from crb.store.jobs import KIND_GAP_PROBE, STATUS_FAILED, STATUS_QUEUED, STATUS_SUCCEEDED
 from crb.store.models import Event, Run
 from fixtures import pyrepo as pr
 from test_worker import Harness
@@ -388,6 +388,18 @@ def _claimable_runs(h: Harness) -> dict[str, Run]:
     own (the branch that calls the deployment's author)."""
     runs: dict[str, Run] = {}
     for kind in sorted(set(RUN_KINDS) | set(h.worker._handlers)):
+        if kind == KIND_GAP_PROBE:
+            # ADR-0059: intake queues it, no client can create it — built as intake does
+            runs[kind] = Run(
+                repo=pr.REPO_NAME,
+                kind=kind,
+                mode="blind",
+                builder="claude_code",
+                model="m",
+                params_json={"rung": "claude_code:m"},
+                actor=SWITCHER,
+            )
+            continue
         if kind not in BUILD_KINDS:
             runs[kind] = new_run(RunCreateRequest(repo=pr.REPO_NAME, kind=kind), actor=SWITCHER)
             continue

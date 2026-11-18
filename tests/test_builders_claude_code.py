@@ -1600,3 +1600,76 @@ def test_a_result_the_api_refused_names_the_refused_login_in_the_ledger_words(
         kind = lg.derive_failure_kind(clean=False, disqualified=False, error=err)
         assert kind == lg.FAILURE_OUTAGE
         assert lg.derive_outage_cause(kind, err) == lg.OUTAGE_CAUSE_AUTH
+
+
+# ---------------------------------------------------------------------------
+# ADR-0059: the gap probe's assumptions field
+# ---------------------------------------------------------------------------
+
+#: The sha256 of the default ``--json-schema`` argument as it was before the gap probe: a
+#: builder without the flag must send exactly these bytes.
+_DEFAULT_SCHEMA_SHA256 = "181dd96a41699e42b3dfee31457682d9fc81352ed20263fe48cbc33559701eec"
+
+
+def test_without_the_gap_probe_the_schema_rules_and_stamp_are_byte_identical(
+    tmp_path: Path,
+) -> None:
+    import hashlib
+
+    fx = make_fixture(tmp_path)
+    brief = base.BuildBrief.from_task(fx.task, mode="blind", config=fx.config)
+    budget = base.Budget(max_turns=7, max_tool_calls=25, max_cost_usd=0.5)
+    plain = cc.ClaudeCodeBuilder(model="claude-sonnet-5")
+    off = cc.ClaudeCodeBuilder(model="claude-sonnet-5", gap_probe=False)
+    argv = plain.argv(brief, budget, tmp_path / "wt")
+    assert argv == off.argv(brief, budget, tmp_path / "wt")
+    schema = argv[argv.index("--json-schema") + 1]
+    assert hashlib.sha256(schema.encode()).hexdigest() == _DEFAULT_SCHEMA_SHA256
+    assert argv[argv.index("--append-system-prompt") + 1] == cc.system_rules(budget, sighted=False)
+    assert "gap_probe" not in plain.describe() and plain.describe() == off.describe()
+
+
+def test_the_gap_probe_asks_for_assumptions_and_the_rule_that_fills_them(
+    tmp_path: Path,
+) -> None:
+    fx = make_fixture(tmp_path)
+    brief = base.BuildBrief.from_task(fx.task, mode="blind", config=fx.config)
+    budget = base.Budget(max_turns=7, max_tool_calls=25, max_cost_usd=0.5)
+    probe = cc.ClaudeCodeBuilder(model="claude-sonnet-5", gap_probe=True)
+    argv = probe.argv(brief, budget, tmp_path / "wt")
+    schema = json.loads(argv[argv.index("--json-schema") + 1])
+    assert schema == cc.GAP_PROBE_OUTPUT_SCHEMA
+    item = schema["properties"]["assumptions"]["items"]
+    assert set(item["properties"]) == {"decision", "question", "guessed"}
+    assert item["properties"]["decision"]["enum"] == sorted(
+        ("name", "signature", "error_text", "format", "rule", "value")
+    )
+    assert argv[argv.index("--append-system-prompt") + 1].endswith(cc.GAP_PROBE_RULE)
+    assert probe.describe()["gap_probe"] is True
+
+
+def test_the_gap_probe_returns_the_reported_assumptions_in_extra(tmp_path: Path) -> None:
+    said = [{"decision": "error_text", "question": "What does the error say?", "guessed": "x"}]
+    lines = [
+        *GOOD_RUN[:-1],
+        ev_result(num_turns=4, structured={"done": True, "summary": "ok", "assumptions": said}),
+    ]
+    _, _, out = _setup(tmp_path / "on", FakeSpawn(lines, side_effect=_fix_calc), gap_probe=True)
+    assert out.extra["assumptions"] == said
+    _, _, plain = _setup(tmp_path / "off", FakeSpawn(lines, side_effect=_fix_calc))
+    assert "assumptions" not in plain.extra
+    # a stream with no structured assumptions carries NO key (review: an empty list here
+    # read as a clean probe with no questions, and the worker registered on no probe)
+    _, _, none = _setup(
+        tmp_path / "none", FakeSpawn(GOOD_RUN, side_effect=_fix_calc), gap_probe=True
+    )
+    assert "assumptions" not in none.extra
+    # an explicit empty list is the build's answer: nothing guessed
+    lines_empty = [
+        *GOOD_RUN[:-1],
+        ev_result(num_turns=4, structured={"done": True, "summary": "ok", "assumptions": []}),
+    ]
+    _, _, empty = _setup(
+        tmp_path / "empty", FakeSpawn(lines_empty, side_effect=_fix_calc), gap_probe=True
+    )
+    assert empty.extra["assumptions"] == []

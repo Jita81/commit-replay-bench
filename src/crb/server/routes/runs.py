@@ -159,6 +159,7 @@ from crb.core.reading import (
 from crb.core.spec import TaskSpec
 from crb.core.taxonomy import GLOBAL_CLASS_SET, is_class_set_version
 from crb.factory.author import author_from_label
+from crb.intake.gap_probe import GAP_PROBE_BUILD_ACTION
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep, require_role_now
 from crb.server.builder_login import login_refusal
@@ -202,7 +203,7 @@ from crb.server.secrets import secrets_dir_for
 from crb.server.spend_cap import unpriced_rungs
 from crb.store.db import make_session_factory
 from crb.store.events import append_event_checked, lock_event_writes
-from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED, stage_queued
+from crb.store.jobs import KIND_FACTORY, KIND_GAP_PROBE, STATUS_QUEUED, stage_queued
 from crb.store.models import Event, Grade, Repo, Run, Task, User
 
 log = logging.getLogger("crb.server.runs")
@@ -575,6 +576,17 @@ def run_out(session: Session, run: Run) -> RunOut:
     cost = session.execute(
         select(func.coalesce(func.sum(Grade.cost_usd), 0.0)).where(Grade.run_id == run.id)
     ).scalar_one()
+    if run.kind == KIND_GAP_PROBE:
+        # ADR-0059: a gap probe writes no ledger row (it never reaches the routes or the
+        # served map), so its spend is its build step event's
+        cost = float(cost or 0.0) + float(
+            session.execute(
+                select(func.coalesce(func.sum(Event.cost_usd), 0.0)).where(
+                    Event.trace_id == run.id, Event.action == GAP_PROBE_BUILD_ACTION
+                )
+            ).scalar_one()
+            or 0.0
+        )
     limit = params.get("limit")
     position, kinds_ahead = _queue_position(session, run)
     return RunOut(

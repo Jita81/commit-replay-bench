@@ -369,12 +369,7 @@ class Workspace:
         dest.parent.mkdir(parents=True, exist_ok=True)
         parent = repo.parent(sha)
         repo.worktree_add(dest, parent)
-        ws = cls(repo, dest, sha=sha, parent=parent)
-        ws._own_excludes()
-        ws.exclude_baseline = ws._clone_exclude_baseline()
-        if post_create and config is not None:
-            ws._post_create(config)
-        return ws
+        return cls(repo, dest, sha=sha, parent=parent)._prepared(config, post_create)
 
     @classmethod
     def at_ref(
@@ -398,12 +393,21 @@ class Workspace:
         dest.parent.mkdir(parents=True, exist_ok=True)
         head = repo.rev_parse(ref)
         repo.worktree_add(dest, head)
-        ws = cls(repo, dest, sha=head, parent=head)
-        ws._own_excludes()
-        ws.exclude_baseline = ws._clone_exclude_baseline()
-        if post_create and config is not None:
-            ws._post_create(config)
-        return ws
+        return cls(repo, dest, sha=head, parent=head)._prepared(config, post_create)
+
+    def _prepared(self, config: RepoConfig | None, post_create: bool) -> Workspace:
+        """The just-added worktree made ready, or removed again when making it ready raises:
+        the caller never reaches its ``with`` block, so nothing else would unregister it."""
+        try:
+            self._own_excludes()
+            self.exclude_baseline = self._clone_exclude_baseline()
+            if post_create and config is not None:
+                self._post_create(config)
+        except BaseException:
+            with contextlib.suppress(Exception):  # the original failure is the one raised
+                self.remove()
+            raise
+        return self
 
     def remove(self) -> None:
         """Unregister the worktree from the clone and delete the directory. Best effort
