@@ -4709,9 +4709,16 @@ class Worker:
             return failed(
                 FAIL_BUILD_ERROR, redact_and_cap(detail, max_chars=300), cost=outcome.cost_usd
             )
-        questions = parse_guesses(
-            outcome.extra.get("assumptions"), int(p.get("max_questions") or 5)
-        )
+        reported = outcome.extra.get("assumptions")
+        questions = parse_guesses(reported, int(p.get("max_questions") or 5))
+        if not questions and (reported or not isinstance(reported, (list, tuple))):
+            # the build reported guesses and none can be asked (empty, multi-line, too
+            # long, an unknown decision): that is a failed probe, never "no questions"
+            return failed(
+                FAIL_BUILD_ERROR,
+                "reported guesses, none usable as a question",
+                cost=outcome.cost_usd,
+            )
         evidence.append(
             EV_INTAKE_GAP_PROBE_FINISHED,
             item_id,

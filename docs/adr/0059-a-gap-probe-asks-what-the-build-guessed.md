@@ -66,7 +66,8 @@ The question loop was read on the bench before it was built here:
 7. **Fail closed.** The run fails when it was reclaimed, when its rung is not `claude_code`,
    when its model is unpriced or its cost unknown, when the build raises, and when the build
    stops without its structured answer (an error, the spend cap, the wall clock), which is
-   never read as "no questions". A request whose run has ended or vanished without a result
+   never read as "no questions". A build that reports guesses of which none can be asked
+   fails the same way. A request whose run has ended or vanished without a result
    is recorded failed once, judged on the chain read again after the run is seen ended, so a
    probe that finished during a pass is never recorded failed. A run queued whose request
    could not be recorded is cancelled; that stops its spend when the cancel lands while it

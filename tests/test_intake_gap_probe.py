@@ -1018,6 +1018,29 @@ def test_a_clean_build_with_an_empty_answer_still_finishes_with_no_questions(
     assert status == "succeeded" and counts == {"gap_probe": "finished", "questions": 0}
 
 
+@pytest.mark.parametrize(
+    "assumptions",
+    [
+        [{"decision": "name", "question": "", "guessed": "status"}],
+        [{"decision": "not-a-decision", "question": "Which name?", "guessed": "x"}],
+        [{"decision": "name", "question": "one\ntwo", "guessed": "x"}],
+        "not a list",
+    ],
+)
+def test_a_probe_whose_every_reported_guess_is_unusable_is_failed_not_clean(
+    assumptions: Any, tmp_path: Path, seams: SimpleNamespace
+) -> None:
+    """Review: a build that reported guesses, none of which could be asked, was recorded
+    as finished with no questions — the same record as a build that guessed nothing."""
+    seams.builder = _Builder(_outcome(extra={"assumptions": assumptions}))
+    worker = _worker(tmp_path)
+    ctx, _ = _ctx()
+    status, counts, _ = worker._run_gap_probe(ctx)
+    assert status == "failed" and counts == {"gap_probe": gp.FAIL_BUILD_ERROR}
+    (ev,) = _chain(worker)
+    assert ev.kind == EV_INTAKE_GAP_PROBE_FAILED and ev.payload["cost_usd"] == 0.37
+
+
 class _LateQueue(Queue):
     """A probe run that finishes DURING a poll pass: the first time its status is asked,
     the worker writes its result to the chain and then ends the run, as the worker does."""
