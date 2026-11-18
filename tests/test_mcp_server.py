@@ -36,7 +36,7 @@ import pytest
 
 from crb.mcp import INSTRUCTIONS, CrbApi, CrbApiError, build_server, tool_names
 from crb.server.app import API_PREFIX
-from fixtures.server_seed import ALPHA, ROOT_PW, USER_PW, USERS, make_env
+from fixtures.server_seed import ALPHA, BUILDER, MODEL, ROOT_PW, USER_PW, USERS, make_env
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -71,6 +71,7 @@ EXPECTED_TOOLS = {
     "crb_strengthen_plan",
     "crb_refusals",
     "crb_forecast",
+    "crb_mapping_quote",
     "crb_ledger_verify",
     "crb_signoffs",
     "crb_signoff_policy",
@@ -162,6 +163,9 @@ def test_reads_relay_the_api_with_method_fields(tmp_path: Path) -> None:
         assert one["row_hash"] == grades["items"][0]["row_hash"]
         assert call(server, "crb_signoff_policy")["policy_version"].startswith("signoff-policy")
         assert "items" in call(server, "crb_signoffs", repo=ALPHA)
+        quote = call(server, "crb_mapping_quote", repo=ALPHA, builder=BUILDER, model=MODEL)
+        assert quote["cells"] and quote["totals"]["cells"] == len(quote["cells"])
+        assert "not a provider invoice" in quote["estimate_of"]
 
 
 def test_refusals_come_back_as_data_not_exceptions(tmp_path: Path) -> None:

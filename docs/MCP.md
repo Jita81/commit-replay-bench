@@ -112,6 +112,7 @@ For the dev stack on this machine the defaults suffice apart from the account:
 | `crb_capability_map`, `crb_routes`, `crb_failure_split` | `GET /capability-map`, `/routes`, `/failure-split` | viewer |
 | `crb_oracle`, `crb_controls` | `GET /oracle/{repo}`, `/oracle/{repo}/controls` | viewer |
 | `crb_remeasure_plan`, `crb_strengthen_plan`, `crb_refusals`, `crb_forecast` | `GET /learn/remeasure`, `/learn/strengthen`, `/learn/refusals`, `/forecast/build` | viewer |
+| `crb_mapping_quote` | `GET /quote/mapping` — read-only; spends nothing (the run it prices, through `crb_start_run`, spends the operator's model budget); `n` applies only when `cells` is empty | viewer |
 | `crb_ledger_verify` | `GET /ledger/verify` | viewer |
 | `crb_signoffs`, `crb_signoff_policy`, `crb_reviews` | `GET /signoffs`, `/signoffs/policy`, `/reviews` — read only | viewer |
 | `crb_factory_backlog`, `crb_factory_tasks`, `crb_factory_evidence` | `GET /factory/{repo}/backlog`, `/tasks`, `/evidence` | viewer |
