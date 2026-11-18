@@ -26,13 +26,17 @@ What it is:   ``AdoTracker`` — the :class:`crb.intake.client.TrackerClient` ov
               DevOps Services or Server, and ``AdoConfig``, the connection it needs.
 What it does: Runs the WIQL query for the watched state inside an area path, reads a work
               item's fields, leaves ONE comment idempotent by an HTML marker, replaces the
-              ``crb:`` tag, moves the state and attaches a hyperlink.
+              ``crb:`` tag, moves the state and attaches a hyperlink — or, for a pull
+              request on Azure Repos in the board's own organisation, Azure's own pull
+              request link, once.
 How:          ``TrackerHttp`` (httpx, injectable) against ``/_apis/wit/*`` at
               ``api-version=7.1``; a personal access token as basic auth with an empty
               user name; HTML is converted by :func:`crb.intake.draft.html_to_text`.
 Layer:        intake — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md
+ADRs:         docs/adr/0017-the-ticket-is-the-backlog-item.md,
+              docs/adr/0057-azure-repos-pr-delivery.md
 Works with:   src/crb/intake/client.py (the protocol it satisfies),
+              src/crb/factory/delivery_azure.py (reads an Azure pull request address),
               src/crb/intake/http.py (the request and the error vocabulary),
               src/crb/intake/draft.py (``html_to_text``), src/crb/intake/jira.py (the same
               six verbs over JQL), src/crb/server/intake.py (builds it from settings and
@@ -45,13 +49,17 @@ Touch when:   never for a new repository; Azure DevOps changes an api-version or
 
 from __future__ import annotations
 
+import urllib.parse
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
+from crb.factory.delivery import azure_organisation
+from crb.factory.delivery_azure import parse_azure_pr_url
 from crb.intake.client import (
+    LINK_PULL_REQUEST,
     REASON_COLUMN_GONE,
     REASON_REFUSED,
     Ticket,
@@ -74,6 +82,11 @@ COMMENTS_API_VERSION = "7.1-preview.4"
 #: comes back rewritten, which is how the marker a re-read looks for goes missing — and a
 #: marker that cannot be found again is a second copy of the same note on somebody's ticket.
 COMMENT_FORMAT = "markdown"
+#: The relation Azure DevOps shows in a work item's Development section, and the name it
+#: gives a pull request there (ADR-0057).
+REL_ARTIFACT = "ArtifactLink"
+PR_LINK_NAME = "Pull Request"
+_PR_ARTIFACT_PREFIX = "vstfs:///Git/PullRequestId/"
 
 FIELD_TITLE = "System.Title"
 FIELD_DESCRIPTION = "System.Description"
@@ -111,6 +124,12 @@ class AdoConfig:
     #: column overflowed and stop the pass with ``column_too_large`` rather than read a
     #: truncated column and say nothing.
     max_refs: int = 201
+    #: Whether a pull request on Azure Repos in this board's organisation is attached as
+    #: Azure's own pull request link, which needs one read of the pull request
+    #: (``/_apis/git/repositories/…/pullrequests/{n}``). Off by default and set from
+    #: ``CRB_FACTORY__AZURE_REPOS_DELIVERY`` (ADR-0057), so with that switch off intake sends
+    #: nothing to the Azure Repos API and every link is a hyperlink, as before.
+    pull_request_links: bool = False
 
     def __post_init__(self) -> None:
         for name in ("organisation_url", "project", "column"):
@@ -341,13 +360,81 @@ class AdoTracker:
         the link — so a queued ticket reads "Backlog item" and a delivered one reads
         "Pull request". The URL stays the identity, so a title changed later does not make
         a second link.
+
+        With ``pull_request_links`` on (ADR-0057), a pull request on Azure Repos in the
+        board's own organisation is attached as Azure's own pull request link instead (an
+        ``ArtifactLink`` named "Pull Request", which the work item's Development section
+        shows), once, and not at all when the same address is already a hyperlink. When the
+        pull request cannot be read, the hyperlink below is attached as before.
         """
+        if (
+            title == LINK_PULL_REQUEST
+            and self.config.pull_request_links
+            and self._link_azure_pull_request(key, url)
+        ):
+            return
         if url in self.read(key).links:
             return
         value: dict[str, Any] = {"rel": "Hyperlink", "url": url}
         if title:
             value["attributes"] = {"comment": title}
         self._patch(key, [{"op": "add", "path": "/relations/-", "value": value}])
+
+    def _link_azure_pull_request(self, key: str, url: str) -> bool:
+        """Attach ``url`` as an ``ArtifactLink`` when it is a pull request in this board's
+        organisation; ``True`` when it is attached (now or before), ``False`` when the caller
+        should attach a hyperlink. The organisation is checked here, not left to the origin
+        guard: every organisation shares the ``dev.azure.com`` origin."""
+        parsed = parse_azure_pr_url(url)
+        board_org = azure_organisation(self.config.organisation_url)
+        if parsed is None or not board_org or parsed[0].org.lower() != board_org:
+            return False
+        repo, number = parsed
+        project = urllib.parse.quote(repo.project, safe="")
+        name = urllib.parse.quote(repo.repo, safe="")
+        try:
+            pr = self.http.get(
+                f"{self.config.organisation_url.rstrip('/')}/{project}"
+                f"/_apis/git/repositories/{name}/pullrequests/{number}",
+                params={"api-version": API_VERSION},
+                expect=(200,),
+            )
+        except TrackerError:
+            return False
+        artifact = _pull_request_artifact(pr or {}, number)
+        if not artifact:
+            return False
+        wi = self.http.get(
+            f"_apis/wit/workitems/{key}",
+            params={"api-version": API_VERSION, "$expand": "relations"},
+            expect=(200,),
+        )
+        for rel in (wi or {}).get("relations") or []:
+            kind, there = str(rel.get("rel", "")), str(rel.get("url", "")).lower()
+            # the same pull request as Azure's link, or as the hyperlink an earlier attempt
+            # fell back to: either way the ticket has it, and a second kind is not added
+            if (kind == REL_ARTIFACT and there == artifact.lower()) or (
+                kind == "Hyperlink" and there == url.lower()
+            ):
+                return True
+        value = {"rel": REL_ARTIFACT, "url": artifact, "attributes": {"name": PR_LINK_NAME}}
+        self._patch(key, [{"op": "add", "path": "/relations/-", "value": value}])
+        return True
+
+
+def _pull_request_artifact(pr: Mapping[str, Any], number: int) -> str:
+    """The pull request's artifact URL (``vstfs:///Git/PullRequestId/{project}%2F{repo}%2F{n}``):
+    Azure's own ``artifactId``, else built from the project and repository ids; ``""`` when
+    the answer carries neither."""
+    given = str(pr.get("artifactId") or "")
+    if given.lower().startswith(_PR_ARTIFACT_PREFIX.lower()):
+        return given
+    repository = pr.get("repository") or {}
+    repo_id = str(repository.get("id") or "")
+    project_id = str((repository.get("project") or {}).get("id") or "")
+    if not repo_id or not project_id:
+        return ""
+    return f"{_PR_ARTIFACT_PREFIX}{project_id}%2F{repo_id}%2F{number}"
 
 
 __all__ = [

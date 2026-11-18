@@ -15,8 +15,8 @@ credentials wired, delivery **fails closed**, never a silent success-looking
 no-op. Tokens never reach ``.git/config`` nor the argv: the default push seam passes
 the token as a one-shot ``http.extraheader`` in the child's environment
 (``GIT_CONFIG_COUNT``); the PR seam is GitHub's REST API over
-:mod:`urllib` (stdlib). Both are injectable so tests are hermetic; an Azure
-DevOps seam plugs in the same way.
+:mod:`urllib` (stdlib). Both are injectable so tests are hermetic; the Azure
+Repos seam (:mod:`crb.factory.delivery_azure`, ADR-0057) plugs in the same way.
 
 The PR body is the evidence summary — belts, pack hash, apparatus, route
 decision, RED proof — and a link to the pack, with a block naming the cell that licensed
@@ -80,9 +80,9 @@ Works with:   src/crb/factory/build.py (``BuildResult`` and its kept workspace),
               docs/SECURITY.md#33-credentials
 Tested by:    tests/test_factory_delivery.py, tests/test_factory_loop.py,
               tests/test_factory_loop_route_gate.py, tests/test_factory_loop_signed_cell.py
-Touch when:   onboarding a repository hosted somewhere other than GitHub — add an
-              ``open_pr_fn`` + ``comment_pr_fn`` + ``close_pr_fn`` seam (Azure DevOps,
-              GitLab) and a credentials provider; NEVER relax ``ALWAYS_PROTECTED_BRANCHES``,
+Touch when:   onboarding a repository hosted somewhere other than GitHub or Azure Repos
+              — add an ``open_pr_fn`` + ``comment_pr_fn`` + ``close_pr_fn`` seam (GitLab)
+              and a credentials provider; NEVER relax ``ALWAYS_PROTECTED_BRANCHES``,
               the verdict refusal or the invariant's order (their tests are ratchets —
               docs/CONTRIBUTING.md#the-never-weaken-a-gate-rule).
 """
@@ -640,6 +640,112 @@ def git_push_fn(
         )
 
 
+#: The two hosts Azure DevOps Services serves a repository from: ``dev.azure.com/{org}`` and
+#: the older ``{org}.visualstudio.com``.
+_AZURE_HOST = "dev.azure.com"
+_AZURE_LEGACY_SUFFIX = ".visualstudio.com"
+
+
+@dataclass(frozen=True)
+class AzureRepo:
+    """One Azure Repos repository, parsed from its https remote (ADR-0057). ``host`` is the
+    host the remote named; ``org``, ``project`` and ``repo`` are percent-decoded names."""
+
+    host: str
+    org: str
+    project: str
+    repo: str
+
+    @property
+    def org_url(self) -> str:
+        """The organisation's address on the remote's own host."""
+        if self.host == _AZURE_HOST:
+            return f"https://{_AZURE_HOST}/{urllib.parse.quote(self.org, safe='')}"
+        return f"https://{self.host}"
+
+    @property
+    def web_url(self) -> str:
+        """The repository's address with no user part: the remote a push is sent to."""
+        project = urllib.parse.quote(self.project, safe="")
+        return f"{self.org_url}/{project}/_git/{urllib.parse.quote(self.repo, safe='')}"
+
+    @property
+    def api_base(self) -> str:
+        """The Git REST address of the repository (``…/_apis/git/repositories/{repo}``)."""
+        project = urllib.parse.quote(self.project, safe="")
+        repo = urllib.parse.quote(self.repo, safe="")
+        return f"{self.org_url}/{project}/_apis/git/repositories/{repo}"
+
+    @property
+    def key(self) -> str:
+        """``org/project/repo``, lower-cased: Azure DevOps names are case-insensitive."""
+        return f"{self.org}/{self.project}/{self.repo}".lower()
+
+
+def _azure_name_ok(name: str) -> bool:
+    """Whether a percent-decoded organisation, project or repository name can be one Azure
+    DevOps name: not blank, not ``.`` or ``..``, and no ``/``, ``\\`` or control character
+    (Azure DevOps refuses all of these in a name, so no real remote is lost). Without this,
+    ``a%2Fb/_git/c`` and ``a/_git/b%2Fc`` would share one repository key, and ``..`` would
+    make the API address point somewhere git's remote does not."""
+    return (
+        bool(name.strip())
+        and name not in {".", ".."}
+        and not any(c in "/\\" or ord(c) < 32 or ord(c) == 127 for c in name)
+    )
+
+
+def _azure_org_and_rest(url: str) -> tuple[str, str, list[str]] | None:
+    """``(host, org, the path parts after the organisation)`` of an https Azure DevOps
+    Services address, or ``None`` for any other scheme, host, port or shape."""
+    try:
+        parsed = urllib.parse.urlsplit(url.strip())
+        port = parsed.port
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme.lower() != "https" or port is not None or parsed.query or parsed.fragment:
+        return None
+    parts = [urllib.parse.unquote(p) for p in parsed.path.split("/") if p]
+    if host == _AZURE_HOST:
+        if not parts or not _azure_name_ok(parts[0]):
+            return None
+        return host, parts[0], parts[1:]
+    if host.endswith(_AZURE_LEGACY_SUFFIX):
+        org = host[: -len(_AZURE_LEGACY_SUFFIX)]
+        if not org or "." in org:
+            return None
+        return host, org, parts
+    return None
+
+
+def azure_organisation(url: str) -> str:
+    """The lower-cased organisation of an https Azure DevOps Services address (the board's
+    ``https://dev.azure.com/{org}`` or a repository remote), or ``""``."""
+    found = _azure_org_and_rest(url)
+    return found[1].lower() if found else ""
+
+
+def parse_azure_remote(remote: str) -> AzureRepo | None:
+    """An :class:`AzureRepo` from an https Azure Repos remote —
+    ``https://[org@]dev.azure.com/{org}/{project}/_git/{repo}`` or
+    ``https://{org}.visualstudio.com/{project}/_git/{repo}`` — or ``None`` for anything else
+    (SSH, http, another host or shape): the caller refuses rather than guesses."""
+    found = _azure_org_and_rest(remote)
+    if found is None:
+        return None
+    host, org, rest = found
+    if len(rest) != 3 or rest[1] != "_git" or not all(map(_azure_name_ok, (org, *rest))):
+        return None
+    return AzureRepo(host=host, org=org, project=rest[0], repo=rest[2])
+
+
+def azure_repository(remote: str) -> str:
+    """``org/project/repo`` (lower-cased) of an Azure Repos remote, or ``""``."""
+    parsed = parse_azure_remote(remote)
+    return parsed.key if parsed else ""
+
+
 def owner_repo_from_remote(remote: str) -> tuple[str, str]:
     """``(owner, name)`` from an https or ``git@`` remote URL (``.git`` stripped)."""
     r = remote.strip()
@@ -656,8 +762,13 @@ def owner_repo_from_remote(remote: str) -> tuple[str, str]:
 
 
 def repository_of(remote: str) -> str:
-    """``owner/name`` of a remote URL (or of an ``owner/name`` string), lower-cased because
-    GitHub's names are case-insensitive; ``""`` when it cannot be parsed."""
+    """``owner/name`` (GitHub) or ``org/project/repo`` (Azure Repos) of a remote URL (or of
+    an ``owner/name`` string), lower-cased because both hosts' names are case-insensitive;
+    ``""`` when it cannot be parsed. An Azure Repos
+    remote is ``org/project/repo`` (:func:`azure_repository`), so two repositories of one
+    project never share a key (ADR-0057)."""
+    if az := azure_repository(remote):
+        return az
     try:
         owner, name = owner_repo_from_remote(remote)
     except DeliveryError:
@@ -670,7 +781,8 @@ _PR_URL_RE = re.compile(r"^https://[^/\s]+/([^/\s]+)/([^/\s]+)/pull/\d+/?$")
 
 
 def recorded_repository(repository: str, pr_url: str) -> str:
-    """The repository a recorded pull request is in, as ``owner/name``: the ``repository``
+    """The repository a recorded pull request is in, as ``owner/name`` (GitHub) or
+    ``org/project/repo`` (Azure Repos): the ``repository``
     its delivery recorded; for a delivery recorded before that field existed, the
     repository in GitHub's address of the pull request; otherwise ``""``, which
     :func:`repository_mismatch` never takes to match anything."""
@@ -870,8 +982,8 @@ class DeliveryResult:
     previous_commit_sha: str = ""
     updated: bool = False
     comment_error: str = ""
-    #: ``owner/name`` of the repository the pull request is in (:func:`repository_of` of the
-    #: remote it was delivered through) — the number means nothing without it (PR #55 review).
+    #: ``owner/name`` (GitHub) or ``org/project/repo`` (Azure Repos) of the repository the
+    #: pull request is in (:func:`repository_of` of the remote it was delivered through) — the number means nothing without it (PR #55 review).
     repository: str = ""
 
     @property
@@ -1156,6 +1268,7 @@ __all__ = [
     "ALWAYS_PROTECTED_BRANCHES",
     "DELIVERY_BRANCH_PREFIX",
     "DELIVERY_BRANCH_RE",
+    "AzureRepo",
     "ClosePrFn",
     "CommentPrFn",
     "DefaultBranchProtectionError",
@@ -1172,6 +1285,8 @@ __all__ = [
     "StaticProvider",
     "assert_not_default_branch",
     "assert_same_repository",
+    "azure_organisation",
+    "azure_repository",
     "close_comment",
     "close_pull_request",
     "commit_on_branch",
@@ -1187,6 +1302,7 @@ __all__ = [
     "github_open_pr_fn",
     "legacy_delivery_branch_name",
     "owner_repo_from_remote",
+    "parse_azure_remote",
     "pr_body",
     "recorded_repository",
     "repository_mismatch",

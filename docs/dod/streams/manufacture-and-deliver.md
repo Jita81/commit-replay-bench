@@ -22,7 +22,10 @@ per repository, default off) → a branch `crb/<item>-<slug>` and a pull request
 customer's repository against a non-default branch, whose body is the evidence summary, whose
 verdict was recorded before any edit, and whose merge or closure lands back on the item's
 chain and on the ticket. The review is accepted before the pull request opens (ADR-0021), and
-a ready ticket is registered only when an operator approves it (ADR-0022).
+a ready ticket is registered only when an operator approves it (ADR-0022). With Azure Repos
+delivery switched on (off by default, ADR-0057), the pull request of an Azure DevOps ticket can
+open on Azure Repos in the board's own organisation and is attached to the ticket as Azure's
+own pull request link; outcome sync for it is not built.
 
 **Non-goals.** It never writes to the customer's default branch and never merges: the pull
 request is where the product's authority ends. It never creates tickets, never edits ticket

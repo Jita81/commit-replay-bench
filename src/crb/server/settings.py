@@ -525,10 +525,16 @@ class FactorySettings(BaseModel):
     ``unsigned_cell`` before any spend. Setting it false removes this clause only;
     the posture is served (``/settings``, the Posture page) so it is never a silent choice,
     and the Factory screen predicts each item's delivery under whichever is in force.
+
+    ``azure_repos_delivery`` (ADR-0057, default false) lets a delivering run open its pull
+    request on Azure Repos, with the tracker's personal access token, when the repository is
+    in the same organisation as the Azure DevOps board. Off, an Azure remote is not
+    delivered to and no token goes to Azure Repos.
     """
 
     test_author: str = ""
     require_signed_cell: bool = True
+    azure_repos_delivery: bool = False
 
     @field_validator("test_author")
     @classmethod
@@ -550,6 +556,7 @@ class FactorySettings(BaseModel):
         return {
             "test_author": self.test_author or "none",
             "require_signed_cell": self.require_signed_cell,
+            "azure_repos_delivery": self.azure_repos_delivery,
         }
 
 

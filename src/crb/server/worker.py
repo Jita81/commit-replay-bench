@@ -394,12 +394,17 @@ from crb.core.workspace import Workspace, opaque_dest
 from crb.factory.author import author_from_label
 from crb.factory.backlog import KIND_CODE, BacklogItem
 from crb.factory.delivery import (
+    AzureRepo,
     GitCredentials,
     GitCredentialsProvider,
+    NoGitCredentialsError,
+    azure_organisation,
     github_close_pr_fn,
     github_comment_pr_fn,
     github_open_pr_fn,
+    parse_azure_remote,
 )
+from crb.factory.delivery_azure import azure_close_pr_fn, azure_comment_pr_fn, azure_open_pr_fn
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
 from crb.factory.standard import Readers, cell_signed
 from crb.factory.testfirst import (
@@ -817,6 +822,36 @@ class _InstallationProvider:
         return GitCredentials(
             remote=self._remote, token=self._app.installation_token(self._installation)
         )
+
+
+class _AzureReposProvider:
+    """A ``GitCredentialsProvider`` for Azure Repos (ADR-0057): every ``resolve`` reads the
+    tracker's personal access token from the secret store — it is never held here."""
+
+    def __init__(self, token: Callable[[], str], remote: str) -> None:
+        self._token = token
+        self._remote = remote
+
+    def resolve(self, repo: str) -> GitCredentials:
+        del repo
+        token = self._token()
+        if not token:
+            raise NoGitCredentialsError(
+                "the tracker token is not available, so nothing is pushed to Azure Repos"
+            )
+        return GitCredentials(remote=self._remote, token=token, username="")
+
+
+@dataclass(frozen=True)
+class _AzureDelivery:
+    """What a delivering run on Azure Repos uses in place of the GitHub App's: the
+    provider, the three pull request seams and the branch the pull request targets."""
+
+    creds: _AzureReposProvider
+    default_branch: str
+    open_pr_fn: Callable[..., tuple[str, int]] = azure_open_pr_fn
+    comment_pr_fn: Callable[..., None] = azure_comment_pr_fn
+    close_pr_fn: Callable[..., None] = azure_close_pr_fn
 
 
 #: The £0 stages in walk order (DL-315): a run of one that succeeds with its pass fact
@@ -1475,7 +1510,10 @@ class Worker:
             return 0
         try:
             tracker = build_tracker(
-                self.settings.intake, self._tracker_token(), home=self.settings.home
+                self.settings.intake,
+                self._tracker_token(),
+                home=self.settings.home,
+                pull_request_links=self.settings.factory.azure_repos_delivery,  # ADR-0057
             )
         except TrackerError as exc:
             for repo, _state in repos:
@@ -2246,6 +2284,98 @@ class Worker:
             return None
         return _InstallationProvider(self._github_app(), installation, remote)
 
+    def _azure_target(self, remote: str) -> AzureRepo | None:
+        """The Azure Repos repository ``remote`` names, when the tracker's token may go to it
+        (ADR-0057): the switch is on, the tracker is Azure DevOps, and the board's https
+        address is in the same organisation as the remote. Otherwise None, so no token
+        leaves for another organisation, nor for any remote while the switch is off. The
+        organisation is compared, not the host: every organisation shares ``dev.azure.com``."""
+        if not self.settings.factory.azure_repos_delivery:
+            return None
+        intake = self.settings.intake
+        if intake.tracker != "ado":
+            return None
+        repo = parse_azure_remote(remote)
+        board = azure_organisation(intake.url.strip())
+        if repo is None or not board or repo.org.lower() != board:
+            return None
+        return repo
+
+    def _azure_auth_header(self, url: str) -> str | None:
+        """``Authorization: Basic …`` for a clone or fetch of an Azure Repos repository the
+        tracker's token may reach (:meth:`_azure_target`), or None."""
+        repo = self._azure_target(url)
+        if repo is None:
+            return None
+        token = self._tracker_token()
+        if not token:
+            return None
+        return GitCredentials(remote=repo.web_url, token=token, username="").basic_auth_header()
+
+    def _azure_delivery(self, remote: str, git: GitRepo) -> _AzureDelivery | None:
+        """The Azure Repos seams for a delivering run (ADR-0057), or None when
+        :meth:`_azure_target` refuses the remote. The pull request targets the clone's
+        ``origin/HEAD``; when that cannot be read the run is refused before any build,
+        rather than guessing a branch name."""
+        repo = self._azure_target(remote)
+        if repo is None:
+            return None
+        head = git.run("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+        branch = head.stdout.strip().removeprefix("origin/") if head.ok else ""
+        if not branch:
+            raise FetchRefused(
+                f"the default branch of {repo.web_url} is not known (the clone has no "
+                "origin/HEAD), so no pull request target can be chosen — the run is refused. "
+                "Run `git remote set-head origin --auto` in the clone, or clear the "
+                "repository's clone path so the next run clones afresh"
+            )
+        return _AzureDelivery(
+            creds=_AzureReposProvider(self._tracker_token, repo.web_url), default_branch=branch
+        )
+
+    def _delivery_seams(
+        self, cfg: Mapping[str, Any], remote: str, git: GitRepo, *, deliver: bool
+    ) -> dict[str, Any]:
+        """The delivery half of a factory run's ``FactorySpec``: ``creds``, the three pull
+        request seams and ``target_default_branch``.
+
+        The GitHub App's installation comes first (ADR-0014); with none, the switch on and
+        the remote on Azure Repos in the board's own organisation, the tracker's token pushes
+        and Azure's seams open the pull request (ADR-0057). With no credentials every seam is
+        None and the loop fails closed on delivery. A run that does not deliver never reads
+        ``origin/HEAD`` for Azure, so it is never refused for a missing one."""
+        creds = self._delivery_credentials(cfg, remote) if remote else None
+        api_base = self.settings.github.api_url if creds is not None else "https://api.github.com"
+        azure = self._azure_delivery(remote, git) if creds is None and remote and deliver else None
+        if azure is not None:
+            return {
+                "creds": azure.creds,
+                "open_pr_fn": azure.open_pr_fn,
+                "comment_pr_fn": azure.comment_pr_fn,
+                "close_pr_fn": azure.close_pr_fn,
+                "target_default_branch": azure.default_branch,
+            }
+
+        def open_pr(**kw: Any) -> tuple[str, int]:
+            return github_open_pr_fn(api_base=api_base, **kw)
+
+        def comment_pr(**kw: Any) -> None:
+            github_comment_pr_fn(api_base=api_base, **kw)
+
+        def close_pr(**kw: Any) -> None:  # ADR-0021: a later non-accept closes an open PR
+            github_close_pr_fn(api_base=api_base, **kw)
+
+        on = creds is not None
+        return {
+            "creds": creds,
+            "open_pr_fn": open_pr if on else None,
+            "comment_pr_fn": comment_pr if on else None,
+            "close_pr_fn": close_pr if on else None,
+            "target_default_branch": str(
+                dict(cfg.get("github") or {}).get("default_branch") or "main"
+            ),
+        }
+
     def _fetch_before(self, kind: str, cfg: Mapping[str, Any], url: str) -> bool:
         """Whether a run of ``kind`` fetches first (F39): a factory run on any repository
         with a URL; a replay / blind / mine on one linked through the GitHub App."""
@@ -2298,6 +2428,9 @@ class Worker:
         # installation token (never argv, never on disk — ADR-0014); any other URL clones
         # as the worker's own git can
         auth_header = self._github_auth_header(cfg, url)
+        # ADR-0057 — an Azure Repos repository in the board's own organisation, with the
+        # switch on, clones with the tracker's token the same way
+        azure_header = None if auth_header else self._azure_auth_header(url)
         if emitter is not None:
             emitter.emit(
                 "system",
@@ -2305,9 +2438,15 @@ class Worker:
                 url=safe_url,
                 dest=str(dest),
                 github_app=bool(auth_header),
+                **({"azure_repos": True} if azure_header else {}),
             )
         try:
-            head = clone_repo(url, target, timeout=DEFAULT_CLONE_TIMEOUT_S, auth_header=auth_header)
+            head = clone_repo(
+                url,
+                target,
+                timeout=DEFAULT_CLONE_TIMEOUT_S,
+                auth_header=auth_header or azure_header,
+            )
         except (CloneUrlError, GitError) as exc:
             if emitter is not None:
                 emitter.error("system", "repo.clone.done", exc, url=safe_url, dest=str(dest))
@@ -2376,6 +2515,7 @@ class Worker:
             cur = git.run("rev-parse", "--abbrev-ref", "HEAD")
             branch = cur.stdout.strip() if cur.ok and cur.stdout.strip() != "HEAD" else ""
         auth_header = self._github_auth_header(cfg, url)
+        azure_header = None if auth_header else self._azure_auth_header(url)  # ADR-0057
         if emitter is not None:
             emitter.emit(
                 "system",
@@ -2384,6 +2524,7 @@ class Worker:
                 branch=branch,
                 dest=str(git.path),
                 github_app=bool(auth_header),
+                **({"azure_repos": True} if azure_header else {}),
             )
 
         def refuse(why: str) -> FetchRefused:
@@ -2411,12 +2552,12 @@ class Worker:
         before_res = git.run("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}")
         before = before_res.stdout.strip() if before_res.ok else ""
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
-        if auth_header:
+        if auth_header or azure_header:
             env.update(
                 {
                     "GIT_CONFIG_COUNT": "1",
                     "GIT_CONFIG_KEY_0": "http.extraheader",
-                    "GIT_CONFIG_VALUE_0": auth_header,
+                    "GIT_CONFIG_VALUE_0": auth_header or azure_header or "",
                 }
             )
         argv = [
@@ -4483,30 +4624,19 @@ class Worker:
             **({"checks": checks.to_dict()} if checks.any_on else {}),
             **self._factory_override_stamp(),
         )
-        # delivery through the GitHub App: the linked installation's token pushes the branch
-        # and opens the pull request against the repository's default branch (ADR-0014);
-        # an unlinked repository has no credentials and the loop fails closed on delivery
+        # delivery through the GitHub App (ADR-0014) or Azure Repos (ADR-0057), chosen in
+        # _delivery_seams; with neither the loop fails closed on delivery
         with self.factory() as s:
             row = s.get(Repo, run.repo)
             cfg_json = dict(row.config_json or {}) if row is not None else {}
-        link = dict(cfg_json.get("github") or {})
         remote = str(ctx.config.url or "")
         # B-9 / F30 — before any build: each delivered pull request's fate, read through
         # the installation token, onto the item's chain (at most closed then merged per
         # PR); never fails the run
         self._sync_outcomes(ctx, home, cfg_json, remote)
-        creds = self._delivery_credentials(cfg_json, remote) if remote else None
-        api_base = self.settings.github.api_url if creds is not None else "https://api.github.com"
-
-        def open_pr(**kw: Any) -> tuple[str, int]:
-            return github_open_pr_fn(api_base=api_base, **kw)
-
-        def comment_pr(**kw: Any) -> None:
-            github_comment_pr_fn(api_base=api_base, **kw)
-
-        def close_pr(**kw: Any) -> None:  # ADR-0021: a later non-accept closes an open PR
-            github_close_pr_fn(api_base=api_base, **kw)
-
+        delivery = self._delivery_seams(
+            cfg_json, remote, ctx.git, deliver=bool(p.get("deliver", False))
+        )
         spec = FactorySpec(
             config=ctx.config,
             runner=runner,
@@ -4521,11 +4651,7 @@ class Worker:
             gap_ledger=home.gap_ledger(),
             test_author=test_author,
             deliver=bool(p.get("deliver", False)),
-            creds=creds,
-            open_pr_fn=open_pr if creds is not None else None,
-            comment_pr_fn=comment_pr if creds is not None else None,
-            close_pr_fn=close_pr if creds is not None else None,
-            target_default_branch=str(link.get("default_branch") or "main"),
+            **delivery,
             # the route gate: the same signed (class × size) map the API serves, under the
             # repo's latest controls verdict, sighted rows of the current apparatus — minus
             # this run's own rows (DL-045); the loop reads it once per item, at readiness

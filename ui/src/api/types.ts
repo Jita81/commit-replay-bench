@@ -1991,8 +1991,9 @@ export interface Settings {
     sandbox?: { executor: string; image?: string }
     /** Dependency provisioning for the sealed sandbox (ADR-0019; `CRB_PROVISION__*`). */
     provision?: { enabled?: boolean }
-    /** `FactorySettings.redacted()`: the test author and the delivery licence posture (ADR-0018). */
-    factory?: { test_author: string; require_signed_cell: boolean }
+    /** `FactorySettings.redacted()`: the test author, the delivery licence posture (ADR-0018)
+     *  and whether delivery to Azure Repos is switched on (ADR-0057). */
+    factory?: { test_author: string; require_signed_cell: boolean; azure_repos_delivery?: boolean }
   }
 }
 

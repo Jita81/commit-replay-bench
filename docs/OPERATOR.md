@@ -1519,6 +1519,16 @@ access token with *Work items: read & write*, or a Jira API token with the accou
 `CRB_INTAKE__EMAIL`. It is held owner-only on the API host and read back only as a
 fingerprint, exactly like the GitHub App key.
 
+**Delivering to Azure Repos with the same token (off by default).** A team whose code is in
+Azure Repos in the board's own organisation can let a factory run deliver there with this
+token: set `CRB_FACTORY__AZURE_REPOS_DELIVERY=true` and give the token *Code: read & write* as
+well as *Work items: read & write* (ADR-0057). The token is then used for the clone, the fetch,
+the push and the pull request of a repository whose https remote is in that organisation, and
+for no other remote; it travels only as an `Authorization` header, never in a URL. A
+repository with a GitHub App link still uses the app. The pull request targets the clone's
+`origin/HEAD`, and the ticket shows it in Azure's own Development section. Such a run is started
+through the API or MCP; the Factory screen's delivery check does not know Azure Repos yet.
+
 **2. An operator switches the listener on, per repository.** `/factory/intake?repo=` →
 *Switch the listener on*. Until they do, that repository's column is never read and no
 ticket is ever written to — and the switch is stored with who threw it and when. It is one
