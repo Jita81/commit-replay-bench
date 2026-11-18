@@ -411,6 +411,142 @@ def test_ado_link_is_skipped_when_the_url_is_already_attached() -> None:
     assert methods == ["GET"]
 
 
+# --- an Azure Repos pull request is attached as Azure's own link (ADR-0057) ---------
+
+AZ_ORG = "https://dev.azure.com/contoso"
+AZ_PR = f"{AZ_ORG}/Widgets/_git/shop/pullrequest/17"
+PROJECT_ID = "6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c"
+REPO_ID = "3411ebc1-d5aa-464f-9615-0b527bc66719"
+VSTFS = f"vstfs:///Git/PullRequestId/{PROJECT_ID}%2F{REPO_ID}%2F17"
+
+
+def _azure_board(
+    relations: list[dict[str, Any]] | None = None,
+    *,
+    pr: dict[str, Any] | None = None,
+    pr_status: int = 200,
+    links: bool = True,
+) -> tuple[ado.AdoTracker, list[tuple[str, str]], list[Any]]:
+    """An ADO board in the ``contoso`` organisation that answers the pull request read,
+    the work item read and the relation write, recording every request. ``links`` is the
+    Azure Repos delivery switch, which the server passes as ``pull_request_links``."""
+    seen: list[tuple[str, str]] = []
+    ops: list[Any] = []
+    answer = (
+        pr if pr is not None else {"repository": {"id": REPO_ID, "project": {"id": PROJECT_ID}}}
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, str(request.url)))
+        if "/pullrequests/" in request.url.path:
+            return _json(answer if pr_status == 200 else {"message": "no"}, pr_status)
+        if request.method == "GET":
+            return _json({"id": 4711, "fields": {}, "relations": relations or []})
+        ops.append(json.loads(request.content))
+        return _json({"id": 4711})
+
+    return _ado(handler, organisation_url=AZ_ORG, pull_request_links=links), seen, ops
+
+
+def test_ado_link_azure_pr_adds_one_artifact_link_named_pull_request() -> None:
+    tracker, seen, ops = _azure_board()
+    tracker.link("4711", AZ_PR, c.LINK_PULL_REQUEST)
+    assert [m for m, _ in seen] == ["GET", "GET", "PATCH"]
+    assert seen[0][1].startswith(f"{AZ_ORG}/Widgets/_apis/git/repositories/shop/pullrequests/17?")
+    assert ops == [
+        [
+            {
+                "op": "add",
+                "path": "/relations/-",
+                "value": {
+                    "rel": "ArtifactLink",
+                    "url": VSTFS,
+                    "attributes": {"name": "Pull Request"},
+                },
+            }
+        ]
+    ]
+
+
+def test_ado_link_azure_pr_already_attached_sends_no_patch() -> None:
+    """A retry reads the relations and finds the same link (case does not matter), so the
+    ticket never gets a second one."""
+    tracker, seen, ops = _azure_board([{"rel": "ArtifactLink", "url": VSTFS.upper()}])
+    tracker.link("4711", AZ_PR, c.LINK_PULL_REQUEST)
+    assert [m for m, _ in seen] == ["GET", "GET"]
+    assert ops == []
+
+
+def test_ado_link_vstfs_uses_percent_2f_project_repo_pr() -> None:
+    """Azure's own ``artifactId`` is used when given; built from the ids otherwise, with
+    ``%2F`` between project, repository and number, never a bare slash."""
+    given = f"vstfs:///Git/PullRequestId/{PROJECT_ID}%2F{REPO_ID}%2F17"
+    tracker, _, ops = _azure_board(pr={"artifactId": given})
+    tracker.link("4711", AZ_PR, c.LINK_PULL_REQUEST)
+    assert ops[0][0]["value"]["url"] == given
+
+    tracker, _, ops = _azure_board()
+    tracker.link("4711", AZ_PR, c.LINK_PULL_REQUEST)
+    url = ops[0][0]["value"]["url"]
+    assert url == VSTFS
+    assert url.removeprefix("vstfs:///Git/PullRequestId/").count("/") == 0
+
+
+def test_ado_link_other_org_pr_gets_hyperlink_and_no_pr_get() -> None:
+    """Every organisation shares the ``dev.azure.com`` origin, so the adapter checks the
+    organisation itself: a pull request elsewhere is never read with this board's PAT."""
+    tracker, seen, ops = _azure_board()
+    other = "https://dev.azure.com/fabrikam/Widgets/_git/shop/pullrequest/17"
+    tracker.link("4711", other, c.LINK_PULL_REQUEST)
+    assert not any("/pullrequests/" in url or "fabrikam" in url for _, url in seen)
+    assert ops[0][0]["value"] == {
+        "rel": "Hyperlink",
+        "url": other,
+        "attributes": {"comment": "Pull request"},
+    }
+
+
+def test_ado_link_github_pr_url_unchanged_hyperlink() -> None:
+    tracker, seen, ops = _azure_board()
+    pr = "https://github.com/acme/widgets/pull/9"
+    tracker.link("4711", pr, c.LINK_PULL_REQUEST)
+    assert [m for m, _ in seen] == ["GET", "PATCH"]
+    assert ops[0][0]["value"] == {
+        "rel": "Hyperlink",
+        "url": pr,
+        "attributes": {"comment": "Pull request"},
+    }
+
+
+def test_ado_link_pr_get_failure_falls_back_to_hyperlink() -> None:
+    """The ticket still gets a link when the pull request cannot be read (a PAT without the
+    Code scope answers 401)."""
+    tracker, seen, ops = _azure_board(pr_status=401)
+    tracker.link("4711", AZ_PR, c.LINK_PULL_REQUEST)
+    assert [m for m, _ in seen] == ["GET", "GET", "PATCH"]
+    assert ops[0][0]["value"]["rel"] == "Hyperlink"
+    assert ops[0][0]["value"]["url"] == AZ_PR
+
+
+def test_ado_link_azure_pr_with_switch_off_reads_no_pull_request() -> None:
+    """With Azure Repos delivery off (the default), the board's PAT never reads a pull
+    request: an Azure address is attached as a plain hyperlink, as before ADR-0057."""
+    tracker, seen, ops = _azure_board(links=False)
+    tracker.link("4711", AZ_PR, c.LINK_PULL_REQUEST)
+    assert [m for m, _ in seen] == ["GET", "PATCH"]
+    assert not any("/pullrequests/" in url for _, url in seen)
+    assert ops[0][0]["value"]["rel"] == "Hyperlink"
+
+
+def test_ado_link_azure_pr_already_a_hyperlink_gets_no_artifact_link() -> None:
+    """An earlier attempt that fell back to a hyperlink leaves the ticket linked; a retry
+    does not add Azure's own link beside it, so the ticket never shows the PR twice."""
+    tracker, seen, ops = _azure_board([{"rel": "Hyperlink", "url": AZ_PR.upper()}])
+    tracker.link("4711", AZ_PR, c.LINK_PULL_REQUEST)
+    assert [m for m, _ in seen] == ["GET", "GET"]
+    assert ops == []
+
+
 # --- Jira ----------------------------------------------------------------------------
 
 

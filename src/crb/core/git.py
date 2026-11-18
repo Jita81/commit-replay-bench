@@ -131,6 +131,29 @@ class GitResult:
         return [p for p in self.stdout.split("\0") if p]
 
 
+def scoped_auth_env(auth_header: str, scope: str | None = None) -> dict[str, str]:
+    """The ``GIT_CONFIG_*`` pairs that hand ``auth_header`` to ONE git command. With no
+    ``scope`` it is ``http.extraheader`` (sent on every request the command makes). With a
+    ``scope`` (a remote URL) it is ``http.<scope>.extraheader``, sent only to URLs under that
+    remote, and redirects are switched off for that same remote (``http.<scope>.followRedirects``
+    — a URL-specific key wins over an unscoped one, so an inherited URL-specific ``true``
+    cannot switch them back on), so the header cannot follow one to another host
+    (ADR-0057: a long-lived tracker token)."""
+    if not scope:
+        return {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.extraheader",
+            "GIT_CONFIG_VALUE_0": auth_header,
+        }
+    return {
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": f"http.{scope}.extraheader",
+        "GIT_CONFIG_VALUE_0": auth_header,
+        "GIT_CONFIG_KEY_1": f"http.{scope}.followRedirects",
+        "GIT_CONFIG_VALUE_1": "false",
+    }
+
+
 def git_config_env(
     pairs: Mapping[str, str], *, base: Mapping[str, str] | None = None
 ) -> dict[str, str]:
@@ -420,6 +443,7 @@ def clone_repo(
     git_binary: str = "git",
     allow_local: bool | None = None,
     auth_header: str | None = None,
+    auth_scope: str | None = None,
 ) -> str:
     """Clone ``url`` (full history, ``--no-tags``) into ``dest``; return the HEAD sha.
 
@@ -474,13 +498,7 @@ def clone_repo(
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
     if auth_header:
         # one-shot credential for this process only (git ≥ 2.31): not argv, not on disk
-        env.update(
-            {
-                "GIT_CONFIG_COUNT": "1",
-                "GIT_CONFIG_KEY_0": "http.extraheader",
-                "GIT_CONFIG_VALUE_0": auth_header,
-            }
-        )
+        env.update(scoped_auth_env(auth_header, auth_scope))
     try:
         p = subprocess.run(
             argv, capture_output=True, text=True, timeout=timeout, check=False, env=env
