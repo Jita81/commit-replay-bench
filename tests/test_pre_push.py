@@ -388,6 +388,14 @@ def test_changed_files_keeps_deleted_and_renamed_paths(
     ]
 
 
+def test_a_test_file_is_guessed_by_exact_case_only() -> None:
+    """docs/dod/PLAN.md must not map to ``tests/test_PLAN.py``: a case-insensitive file
+    system finds tests/test_plan.py under that name and pytest then refuses the path."""
+    tests, notes = pre_push.tests_for(["docs/dod/PLAN.md"])
+    assert tests == []
+    assert notes == ["docs/dod/PLAN.md maps to no test: only the ratchets and the full run read it"]
+
+
 def test_a_changed_file_that_maps_to_no_test_gets_a_note() -> None:
     tests, notes = pre_push.tests_for(["docs/CONTRIBUTING.md"])
     assert tests == []
