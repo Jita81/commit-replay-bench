@@ -408,31 +408,33 @@ def test_azure_default_branch_from_origin_head_else_refused(tmp_path: Path) -> N
 
 
 def test_redirects_stay_off_for_the_remote_over_an_inherited_url_specific_true(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     """A URL-specific ``http.<url>.followRedirects`` beats an unscoped one, so the switch
     is scoped to the remote the header is: an inherited ``true`` for the host loses."""
     git = shutil.which("git")
     assert git is not None  # every worker test needs git; none skips on it
-    inherited = tmp_path / "gitconfig"
-    inherited.write_text('[http "https://dev.azure.com/"]\n\tfollowRedirects = true\n')
-    for name in [k for k in os.environ if k.startswith("GIT_CONFIG")]:
-        monkeypatch.delenv(name)
-    env = {
-        **os.environ,
-        "GIT_CONFIG_GLOBAL": str(inherited),
-        "GIT_CONFIG_NOSYSTEM": "1",
-        **core_git.scoped_auth_env("Authorization: Basic eA==", REMOTE),
-    }
-    p = subprocess.run(
-        [git, "config", "--get-urlmatch", "http.followRedirects", f"{REMOTE}/info/refs"],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
-        cwd=tmp_path,
-    )
-    assert p.stdout.strip() == "false", p.stderr
+    # an isolated HOME/.gitconfig, not GIT_CONFIG_GLOBAL: git 2.31 does not read that variable
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".gitconfig").write_text('[http "https://dev.azure.com/"]\n\tfollowRedirects = true\n')
+    base = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_CONFIG", "XDG_"))}
+    base.update({"HOME": str(home), "GIT_CONFIG_NOSYSTEM": "1"})
+
+    def effective(env: dict[str, str]) -> str:
+        p = subprocess.run(
+            [git, "config", "--get-urlmatch", "http.followRedirects", f"{REMOTE}/info/refs"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+            cwd=tmp_path,
+        )
+        return p.stdout.strip()
+
+    assert effective(base) == "true"  # the inherited setting really is in force
+    scoped = {**base, **core_git.scoped_auth_env("Authorization: Basic eA==", REMOTE)}
+    assert effective(scoped) == "false"
 
 
 def test_azure_push_seam_keeps_redirects_off(tmp_path: Path) -> None:

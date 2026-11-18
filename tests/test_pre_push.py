@@ -396,6 +396,47 @@ def test_a_test_file_is_guessed_by_exact_case_only() -> None:
     assert notes == ["docs/dod/PLAN.md maps to no test: only the ratchets and the full run read it"]
 
 
+def _case_blind_is_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``Path.is_file`` find a file under any case of its name, as macOS does."""
+    real = Path.is_file
+
+    def is_file(self: Path) -> bool:
+        if real(self):
+            return True
+        parent = self.parent
+        return parent.is_dir() and self.name.lower() in {n.lower() for n in os.listdir(parent)}
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+
+
+def test_a_wrong_case_guess_is_refused_where_lookup_ignores_case(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same refusal on any file system: with a lookup that ignores case, the old
+    ``is_file`` test alone would return ``tests/test_PLAN.py``."""
+    _case_blind_is_file(monkeypatch)
+    assert (pre_push.ROOT / "tests/test_PLAN.py").is_file()  # the lookup really is blind
+    tests, _notes = pre_push.tests_for(["docs/dod/PLAN.md"])
+    assert tests == []
+
+
+def test_an_unlistable_tests_directory_gives_a_note_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A guess that cannot be verified by name is not accepted, and selection goes on."""
+    real = os.listdir
+
+    def listdir(path: Any = ".") -> list[str]:
+        if Path(path) == pre_push.ROOT / "tests":
+            raise PermissionError(13, "denied")
+        return real(path)
+
+    monkeypatch.setattr(pre_push.os, "listdir", listdir)
+    tests, notes = pre_push.tests_for(["scripts/pre_push.py", "scripts/hooks/pre-push"])
+    assert "tests/test_pre_push.py" in tests  # the explicit mappings still select it
+    assert any("could not be verified by name (PermissionError)" in n for n in notes)
+
+
 def test_a_changed_file_that_maps_to_no_test_gets_a_note() -> None:
     tests, notes = pre_push.tests_for(["docs/CONTRIBUTING.md"])
     assert tests == []

@@ -527,9 +527,9 @@ def test_a_redirect_is_refused_and_the_token_never_reaches_the_second_host() -> 
     assert TOKEN not in str(err.value)
 
 
-@pytest.mark.parametrize("body", ["null", "[]", '"text"'])
+@pytest.mark.parametrize("body", ["null", "[]", '"text"', "", "  "])
 def test_a_non_object_answer_is_refused_not_read_as_empty(body: str) -> None:
-    """``null`` or ``[]`` is no confirmation: the comment is refused, so a caller never
+    """Nothing, ``null`` or ``[]`` is no confirmation: the comment is refused, so a caller never
     records one Azure did not answer for."""
     with pytest.raises(az.AzureReposError, match="no JSON object"):
         az.azure_comment_pr_fn(

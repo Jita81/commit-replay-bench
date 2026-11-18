@@ -181,11 +181,12 @@ def _call(
         reason = _scrub(str(e.reason), credentials)
         raise AzureReposError(f"Azure Repos {what} API unreachable: {reason}") from None
     try:
-        data = json.loads(raw.decode("utf-8")) if raw else {}
+        # an empty body is not an answer either: every endpoint called here returns an object
+        data = json.loads(raw.decode("utf-8")) if raw.strip() else None
     except ValueError:
         raise AzureReposError(f"Azure Repos {what} API answered with no JSON object") from None
     if not isinstance(data, Mapping):
-        # ``null`` or ``[]`` is not an answer to a call that returns an object: refused, so a
+        # nothing, ``null`` or ``[]`` is not an answer to a call that returns an object: refused, so a
         # caller never records a comment or a close Azure did not confirm
         raise AzureReposError(f"Azure Repos {what} API answered with no JSON object")
     return dict(data)
