@@ -102,6 +102,7 @@ from crb.provision.config import (
     ProvisionConfig,
     parse_host_list,
 )
+from crb.server.schemas import BUDGET_MAX_COST_USD
 
 log = logging.getLogger("crb.server.settings")
 
@@ -722,6 +723,18 @@ class IntakeSettings(BaseModel):
     gap_probe_max_cost_usd: float = Field(default=2.0, ge=0.0001, le=1_000_000)
     #: The rung that probes, ``claude_code:<model>``; empty while the probe is off.
     gap_probe_rung: str = ""
+    #: ADR-0060 — after an operator's Register act and a clean probe, queue ONE capped
+    #: factory run that builds and delivers that one ticket. OFF BY DEFAULT: it spends model
+    #: budget on every such ticket. Start-up refuses it without ``gap_probe``, without
+    #: ``require_approval``, without ``auto_manufacture_rung``, and with a cap too large for
+    #: one attempt's budget.
+    auto_manufacture: bool = False
+    #: The rung that builds, ``<builder>:<model>``; empty while the switch is off.
+    auto_manufacture_rung: str = ""
+    #: The whole run's spend cap, rework included; each attempt gets an equal share.
+    auto_manufacture_max_cost_usd: float = Field(default=10.0, ge=0.0001, le=1_000_000)
+    #: Rework attempts after the first build (0..5), as a run's ``max_rework``.
+    auto_manufacture_max_rework: int = Field(default=1, ge=0, le=5)
 
     @property
     def enabled(self) -> bool:
@@ -807,6 +820,35 @@ class IntakeSettings(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _auto_manufacture_is_complete(self) -> IntakeSettings:
+        # ADR-0060: a build queued by no person's act, or on a ticket nobody probed, is
+        # refused; so is a cap whose per-attempt share no run budget could hold
+        rung = self.auto_manufacture_rung.strip()
+        if rung:
+            parsed = parse_rung(rung)
+            rung = f"{parsed.builder}:{parsed.model}" + (
+                f"@{parsed.provider}" if parsed.provider else ""
+            )
+        self.auto_manufacture_rung = rung
+        if not self.auto_manufacture:
+            return self
+        if not self.gap_probe:
+            raise ValueError("auto_manufacture needs gap_probe: it builds only probed tickets")
+        if not self.require_approval:
+            raise ValueError(
+                "auto_manufacture needs require_approval: a build must follow a person's act"
+            )
+        if not rung:
+            raise ValueError("auto_manufacture is on but auto_manufacture_rung is empty")
+        share = self.auto_manufacture_max_cost_usd / (self.auto_manufacture_max_rework + 1)
+        if share > BUDGET_MAX_COST_USD:
+            raise ValueError(
+                f"auto_manufacture_max_cost_usd gives {share:.4f} per attempt; one "
+                f"attempt's budget cannot exceed {BUDGET_MAX_COST_USD}"
+            )
+        return self
+
     def redacted(self) -> dict[str, Any]:
         """What ``/settings`` may show. There is no secret in this model, but the shape
         matches ``BuilderSettings.redacted`` so a reader treats them alike."""
@@ -831,6 +873,10 @@ class IntakeSettings(BaseModel):
             "gap_probe_max_questions": self.gap_probe_max_questions,
             "gap_probe_max_cost_usd": self.gap_probe_max_cost_usd,
             "gap_probe_rung": self.gap_probe_rung,
+            "auto_manufacture": self.auto_manufacture,
+            "auto_manufacture_rung": self.auto_manufacture_rung,
+            "auto_manufacture_max_cost_usd": self.auto_manufacture_max_cost_usd,
+            "auto_manufacture_max_rework": self.auto_manufacture_max_rework,
             "enabled": self.enabled,
         }
 

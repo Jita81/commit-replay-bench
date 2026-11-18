@@ -1,6 +1,8 @@
 # ADR-0022 — An operator approves a ticket before it is registered; one pass per repository
 
-**Status:** Proposed (DL-059)
+**Status:** Proposed (DL-059) · **Amended by
+[ADR-0060](0060-a-clean-probe-queues-one-capped-build.md)** (2026-11-18: the act may also consent to
+one capped build)
 **Date:** 2026-09-25
 **Apparatus impact:** none — intake decides *which* items exist, never how one is graded
 (ADR-0017's reasoning holds): no belt, cell, route, threshold or sign-off clause moves, and
@@ -52,7 +54,9 @@ refuses.
    repository a factory run holds (409 `factory_run_active`). The act writes on the ticket,
    so it is refused while the repository's listener is off (422 `intake_listener_off`, the
    same refusal the poll has: the switch stays the consent to write on that board). It is
-   evented twice: `intake.registered` on the item's chain with
+   evented twice (Amended by ADR-0060: where `CRB_INTAKE__AUTO_MANUFACTURE` is on, the act
+   also consents to one capped build of that content after a clean probe):
+   `intake.registered` on the item's chain with
    `approved_by: operator:<account id>` — the stable, unique account id, never the display
    name an account can change or share — and `approved_by_name` beside it for a human
    reader, and `intake.approved` on the repository's system trace.

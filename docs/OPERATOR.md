@@ -1495,6 +1495,10 @@ CRB_INTAKE__GAP_PROBE=false                   # OFF by default: no trial build b
 CRB_INTAKE__GAP_PROBE_RUNG=""                 # required when on; a claude_code rung only
 CRB_INTAKE__GAP_PROBE_MAX_QUESTIONS=5         # 1..10, at most the gap limit
 CRB_INTAKE__GAP_PROBE_MAX_COST_USD=2.0        # each trial build's spend cap, 0.0001..1e6
+CRB_INTAKE__AUTO_MANUFACTURE=false            # OFF by default: no build without a run started by hand (ADR-0060)
+CRB_INTAKE__AUTO_MANUFACTURE_RUNG=""          # required when on; the factory rung it builds on
+CRB_INTAKE__AUTO_MANUFACTURE_MAX_COST_USD=10.0  # the whole run's spend cap, shared per attempt
+CRB_INTAKE__AUTO_MANUFACTURE_MAX_REWORK=1     # 0..5 rework attempts after the first build
 CRB_PUBLIC_URL=https://crb.example.com        # THIS deployment's address (required, see below)
 ```
 
@@ -1613,7 +1617,8 @@ are in §8.
 
 **Cost.** Reading a column, drafting an item and posting the feedback call no model and
 spend nothing. Only a factory run spends, and it is still started the same way (§3) — and,
-where `CRB_INTAKE__GAP_PROBE` is on, one trial build per approved ticket content.
+where `CRB_INTAKE__GAP_PROBE` is on, one trial build per approved ticket content; and, where
+`CRB_INTAKE__AUTO_MANUFACTURE` is on, one capped factory run per content an operator approved.
 
 **The gap probe (ADR-0059).** Off by default. When on, a ready ticket that has been approved
 (by the Register act, or an author on `CRB_INTAKE__APPROVE_AUTHORS`) is built once, blind,
@@ -1631,6 +1636,23 @@ production a worker that refuses unsealed builds (ADR-0023) refuses every probe 
 approved ticket stops `gap_probe_failed`. Start the worker with `CRB_ALLOW_UNSEALED_PROD=1`,
 with `CRB_ALLOW_UNSEALED_PROD_BY` naming an active admin and `CRB_ALLOW_UNSEALED_PROD_REASON`
 saying why (G-663), to run probes on purpose.
+
+**The automatic build (ADR-0060).** Off by default, and refused at start-up without the gap
+probe, without `CRB_INTAKE__REQUIRE_APPROVAL`, without `CRB_INTAKE__AUTO_MANUFACTURE_RUNG`, or
+with a cap whose share per attempt is above one run's budget limit. When on, an operator's
+Register act also consents to one build. After a clean probe the ticket registers, and the
+worker's next intake pass queues one delivering `factory` run that builds that item only. Its
+whole spend is capped by `CRB_INTAKE__AUTO_MANUFACTURE_MAX_COST_USD`, shared equally between
+the first build and `CRB_INTAKE__AUTO_MANUFACTURE_MAX_REWORK` reworks. Only an act made while
+the switch is on consents: an allowlisted author, an unattended column, or an act made before
+the switch was turned on never starts a build. One run per ticket content: an edit needs a new
+probe and a new act. The chain records `intake.manufacture.requested` (the run) or
+`intake.manufacture.skipped` (why not, for good at that content), and the system trace records
+`intake.manufacture.queued`. A factory run already active, or an error reading the delivery
+route, waits for the next pass. On a production worker that refuses unsealed builds the run is
+skipped `sealed`; start the worker with `CRB_ALLOW_UNSEALED_PROD=1`, with
+`CRB_ALLOW_UNSEALED_PROD_BY` naming an active admin and `CRB_ALLOW_UNSEALED_PROD_REASON` saying
+why (G-663), to build on purpose.
 
 ## 12. The prevention loop
 

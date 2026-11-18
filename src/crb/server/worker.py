@@ -459,14 +459,20 @@ from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcome
 from crb.server.flow_record import record_deliver_transitions
 from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.intake import (
+    ROUTE_ERROR,
+    ROUTE_FOUND,
+    ROUTE_NONE,
     ApprovalPolicy,
+    FencedTracker,
     ListenerState,
     PollReport,
     apply_outcome_map,
+    auto_manufacture_for,
     build_tracker,
     gap_probe_for,
     intake_lease,
     item_url_for,
+    manufacture_registered,
     poll_repository,
     post_outcomes_to_tickets,
     return_state_for,
@@ -1587,6 +1593,17 @@ class Worker:
         # (an operator registers a ready ticket unless its author is allowlisted) and the
         # repository's lease (one pass at a time — a busy pass does nothing)
         budget_s = float(self.settings.intake.poll_budget_s)
+        began = time.monotonic()
+        # ADR-0060: None (off) unless CRB_INTAKE__AUTO_MANUFACTURE — then one capped build
+        # is queued after an operator's Register act and a clean probe
+        auto = auto_manufacture_for(
+            self._gap_probe_settings(),
+            self.factory,
+            repo,
+            run_active=lambda: self._factory_run_active(repo),
+            delivery_route=lambda: self._delivery_route(repo),
+            sealed=bool(self.settings.refuse_unsealed),
+        )
 
         def tell_the_tickets(report: PollReport, tracker: TrackerClient) -> None:
             """What the loop did with the items this column produced, told to the tickets
@@ -1610,6 +1627,18 @@ class Worker:
                 outcome_map=dict(self.settings.intake.outcome_map),
                 evidence=home.evidence(actor="worker"),
             )
+            # still under the lease, renewed before each act: a pass that lost it stops
+            if auto is not None and isinstance(tracker, FencedTracker) and not tracker.lost:
+                try:
+                    manufacture_registered(
+                        home,
+                        tracker=tracker.name,
+                        auto=auto,
+                        renew=tracker.lease.renew,
+                        out_of_time=lambda: time.monotonic() - began > budget_s,
+                    )
+                except Exception:  # never fail the poll: the next pass sweeps again
+                    _LOG.warning("automatic build sweep failed", extra={"repo": repo})
 
         # a busy pass (another holds the lease, and it posts the outcomes too) or a
         # withdrawn one (the listener was switched off since it was listed) does nothing
@@ -2330,6 +2359,31 @@ class Worker:
         if not inst.can_deliver:
             return None
         return _InstallationProvider(self._github_app(), installation, remote)
+
+    def _delivery_route(self, repo: str) -> str:
+        """Whether a factory run on ``repo`` could deliver now (ADR-0060): ``found``,
+        ``none`` (no route is configured — final for an automatic build), or ``error``
+        (GitHub could not be asked — the automatic build waits for the next pass). The same
+        routes :meth:`_delivery_seams` chooses between: the GitHub App first, then Azure
+        Repos with the tracker's token."""
+        with self.factory() as s:
+            row = s.get(Repo, repo)
+            if row is None:
+                return ROUTE_NONE
+            cfg = dict(row.config_json or {})
+            remote = str(row.url or cfg.get("url") or "").strip()
+        if not remote:
+            return ROUTE_NONE
+        installation = self._github_installation(cfg)
+        if installation is not None and self._github_host_ok(remote):
+            try:
+                inst = self._github_app().installation(installation)
+            except GitHubAppError:
+                return ROUTE_ERROR
+            return ROUTE_FOUND if inst.can_deliver else ROUTE_NONE
+        if self._azure_target(remote) is not None and self._tracker_token():
+            return ROUTE_FOUND
+        return ROUTE_NONE
 
     def _azure_target(self, remote: str) -> AzureRepo | None:
         """The Azure Repos repository ``remote`` names, when the tracker's token may go to it
@@ -4783,6 +4837,21 @@ class Worker:
                 f"{pinned_ev[:16] or '(none)'}…, active {backlog.evolutions_hash[:16] or '(none)'}… "
                 "— re-queue so the run works the items you can see"
             )
+        # ADR-0060: the intake's automatic build works its one item and no other, and only
+        # while that item is still active and depends on nothing (checked again at claim)
+        only = str(p.get("intake_item") or "")
+        if only:
+            target = backlog.get(only)
+            if target is None or only not in {i.id for i in backlog.active_items()}:
+                raise ValueError(
+                    f"item {only} is no longer active on the backlog: this automatic build "
+                    "is not run"
+                )
+            if target.depends_on:
+                raise ValueError(
+                    f"item {only} depends on other items: an automatic build works one item "
+                    "alone, so run the backlog instead"
+                )
         ladder = self._ladder(ctx)
         budget = self._budget(ctx)
         rungs = trial_labels_for(ladder, budget)
@@ -4926,7 +4995,7 @@ class Worker:
             else None,
         )
         loop = FactoryLoop(spec, ctx.git, emitter=ctx.emitter)
-        total = len(backlog.ordered())
+        total = 1 if only else len(backlog.ordered())
         counts: dict[str, Any] = {"items": total, "done": 0, "accepted": 0, "by_status": {}}
         ctx.counts.update(counts)
         self._progress(ctx, 0, total)
@@ -4980,6 +5049,7 @@ class Worker:
             authored=home.authored(),
             expected_hash=backlog.backlog_hash,
             stop=stop,
+            **({"only": only} if only else {}),
         )
         counts["outcomes"] = [o.to_dict() for o in outcomes]
         ctx.counts.clear()

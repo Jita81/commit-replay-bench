@@ -1852,13 +1852,18 @@ class FactoryLoop:
         authored: Mapping[str, AuthoredTest] | None = None,
         expected_hash: str = "",
         stop: Callable[[], bool] | None = None,
+        only: str = "",
     ) -> list[ItemOutcome]:
         """All-comers: every active item is attempted or explicitly routed, in
         dependency order. The backlog must be frozen and verify; the freeze is
         recorded once. An item whose dependency was not accepted is recorded as
         blocked, never silently skipped — the dependency resolved through the
         backlog's supersession chain, so its latest evolution is what must have been
-        accepted."""
+        accepted.
+
+        ``only`` (ADR-0060, the intake's automatic build) works that one item and no
+        other: the rest are not attempted and get no outcome, so a later run still works
+        them. The caller has checked the item is active and depends on nothing."""
         if not backlog.frozen or not backlog.verify(expected_hash):
             raise BacklogError("backlog must be frozen and verify against its hash before a run")
         ev = self.spec.evidence
@@ -1874,6 +1879,8 @@ class FactoryLoop:
         tests = dict(authored or {})
         outcomes: dict[str, ItemOutcome] = {}
         for item in backlog.ordered():
+            if only and item.id != only:
+                continue
             if stop is not None and stop():
                 break
             # a dependency names the id as registered; what was worked may be the latest

@@ -675,6 +675,19 @@ def test_a_dependency_is_resolved_through_its_evolution_before_the_block_check(
     assert rig.author.calls == [], "the dependant was never sent to a builder"
 
 
+def test_only_works_the_one_item_and_leaves_the_rest_without_an_outcome(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """ADR-0060: the intake's automatic build works the item an operator consented to and
+    no other; the rest get no outcome, so a later run still works them."""
+    rig = _rig(pyrepo, tmp_path)
+    route, needs_route = _items()[3], _items()[5]  # I-4, and I-6 that depends on it
+    backlog = Backlog(items=(route, needs_route), repo="pyrepo").freeze()
+    outcomes = rig.loop().run_backlog(backlog, expected_hash=backlog.backlog_hash, only="I-4")
+    assert [(o.item_id, o.status) for o in outcomes] == [("I-4", fl.STATUS_NEEDS_CONTEXT)]
+    assert not rig.evidence.events_for("I-6")
+
+
 def test_horizon_checkpoint_is_ledgered(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
     rig = _rig(pyrepo, tmp_path)
     ev = rig.loop().checkpoint(
