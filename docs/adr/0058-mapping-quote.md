@@ -60,7 +60,7 @@ say what is left for a reading after the mapping.
    with `n_repos`) reads every other repository's; `declared` echoes the caller's band (low
    and high only); `unknown` serves `null` with a reason. A tier reads only the newest
    apparatus among its metered rows and needs at least 2. A metered row has a known cost and
-   metered something (a cost or a token): a refused call such as an outage records $0 with no
+   metered at least one token: a refused call such as an outage records $0 with no
    token and observed no cost, so it is left out rather than read as a free attempt. An
    unknown cost is never read as 0, and an unknown cell is never priced at $0. Every metered
    attempt counts, whatever its outcome, because the money was spent.

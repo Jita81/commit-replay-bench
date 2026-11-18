@@ -18,7 +18,7 @@ Honest by construction
   ``r1``), other arms (bigger briefs) and context-set arms never enter a basis.
 * A tier reads only the newest apparatus among its candidate rows (never pooled) and needs
   ``MIN_BASIS_ROWS`` rows with a known, metered cost; an unknown cost is never read as zero,
-  and a row that metered nothing (no cost, no token: the provider refused the call, or the
+  and a row that metered no token (the provider refused the call, or the
   attempt ended before it) observed no cost and is left out.
 * Every metered attempt that recorded a cost counts, whatever its outcome: money spent on an
   attempt later disqualified was still spent. This is also what keeps the quote blind to
@@ -149,7 +149,7 @@ BASIS_ROWS = (
     "a basis row is a sighted replay attempt of this builder and model on rung r1 with the "
     "S3 brief (the commit's own tests), at the newest apparatus among the tier's rows, in this "
     "repository's checks arm and posture class; a row with no known cost, a negative cost, "
-    "or that metered nothing (no cost and no token), is left out"
+    "or that metered no token, is left out"
 )
 PRECISION_NOTE = (
     "wilson_half_width_p50 is the Wilson 95% half-width at an assumed p of 0.5 for the tasks "
@@ -473,12 +473,13 @@ def _index(rows: Iterable[CostRow], builder: str, model: str) -> dict[CellKey, l
 
 
 def _metered(r: CostRow) -> bool:
-    """The row observed a cost: a known, finite, non-negative cost, and the builder metered
-    something (a row with no cost and no token — a refused call, an attempt that ended before
-    it — observed nothing). A negative cost is not a price and would invert the band."""
+    """The row observed a cost: a known, finite, non-negative cost on a row that metered at
+    least one token. A row with no token (a refused call, an attempt that ended before it)
+    observed nothing and never prices a cell; a $0 with tokens is a real zero and counts.
+    A negative cost is not a price and would invert the band."""
     if not (r.cost_known and math.isfinite(r.cost_usd) and r.cost_usd >= 0):
         return False
-    return r.cost_usd > 0 or r.tokens_in > 0 or r.tokens_out > 0
+    return r.tokens_in > 0 or r.tokens_out > 0
 
 
 def _newest(rows: list[CostRow]) -> tuple[str | None, list[CostRow]]:
