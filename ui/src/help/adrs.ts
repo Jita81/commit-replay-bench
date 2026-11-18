@@ -79,6 +79,7 @@ export const ADR_TITLES: ReadonlyArray<readonly [string, string]> = [
   ['0055', 'Audited-bypass plan arm: a plan attested as drafted blind skips only the lookalike checks of the plan guard'],
   ['0056', 'A ticket with open questions goes back to a state the team names'],
   ['0057', 'Azure Repos pull request delivery, attached to the Azure DevOps ticket'],
+  ['0059', 'A gap probe asks what the build guessed'],
 ]
 
 /** `ADR-0015` — the name a record carries in the /help/docs route. */

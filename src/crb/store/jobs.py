@@ -124,6 +124,10 @@ KIND_FACTORY = "factory"
 #: ADR-0019: measure the repository's tasks in the posture that will grade them — no
 #: builder is constructed and no model is called.
 KIND_QUALIFY = "qualify"
+#: ADR-0059: one unseen, undelivered build of an approved intake ticket that reports the
+#: decisions it had to guess. Queued only by intake, never by a client (it is absent from
+#: ``crb.server.schemas.RUN_KINDS``); no ledger row, no patch, no branch.
+KIND_GAP_PROBE = "gap_probe"
 RUN_KINDS: tuple[str, ...] = (
     KIND_SETUP,
     KIND_PROBE,
@@ -135,6 +139,7 @@ RUN_KINDS: tuple[str, ...] = (
     KIND_LABEL,
     KIND_FACTORY,
     KIND_QUALIFY,
+    KIND_GAP_PROBE,
 )
 
 DEFAULT_MAX_RECLAIMS = 3
@@ -555,6 +560,7 @@ __all__ = [
     "DEFAULT_MAX_RECLAIMS",
     "KIND_BLIND",
     "KIND_CONTROLS",
+    "KIND_GAP_PROBE",
     "KIND_LABEL",
     "KIND_MINE",
     "KIND_ORACLE",

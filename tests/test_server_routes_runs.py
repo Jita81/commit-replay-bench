@@ -742,6 +742,9 @@ class TestCredentialPresence:
             ("routes/runs.py", "_jobs_api"): "builds the queue adapter the gated routes call",
             ("routes/runs.py", "_enqueue"): "the queue adapter itself, called by the gated routes",
             ("routes/repos.py", "probe_repo"): "queues kind probe only: no builder, no spend",
+            ("intake.py", "_request_gap_probe"): (
+                "calls the injected GapProbe seam, whose enqueue (gap_probe_for) is gated"
+            ),
         }
         root = Path(server_pkg.__file__).parent
         seen: set[tuple[str, str]] = set()
@@ -773,6 +776,7 @@ class TestCredentialPresence:
         assert {
             ("routes/runs.py", "create_run"),
             ("routes/learn.py", "queue_remeasurement"),
+            ("intake.py", "gap_probe_for"),
         } <= seen
         assert set(exempt) <= seen
 

@@ -1,6 +1,6 @@
 # ADR-0017 — The ticket is the backlog item; the column is the consent gate
 
-**Status:** Accepted (operator decision DL-051; built in wave 1, stream I) · **Superseded in part by [ADR-0022](0022-intake-approval-by-default.md)** (2026-09-25: the column is the request, an operator's Register act is the consent) · **Amended by [ADR-0056](0056-a-not-ready-ticket-goes-back.md)** (2026-11-17: a configured return state for a ticket with open questions)
+**Status:** Accepted (operator decision DL-051; built in wave 1, stream I) · **Superseded in part by [ADR-0022](0022-intake-approval-by-default.md)** (2026-09-25: the column is the request, an operator's Register act is the consent) · **Amended by [ADR-0056](0056-a-not-ready-ticket-goes-back.md)** (2026-11-17: a configured return state for a ticket with open questions) · **Amended by [ADR-0059](0059-a-gap-probe-asks-what-the-build-guessed.md)** (2026-11-18: an optional trial build before registration)
 **Date:** 2026-09-22
 **Apparatus impact:** none — nothing here changes what a belt means, how a cell is keyed
 or how a route is decided. Intake decides *which* items exist, never how one is graded.
@@ -38,6 +38,8 @@ day. The two have to be reconciled without weakening the first.
 **The ticket is the backlog item.** One ticket becomes one `BacklogItem` with the id
 `<tracker>-<key>` (`ado-4711`, `jira-abc-123`), registered through exactly the path the
 API uses (`FactoryHome.register_backlog` / `register_evolution`). Nothing is typed twice.
+(Amended by ADR-0059: where `CRB_INTAKE__GAP_PROBE` is on, only after one trial build of that
+content reported no decision it had to guess.)
 
 **The column is the consent gate.** Moving a ticket into one watched column is the request
 to manufacture. Nothing outside that column is read, ever.
