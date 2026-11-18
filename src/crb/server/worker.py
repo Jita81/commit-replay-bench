@@ -272,7 +272,7 @@ from crb.builders.adapter import (
     run_arm_for,
     rungs_from_entries,
 )
-from crb.builders.base import Budget, BuildBrief, Builder, EscalationLadder, Rung
+from crb.builders.base import STOP_DONE, Budget, BuildBrief, Builder, EscalationLadder, Rung
 from crb.builders.brief import ARM_S1, ContextEntry, S1Arm
 from crb.builders.budget import budget_for_rung, load_pricing, parse_rung
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
@@ -4681,6 +4681,14 @@ class Worker:
         )
         if not outcome.cost_known:
             return failed(FAIL_COST_UNKNOWN, cost=outcome.cost_usd)
+        if "assumptions" not in outcome.extra or outcome.stop_reason != STOP_DONE or outcome.errors:
+            # a build that ended without its structured answer (refused auth, a stream
+            # error, the spend cap, the wall clock) is a failed probe, never "no questions"
+            said = "; ".join(outcome.errors) or "no structured answer"
+            detail = f"stopped {outcome.stop_reason or 'unknown'}: {said}"
+            return failed(
+                FAIL_BUILD_ERROR, redact_and_cap(detail, max_chars=300), cost=outcome.cost_usd
+            )
         questions = parse_guesses(
             outcome.extra.get("assumptions"), int(p.get("max_questions") or 5)
         )

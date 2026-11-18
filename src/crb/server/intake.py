@@ -91,6 +91,7 @@ Touch when:   never for a new repository (a board is linked in the repository's 
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import secrets
@@ -248,6 +249,9 @@ class GapProbe:
     enqueue: Callable[[Mapping[str, Any]], str]
     run_status: Callable[[str], str | None]
     max_questions: int = 5
+    #: cancel a queued probe run whose request could not be recorded, so a pass that then
+    #: finds no request never leaves a second paid probe running beside the first
+    cancel: Callable[[str], None] | None = None
 
 
 def gap_probe_for(settings: Any, sessions: sessionmaker[Session], repo: str) -> GapProbe | None:
@@ -312,7 +316,10 @@ def gap_probe_for(settings: Any, sessions: sessionmaker[Session], repo: str) -> 
         run = queue.get(run_id) if run_id else None
         return None if run is None else str(run.status)
 
-    return GapProbe(enqueue, run_status, int(intake.gap_probe_max_questions))
+    def cancel(run_id: str) -> None:
+        queue.request_cancel(run_id, actor="intake")
+
+    return GapProbe(enqueue, run_status, int(intake.gap_probe_max_questions), cancel)
 
 
 #: The advice on a row whose return did not happen for a reason that passes (the tracker
@@ -1570,12 +1577,13 @@ def _handle_ticket(
     # ADR-0059: keyed on the ticket's CONTENT, which this product's own writes never move,
     # so a probe's comment, label and move cannot ask for another probe
     probe = (
-        probe_state(
+        _probe_now(
+            home,
             events,
-            tracker.name,
-            ticket.key,
-            draft.item.labels.get("content_revision", ""),
-            gap_probe.run_status,
+            tracker=tracker.name,
+            key=ticket.key,
+            content=draft.item.labels.get("content_revision", ""),
+            run_status=gap_probe.run_status,
         )
         if gap_probe is not None and not already_registered
         else NO_PROBE
@@ -1981,6 +1989,25 @@ def _unsay_the_return(
     return replace_row(row, feedback=plain.text)
 
 
+def _probe_now(
+    home: FactoryHome,
+    events: Sequence[Any],
+    *,
+    tracker: str,
+    key: str,
+    content: str,
+    run_status: Callable[[str], str | None],
+) -> ProbeState:
+    """:func:`probe_state` for a pass whose ``events`` were read when it began. The worker
+    writes the probe's result BEFORE it ends the run, so a run seen ended with no result in
+    that copy may have finished during the pass: the chain is read again before the probe
+    is judged dead, and a clean probe is never recorded failed."""
+    probe = probe_state(events, tracker, key, content, run_status)
+    if probe.state == STATE_FAILED and not probe.recorded:
+        probe = probe_state(_read_events(home), tracker, key, content, run_status)
+    return probe
+
+
 def _request_gap_probe(
     item: BacklogItem,
     *,
@@ -2013,17 +2040,25 @@ def _request_gap_probe(
             "max_questions": int(gap_probe.max_questions),
         }
     )
-    evidence.append(
-        EV_GAP_PROBE_REQUESTED,
-        item.id,
-        tracker=tracker.name,
-        key=key,
-        revision=revision,
-        content_revision=content,
-        approved_by=approved_by,
-        approved_by_name=approved_by_name or approved_by,
-        run_id=run_id,
-    )
+    try:
+        evidence.append(
+            EV_GAP_PROBE_REQUESTED,
+            item.id,
+            tracker=tracker.name,
+            key=key,
+            revision=revision,
+            content_revision=content,
+            approved_by=approved_by,
+            approved_by_name=approved_by_name or approved_by,
+            run_id=run_id,
+        )
+    except Exception:
+        # the run is queued but the chain does not name it: the next pass would find no
+        # request and queue a second paid probe, so this one is cancelled before it spends
+        if gap_probe.cancel is not None:
+            with contextlib.suppress(Exception):  # the original failure is the one raised
+                gap_probe.cancel(run_id)
+        raise
     return run_id
 
 
@@ -2069,7 +2104,7 @@ def _gap_probe_step(
                 evidence=evidence,
                 approved_by=approved_by,
             )
-        except Exception as exc:  # a queue that refused: nothing spent, the next pass asks
+        except Exception as exc:  # refused, or queued then cancelled: nothing left to spend
             evidence.append(
                 EV_STOPPED,
                 draft.item.id,
@@ -2366,7 +2401,14 @@ def _register_approved(
     item = BacklogItem.from_dict(dict(waiting.payload.get("item") or {}))
     evidence = home.evidence(actor=approver)
     if gap_probe is not None:
-        probe = probe_state(events, tracker.name, key, now_content, gap_probe.run_status)
+        probe = _probe_now(
+            home,
+            events,
+            tracker=tracker.name,
+            key=key,
+            content=now_content,
+            run_status=gap_probe.run_status,
+        )
         if probe.state == STATE_NONE:
             return _probe_on_approval(
                 item,

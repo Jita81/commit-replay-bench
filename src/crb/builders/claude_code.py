@@ -1365,8 +1365,11 @@ class ClaudeCodeBuilder:
         if self.gap_probe:
             so = (stats.result or {}).get("structured_output")
             raw = so.get("assumptions") if isinstance(so, dict) else None
-            # untrusted: the probe's reader (crb.intake.gap_probe.parse_guesses) filters it
-            extra["assumptions"] = list(raw) if isinstance(raw, list) else []
+            # untrusted: the probe's reader (crb.intake.gap_probe.parse_guesses) filters it.
+            # Set ONLY when the build answered: a stream with no structured answer has no
+            # key, so the worker reads it as a failed probe, never as "no questions"
+            if isinstance(raw, list):
+                extra["assumptions"] = list(raw)
         return finish(done=done and stop == STOP_DONE, summary=summary, stop=stop, extra=extra)
 
 

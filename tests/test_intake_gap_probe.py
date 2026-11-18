@@ -123,12 +123,18 @@ def _poll(home: FactoryHome, tracker: FakeTracker, **kw: Any) -> sv.PollReport:
 
 
 class Queue:
-    """The probe's queue seam: records each request, answers a settable run status."""
+    """The probe's queue seam: records each request, answers a settable run status, and
+    records each run it was asked to cancel."""
 
     def __init__(self, *, refuse: bool = False) -> None:
         self.requests: list[dict[str, Any]] = []
         self.status: dict[str, str | None] = {}
         self.refuse = refuse
+        self.cancelled: list[str] = []
+
+    def cancel(self, run_id: str) -> None:
+        self.cancelled.append(run_id)
+        self.status[run_id] = "cancelled"
 
     def enqueue(self, request: Any) -> str:
         if self.refuse:
@@ -142,7 +148,7 @@ class Queue:
         return self.status.get(run_id)
 
     def probe(self, n: int = 5) -> sv.GapProbe:
-        return sv.GapProbe(self.enqueue, self.run_status, n)
+        return sv.GapProbe(self.enqueue, self.run_status, n, self.cancel)
 
 
 def _finish(home: FactoryHome, queue: Queue, questions: list[dict[str, str]]) -> None:
@@ -673,6 +679,8 @@ def _outcome(**kw: Any) -> BuildOutcome:
         "cost_usd": 0.37,
         "tokens_in": 1000,
         "tokens_out": 200,
+        "done": True,
+        "stop_reason": "done",
         "extra": {
             "assumptions": [
                 {"decision": "error_text", "question": "What does the 503 say?", "guessed": "x"},
@@ -897,3 +905,157 @@ def test_the_served_cost_of_a_probe_run_is_its_build_step_events(tmp_path: Path)
         assert probe is not None and other is not None
         assert run_out(s, probe).cost_usd == pytest.approx(0.75)
         assert run_out(s, other).cost_usd == 0.0
+
+
+# --- review regressions -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        # the model-error path: no structured answer, no assumptions key
+        {"done": False, "stop_reason": "model_error", "errors": ("model_error: x",), "extra": {}},
+        # a stream that ended "done" but never carried the structured answer
+        {"extra": {}},
+        # the spend cap stopped it, even though a partial list came back
+        {"done": False, "stop_reason": "max_cost_usd", "extra": {"assumptions": []}},
+        # a refused login killed the stream after it answered
+        {"errors": ("model_error: auth_refused (HTTP 401)",), "extra": {"assumptions": []}},
+    ],
+)
+def test_a_probe_build_that_stopped_without_its_answer_is_failed_not_clean(
+    kw: dict[str, Any], tmp_path: Path, seams: SimpleNamespace
+) -> None:
+    """Review: a probe build that failed before its structured answer was recorded as
+    finished with no questions, and the poll registered the ticket on no probe at all."""
+    seams.builder = _Builder(_outcome(**kw))
+    worker = _worker(tmp_path)
+    ctx, emitted = _ctx()
+    status, counts, _ = worker._run_gap_probe(ctx)
+    assert status == "failed" and counts == {"gap_probe": gp.FAIL_BUILD_ERROR}
+    (ev,) = _chain(worker)
+    assert ev.kind == EV_INTAKE_GAP_PROBE_FAILED and ev.payload["cost_usd"] == 0.37
+    assert len(emitted) == 1 and seams.ws.removed == seams.ws.opened
+
+
+def test_a_clean_build_with_an_empty_answer_still_finishes_with_no_questions(
+    tmp_path: Path, seams: SimpleNamespace
+) -> None:
+    seams.builder = _Builder(_outcome(extra={"assumptions": []}))
+    worker = _worker(tmp_path)
+    ctx, _ = _ctx()
+    status, counts, _ = worker._run_gap_probe(ctx)
+    assert status == "succeeded" and counts == {"gap_probe": "finished", "questions": 0}
+
+
+class _LateQueue(Queue):
+    """A probe run that finishes DURING a poll pass: the first time its status is asked,
+    the worker writes its result to the chain and then ends the run, as the worker does."""
+
+    def __init__(self, home: FactoryHome, questions: list[dict[str, str]]) -> None:
+        super().__init__()
+        self.home, self.questions, self.armed = home, questions, False
+
+    def run_status(self, run_id: str) -> str | None:
+        if self.armed:
+            self.armed = False
+            _finish(self.home, self, self.questions)
+        return super().run_status(run_id)
+
+
+def test_a_probe_that_finishes_during_a_poll_pass_is_never_recorded_failed(
+    home: FactoryHome,
+) -> None:
+    """Review: the pass read the chain at its start but the run's status live, so a probe
+    that finished mid-pass was recorded failed beside its own result and the row told the
+    person to edit the ticket."""
+    queue = _LateQueue(home, [])
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, gap_probe=queue.probe())
+    queue.armed = True
+    report = _poll(home, tracker, gap_probe=queue.probe())
+    assert EV_INTAKE_GAP_PROBE_FAILED not in _kinds(home)
+    assert report.registered == 1 and len(queue.requests) == 1
+    (row,) = report.rows
+    assert row.stopped != sv.REASON_GAP_PROBE_FAILED
+
+
+def test_a_register_act_racing_a_finishing_probe_is_not_refused_as_failed(
+    home: FactoryHome,
+) -> None:
+    queue = _LateQueue(home, ASKED)
+    tracker = _tracker(_ticket(author="mallory@example.invalid"))
+    _poll(home, tracker, gap_probe=queue.probe(), approval=sv.ApprovalPolicy())
+    _register(home, tracker, queue)
+    queue.armed = True
+    with pytest.raises(sv.ApprovalRefused) as err:
+        _register(home, tracker, queue)
+    assert err.value.code == "gap_probe_questions"
+    assert EV_INTAKE_GAP_PROBE_FAILED not in _kinds(home)
+
+
+def test_a_queued_probe_whose_request_cannot_be_recorded_is_cancelled(
+    home: FactoryHome, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review: the run was queued before its request was recorded, so a failed chain write
+    left a paid probe running that no pass could see, and the next pass queued a second."""
+    from crb.factory.evidence import FactoryEvidence
+
+    real = FactoryEvidence.append
+
+    def append(self: Any, kind: str, item_id: str = "", **payload: Any) -> Any:
+        if kind == EV_INTAKE_GAP_PROBE_REQUESTED:
+            raise OSError("disk full")
+        return real(self, kind, item_id, **payload)
+
+    queue = Queue()
+    tracker = _tracker(_ticket())
+    with monkeypatch.context() as m:
+        m.setattr(FactoryEvidence, "append", append)
+        report = _poll(home, tracker, gap_probe=queue.probe())
+    (row,) = report.rows
+    assert row.stopped == sv.REASON_REFUSED and not row.registered
+    assert queue.cancelled == ["probe-1"] and not _probe_events(home)
+    # a refusal is final at its revision; the operator's forced re-post asks again, and
+    # only one probe is ever left to run
+    _poll(home, tracker, gap_probe=queue.probe())
+    assert len(queue.requests) == 1
+    _poll(home, tracker, gap_probe=queue.probe(), force=True)
+    assert len(queue.requests) == 2 and queue.cancelled == ["probe-1"]
+    assert queue.status == {"probe-1": "cancelled", "probe-2": "queued"}
+
+
+def test_a_register_act_whose_request_cannot_be_recorded_cancels_its_run(
+    home: FactoryHome, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from crb.factory.evidence import FactoryEvidence
+
+    real = FactoryEvidence.append
+
+    def append(self: Any, kind: str, item_id: str = "", **payload: Any) -> Any:
+        if kind == EV_INTAKE_GAP_PROBE_REQUESTED:
+            raise OSError("disk full")
+        return real(self, kind, item_id, **payload)
+
+    queue = Queue()
+    tracker = _tracker(_ticket(author="mallory@example.invalid"))
+    _poll(home, tracker, gap_probe=queue.probe(), approval=sv.ApprovalPolicy())
+    monkeypatch.setattr(FactoryEvidence, "append", append)
+    with pytest.raises(sv.ApprovalRefused) as err:
+        _register(home, tracker, queue)
+    assert err.value.code == "register_refused" and queue.cancelled == ["probe-1"]
+
+
+def test_the_deployed_probe_cancels_a_queued_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from crb.store.jobs import JobQueue
+
+    monkeypatch.setattr(sv, "submit_refusals", lambda *a, **k: None)
+    sessions = _queue_with_repo(tmp_path)
+    probe = sv.gap_probe_for(_deployment(**_ON), sessions, "alpha")
+    assert probe is not None and probe.cancel is not None
+    run_id = probe.enqueue({"key": "4711", "approved_by": "operator:ada"})
+    probe.cancel(run_id)
+    run = JobQueue(sessions).get(run_id)
+    assert run is not None and run.status == "cancelled"

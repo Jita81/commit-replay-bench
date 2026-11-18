@@ -800,12 +800,15 @@ the configured state change after a merge; or `outcome` = `returned` with `from_
 `revision` — a ticket with open questions moved back to `CRB_INTAKE__RETURN_STATE`, ADR-0056) and
 `intake.gap_probe.requested` (`tracker`, `key`, `revision`, `content_revision`, `approved_by`,
 `approved_by_name`, `run_id` — one trial build of an approved ready ticket was queued,
-ADR-0059), `intake.gap_probe.finished` (the same keys plus `questions[{question, decision}]`,
-`cost_usd`, `tokens` — what the build reported it guessed, redacted, at most
-`CRB_INTAKE__GAP_PROBE_MAX_QUESTIONS`) and `intake.gap_probe.failed` (the same keys plus
-`reason` ∈ `reclaimed` | `run_ended` | `unpriced` | `cost_unknown` | `build_error` |
-`not_probe_builder` — final at that content: nothing is registered and nothing is retried
-until the ticket's words change), `intake.stopped` (`step` — `return` for a move back that did not happen, which also carries
+ADR-0059), `intake.gap_probe.finished` (`tracker`, `key`, `revision`, `content_revision`,
+`run_id` plus `questions[{question, decision}]`, `cost_usd`, `tokens` — what the build reported
+it guessed, redacted, at most `CRB_INTAKE__GAP_PROBE_MAX_QUESTIONS`; written only when the build
+ended done with its structured answer) and `intake.gap_probe.failed` (`tracker`, `key`,
+`revision`, `content_revision`, `run_id` plus `reason` ∈ `reclaimed` | `run_ended` | `unpriced`
+| `cost_unknown` | `build_error` | `not_probe_builder`, and, when the worker wrote it,
+`detail` and `cost_usd`; `build_error` also covers a build that stopped without its answer —
+final at that content: nothing is registered and nothing is retried until the ticket's words
+change), `intake.stopped` (`step` — `return` for a move back that did not happen, which also carries
 `tracker`, `revision` and `state` —, `reason` ∈ `unreachable` |
 `unauthorised` | `no_secret` | `refused` | `column_gone` | `not_configured` | `column_too_large` |
 `no_public_url` | `lease_lost`, `detail`; `step` = `gap_probe` with `refused` when the queue refused a

@@ -1658,8 +1658,18 @@ def test_the_gap_probe_returns_the_reported_assumptions_in_extra(tmp_path: Path)
     assert out.extra["assumptions"] == said
     _, _, plain = _setup(tmp_path / "off", FakeSpawn(lines, side_effect=_fix_calc))
     assert "assumptions" not in plain.extra
-    # a stream with no structured assumptions is an empty list, never an error
+    # a stream with no structured assumptions carries NO key (review: an empty list here
+    # read as a clean probe with no questions, and the worker registered on no probe)
     _, _, none = _setup(
         tmp_path / "none", FakeSpawn(GOOD_RUN, side_effect=_fix_calc), gap_probe=True
     )
-    assert none.extra["assumptions"] == []
+    assert "assumptions" not in none.extra
+    # an explicit empty list is the build's answer: nothing guessed
+    lines_empty = [
+        *GOOD_RUN[:-1],
+        ev_result(num_turns=4, structured={"done": True, "summary": "ok", "assumptions": []}),
+    ]
+    _, _, empty = _setup(
+        tmp_path / "empty", FakeSpawn(lines_empty, side_effect=_fix_calc), gap_probe=True
+    )
+    assert empty.extra["assumptions"] == []
