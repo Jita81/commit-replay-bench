@@ -28,10 +28,11 @@ say what is left for a reading after the mapping.
 ## Decision
 
 1. **Read-only.** `GET /quote/mapping` (viewer) starts nothing, writes nothing and calls no
-   model and no outbound network. The MCP reader `crb_mapping_quote` makes one HTTP request, to
-   this endpoint, and nothing more. The response carries no timestamp,
-   so two reads of the same data give the same bytes. It prices a sighted replay, ladder
-   `["r1"]`, one attempt per task, and says so in `run`.
+   model and no outbound network. The MCP reader `crb_mapping_quote` reads this endpoint
+   and nothing else, through the shared client's normal sign-in and retry: a new client
+   signs in first, and a 401 is answered by one sign-in and one repeat of the read. The
+   response carries no timestamp, so two reads of the same data give the same bytes. It
+   prices a sighted replay, ladder `["r1"]`, one attempt per task, and says so in `run`.
 2. **The request.** `repo` and `builder` are required. `model` defaults as `POST /runs` does
    (422 when the builder has none). `n` defaults to the first look of the routing rule and is
    1 to 1000. `cells` uses the forecast's `class:size:count` grammar (`*` means every size of

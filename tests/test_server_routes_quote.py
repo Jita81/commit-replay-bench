@@ -83,10 +83,17 @@ def _cells(body: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _beta_rows(
-    env: Env, *, arm: str = "", n: int = 4, imported: bool = False, **labels: str
+    env: Env,
+    *,
+    arm: str = "",
+    n: int = 4,
+    imported: bool = False,
+    cost: float | None = None,
+    **labels: str,
 ) -> None:
     """``n`` rows for BETA in test.add/XS by the seed's builder and model, through the write
-    path, alternating $0.01 / $0.03 and 30 s / 90 s; ``labels`` overlay the seed's own."""
+    path, alternating $0.01 / $0.03 and 30 s / 90 s (``cost`` fixes every row's cost instead);
+    ``labels`` overlay the seed's own."""
     if arm:
         labels["context_arm"] = arm
     rows = [
@@ -106,7 +113,7 @@ def _beta_rows(
             provider="cerebras",
             run_id="b" * 32,
             trial="r1",
-            cost_usd=0.01 if i % 2 else 0.03,
+            cost_usd=cost if cost is not None else (0.01 if i % 2 else 0.03),
             latency_s=30.0 if i % 2 else 90.0,
             tokens_in=1000,
             evidence_pack_hash=("e" * 64) if i % 2 == 0 else "",
@@ -181,6 +188,15 @@ def test_quote_uses_other_repository_rows_when_repo_has_none(env: Env) -> None:
     assert c["tasks_to_run"] == 1
     assert c["cost_usd"]["expected"] == pytest.approx(0.02)
     assert c["minutes"]["expected"] == pytest.approx(1.0)
+
+
+def test_quote_never_prices_from_a_negative_cost_ledger_row(env: Env) -> None:
+    # through the write path, not a stand-in row: the ledger takes a negative cost with
+    # tokens as written, and the served quote must not price a cell from it
+    _beta_rows(env, cost=-1.0)
+    c = _cells(env.get(f"{BASE}&cells=test.add:XS:5").json())["test.add/XS"]
+    assert c["basis"]["tier"] == q.TIER_UNKNOWN and c["basis"]["n_rows"] == 0
+    assert [c["cost_usd"][k] for k in ("low", "expected", "high")] == [None, None, None]
 
 
 def test_quote_never_prices_from_imported_rows(env: Env) -> None:
