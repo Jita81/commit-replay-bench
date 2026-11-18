@@ -2,8 +2,9 @@
 
 The factory delivers to a repository hosted on Azure Repos the same way it delivers to
 GitHub: the push is git's own (:func:`crb.factory.delivery.git_push_fn`, a one-shot header in
-the child's environment, with redirects off — :func:`azure_push_fn`), and the pull request is opened, commented on and closed through
-three functions with the same keyword-only signatures as the GitHub ones. ``deliver`` and
+the child's environment, with redirects off — :func:`azure_push_fn`), and the pull request is
+opened, commented on and closed through three functions with the same keyword-only
+signatures as the GitHub ones. ``deliver`` and
 ``close_pull_request`` do not know which forge they talk to.
 
 Azure DevOps's Git REST API (``api-version=7.1``) is reached with stdlib :mod:`urllib`, and

@@ -413,8 +413,7 @@ def test_redirects_stay_off_for_the_remote_over_an_inherited_url_specific_true(
     """A URL-specific ``http.<url>.followRedirects`` beats an unscoped one, so the switch
     is scoped to the remote the header is: an inherited ``true`` for the host loses."""
     git = shutil.which("git")
-    if git is None:
-        pytest.skip("git is not installed")
+    assert git is not None  # every worker test needs git; none skips on it
     inherited = tmp_path / "gitconfig"
     inherited.write_text('[http "https://dev.azure.com/"]\n\tfollowRedirects = true\n')
     for name in [k for k in os.environ if k.startswith("GIT_CONFIG")]:
