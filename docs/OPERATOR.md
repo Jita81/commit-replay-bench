@@ -1638,8 +1638,10 @@ with `CRB_ALLOW_UNSEALED_PROD_BY` naming an active admin and `CRB_ALLOW_UNSEALED
 saying why (G-663), to run probes on purpose.
 
 **The automatic build (ADR-0060).** Off by default, and refused at start-up without the gap
-probe, without `CRB_INTAKE__REQUIRE_APPROVAL`, without `CRB_INTAKE__AUTO_MANUFACTURE_RUNG`, or
-with a cap whose share per attempt is above one run's budget limit. When on, an operator's
+probe, without `CRB_INTAKE__REQUIRE_APPROVAL`, without `CRB_INTAKE__AUTO_MANUFACTURE_RUNG`,
+with a cap whose share per attempt is above one run's budget limit, or with a rung the run
+request it queues would refuse (for example a space, or more than 128 characters in all;
+checked whenever the rung is set). When on, an operator's
 Register act also consents to one build. After a clean probe the ticket registers, and the
 worker's next intake pass queues one delivering `factory` run that builds that item only. Its
 build attempts are capped by `CRB_INTAKE__AUTO_MANUFACTURE_MAX_COST_USD`, shared equally

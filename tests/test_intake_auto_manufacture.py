@@ -305,29 +305,53 @@ def test_settings_refuse_out_of_range_bounds(kw: dict[str, Any]) -> None:
         _settings(**kw)
 
 
-@pytest.mark.parametrize(
-    ("rung", "part"),
-    [
-        ("claude_code:" + "m" * 129, "model"),
-        ("b" * 65 + ":claude-sonnet-5", "builder"),
-        ("claude_code:claude-sonnet-5@" + "p" * 65, "provider"),
-    ],
-)
-def test_settings_refuse_a_rung_longer_than_a_run_accepts(rung: str, part: str) -> None:
-    """Outside review: such a rung passed start-up, then every pass failed to build the run
-    request and queued nothing."""
-    with pytest.raises(ValidationError, match=f"the {part} is"):
-        _settings(**{**_ON, "auto_manufacture_rung": rung})
+#: Each passed the old start-up check (each part within its length) or a part-only check,
+#: then the run request refused its one-label ladder (``_LADDER_RE``: at most 128
+#: characters, letters, digits and ``._:/@-``) on every pass.
+_REFUSED_RUNGS = [
+    "claude_code:" + "m" * 129,
+    "b" * 65 + ":claude-sonnet-5",
+    "claude_code:claude-sonnet-5@" + "p" * 65,
+    "claude_code:" + "m" * 120 + "@" + "p" * 8,
+    "claude_code:" + "m" * 120,
+    "claude_code:claude sonnet-5",
+    "claude_code:claude-sonnet-5#1",
+]
 
 
-def test_the_longest_rung_a_run_accepts_starts() -> None:
-    from crb.server.schemas import RunCreateRequest
+@pytest.mark.parametrize("rung", _REFUSED_RUNGS)
+@pytest.mark.parametrize("on", [True, False])
+def test_settings_refuse_a_rung_a_run_request_refuses(rung: str, on: bool) -> None:
+    """Outside review (twice): such a rung passed start-up, then every pass failed to
+    build the run request, wrote nothing and tried again."""
+    kw = {**_ON, "auto_manufacture_rung": rung} if on else {"auto_manufacture_rung": rung}
+    with pytest.raises(ValidationError, match="a run request refuses it"):
+        _settings(**kw)
 
-    rung = "claude_code:" + "m" * 128 + "@" + "p" * 64
+
+def test_the_longest_rung_start_up_accepts_builds_a_real_run_request() -> None:
+    """The request is built here by hand, ladder included, not through the shared helper,
+    so a helper that drifts from what ``POST /runs`` accepts fails this test."""
+    from crb.server.schemas import RunBudget, RunCreateRequest
+
+    rung = "claude_code:" + "m" * (128 - len("claude_code:"))
     s = _settings(**{**_ON, "auto_manufacture_rung": rung})
-    builder, _, rest = s.auto_manufacture_rung.partition(":")
-    model, _, provider = rest.partition("@")
-    RunCreateRequest(repo="alpha", kind="factory", builder=builder, model=model, provider=provider)
+    assert s.auto_manufacture_rung == rung and len(rung) == 128
+    builder, _, model = rung.partition(":")
+    body = RunCreateRequest(
+        repo="alpha",
+        kind="factory",
+        builder=builder,
+        model=model,
+        ladder=[rung],
+        max_cost_usd=6.0,
+        deliver=True,
+        max_rework=2,
+        budget=RunBudget(max_cost_usd=2.0),
+    )
+    assert body.stored_ladder() == [rung]
+    with pytest.raises(ValidationError, match="a run request refuses it"):
+        _settings(**{**_ON, "auto_manufacture_rung": rung + "m"})
 
 
 def test_the_settings_keys_are_in_the_api_doc_and_the_ui_type() -> None:
@@ -728,6 +752,25 @@ def test_a_lease_lost_in_the_insert_transaction_writes_nothing(one: FactoryHome)
     assert _sweep(one, factory) == "run-1"
 
 
+def test_a_lease_lost_after_the_queue_writes_no_requested_event(one: FactoryHome) -> None:
+    """Outside review: after a queue whose store calls can outlast the lease, the
+    ``requested`` event was written with no renewal. The run stands unnamed; the next pass
+    names it and queues nothing."""
+    factory = Factory()
+    calls: list[str] = []
+
+    def renew() -> bool:
+        calls.append("renew")
+        return len(calls) < 3  # held for the find and the queue, lost before the write
+
+    assert _sweep(one, factory, renew=renew) == "run-1"
+    assert calls == ["renew"] * 3 and len(factory.queued) == 1
+    assert not _of(one, EV_INTAKE_MANUFACTURE_REQUESTED)
+    assert _sweep(one, factory) == "" and len(factory.queued) == 1
+    (named,) = _of(one, EV_INTAKE_MANUFACTURE_REQUESTED)
+    assert named.payload["run_id"] == "run-1"
+
+
 def test_one_run_per_pass_oldest_first(home: FactoryHome) -> None:
     home.register_backlog([_item("fake-1"), _item("fake-2")], actor="t")
     _mark(home, "fake-1", key="1")
@@ -946,6 +989,40 @@ def test_a_run_the_submit_gate_refuses_is_never_queued(
     with pytest.raises(sv.ManufactureRefused) as refused:
         auto.queue_run(_REQUEST, _held)
     assert refused.value.code == "spend_cap_unpriced"
+    assert _runs(sessions) == [] and _traces(sessions) == []
+
+
+def test_a_request_the_schema_refuses_is_skipped_once_never_retried(
+    tmp_path: Path, one: FactoryHome
+) -> None:
+    """Outside review: the run request was built outside the refusal handling, so a rung the
+    schema refused (one that start-up let through) logged "not queued", wrote no skip, and
+    every pass tried again. The settings are bypassed here to reach the queue path."""
+    sessions = _store(tmp_path)
+    intake = SimpleNamespace(
+        auto_manufacture=True,
+        auto_manufacture_rung="claude_code:claude sonnet-5",
+        auto_manufacture_max_cost_usd=6.0,
+        auto_manufacture_max_rework=2,
+    )
+    auto = sv.auto_manufacture_for(
+        SimpleNamespace(intake=intake, home=tmp_path),
+        sessions,
+        "alpha",
+        run_active=lambda: False,
+        delivery_route=lambda: sv.ROUTE_FOUND,
+    )
+    assert auto is not None
+    for _ in range(3):
+        assert (
+            sv.manufacture_registered(
+                one, tracker="fake", auto=auto, renew=lambda: True, fence=_held
+            )
+            == ""
+        )
+    assert _skipped(one) == [f"{sv.SKIP_REFUSED}:validation_error"]
+    (ev,) = _of(one, EV_INTAKE_MANUFACTURE_SKIPPED)
+    assert ev.payload["detail"].startswith("the run request was refused: ladder")
     assert _runs(sessions) == [] and _traces(sessions) == []
 
 

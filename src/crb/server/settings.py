@@ -89,7 +89,14 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from crb.builders.budget import parse_rung
@@ -102,12 +109,7 @@ from crb.provision.config import (
     ProvisionConfig,
     parse_host_list,
 )
-from crb.server.schemas import (
-    BUDGET_MAX_COST_USD,
-    RUN_BUILDER_MAX_LENGTH,
-    RUN_MODEL_MAX_LENGTH,
-    RUN_PROVIDER_MAX_LENGTH,
-)
+from crb.server.schemas import BUDGET_MAX_COST_USD, first_refusal, manufacture_request
 
 log = logging.getLogger("crb.server.settings")
 
@@ -731,8 +733,8 @@ class IntakeSettings(BaseModel):
     #: ADR-0060 — after an operator's Register act and a clean probe, queue ONE capped
     #: factory run that builds and delivers that one ticket. OFF BY DEFAULT: it spends model
     #: budget on every such ticket. Start-up refuses it without ``gap_probe``, without
-    #: ``require_approval``, without ``auto_manufacture_rung``, and with a cap too large for
-    #: one attempt's budget.
+    #: ``require_approval``, without ``auto_manufacture_rung``, with a cap too large for one
+    #: attempt's budget, and with a rung or cap the run request it queues would refuse.
     auto_manufacture: bool = False
     #: The rung that builds, ``<builder>:<model>``; empty while the switch is off.
     auto_manufacture_rung: str = ""
@@ -835,19 +837,10 @@ class IntakeSettings(BaseModel):
             rung = f"{parsed.builder}:{parsed.model}" + (
                 f"@{parsed.provider}" if parsed.provider else ""
             )
-            # the run request refuses these lengths, so every pass would fail to queue
-            for part, value, most in (
-                ("builder", parsed.builder, RUN_BUILDER_MAX_LENGTH),
-                ("model", parsed.model, RUN_MODEL_MAX_LENGTH),
-                ("provider", parsed.provider, RUN_PROVIDER_MAX_LENGTH),
-            ):
-                if len(value) > most:
-                    raise ValueError(
-                        f"auto_manufacture_rung: the {part} is {len(value)} characters; "
-                        f"a run accepts at most {most}"
-                    )
         self.auto_manufacture_rung = rung
         if not self.auto_manufacture:
+            if rung:  # a rung set with the switch off is refused as it would be when on
+                self._run_request_accepts(rung)
             return self
         if not self.gap_probe:
             raise ValueError("auto_manufacture needs gap_probe: it builds only probed tickets")
@@ -863,7 +856,24 @@ class IntakeSettings(BaseModel):
                 f"auto_manufacture_max_cost_usd gives {share:.4f} per attempt; one "
                 f"attempt's budget cannot exceed {BUDGET_MAX_COST_USD}"
             )
+        self._run_request_accepts(rung)
         return self
+
+    def _run_request_accepts(self, rung: str) -> None:
+        """Build the very request each pass queues (``manufacture_request``; the repository
+        is the one part start-up does not know), so a rung or cap that request refuses is
+        refused here, at start-up, and never fails every pass."""
+        try:
+            manufacture_request(
+                "start-up-check",
+                rung,
+                max_cost_usd=self.auto_manufacture_max_cost_usd,
+                max_rework=self.auto_manufacture_max_rework,
+            )
+        except ValidationError as exc:
+            raise ValueError(
+                f"auto_manufacture_rung {rung!r}: a run request refuses it ({first_refusal(exc)})"
+            ) from None
 
     def redacted(self) -> dict[str, Any]:
         """What ``/settings`` may show. There is no secret in this model, but the shape

@@ -100,12 +100,12 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import httpx
+from pydantic import ValidationError
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -185,7 +185,12 @@ from crb.server.routes.runs import (
     submit_refusals,
     system_trace_id,
 )
-from crb.server.schemas import RunBudget, RunCreateRequest
+from crb.server.schemas import (
+    RunCreateRequest,
+    attempt_share,
+    first_refusal,
+    manufacture_request,
+)
 from crb.server.settings import ROLE_RANK
 from crb.store.jobs import KIND_FACTORY, KIND_GAP_PROBE, TERMINAL_STATUSES, JobQueue, stage_queued
 from crb.store.models import LEASE_ROW_PREFIX, Repo, Run, User, WorkerRow
@@ -2972,19 +2977,6 @@ def manufacture_run_id(repo: str, tracker: str, key: str, content: str) -> str:
     return uuid.uuid5(uuid.NAMESPACE_URL, name).hex
 
 
-def attempt_share(cap: float, max_rework: int) -> float:
-    """One attempt's cost cap: an equal share of the run's ``cap`` over the first build
-    and each rework. It is rounded DOWN to a millionth of a dollar, so the worker's
-    reserve for the item (``item_reserve``: the share once per attempt) never passes the
-    cap. Rounded to the nearest, $2 over 3 attempts gave $0.6667 each, a reserve of
-    $2.0001, and the run stopped before it built. It stays above 0, since a budget of 0
-    means no cap at all; below a millionth the share is the exact quotient."""
-    attempts = 1 + max(0, max_rework)
-    exact = Decimal(repr(float(cap))) / attempts
-    share = float(exact.quantize(Decimal("0.000001"), rounding=ROUND_DOWN))
-    return share if share > 0 else float(cap) / attempts
-
-
 def auto_manufacture_for(
     settings: Any,
     sessions: sessionmaker[Session],
@@ -3004,8 +2996,6 @@ def auto_manufacture_for(
     if intake is None or not bool(getattr(intake, "auto_manufacture", False)):
         return None
     rung = str(intake.auto_manufacture_rung)
-    builder, _, rest = rung.partition(":")
-    model, _, provider = rest.partition("@")
     cap = float(intake.auto_manufacture_max_cost_usd)
     rework = int(intake.auto_manufacture_max_rework)
     same = ("tracker", "key", "content_revision")
@@ -3036,22 +3026,17 @@ def auto_manufacture_for(
     def queue(request: Mapping[str, Any], fence: Fence) -> QueuedRun | None:
         run_id = manufacture_run_id(repo, *(str(request.get(k, "")) for k in same))
         approved_by = str(request.get("approved_by", ""))
-        body = RunCreateRequest(
-            repo=repo,
-            kind=KIND_FACTORY,
-            builder=builder,
-            model=model,
-            provider=provider,
-            ladder=[rung],
-            max_cost_usd=cap,
-            deliver=True,
-            max_rework=rework,
-            # each attempt gets an equal share, so the first build cannot spend the rework's
-            budget=RunBudget(max_cost_usd=attempt_share(cap, rework)),
-        )
+        auto = {k: str(request.get(k, "")) for k in (*same, "item_id", "approved_by")}
+        try:
+            # built inside the try: a request the schema refuses is a recorded refusal,
+            # never an error every pass retries (start-up builds this same request)
+            body = manufacture_request(repo, rung, max_cost_usd=cap, max_rework=rework)
+        except ValidationError as exc:
+            raise ManufactureRefused(
+                "validation_error", f"the run request was refused: {first_refusal(exc)}"
+            ) from exc
         run = new_run(body, actor=approved_by.removeprefix(OPERATOR_PREFIX) or "intake")
         run.id = run_id
-        auto = {k: str(request.get(k, "")) for k in (*same, "item_id", "approved_by")}
         try:
             with sessions() as db:
                 held = db.get(Run, run_id)
@@ -3227,7 +3212,10 @@ def manufacture_registered(
             else:
                 if queued is None:  # the lease was lost in the insert: nothing written
                     return ""
-                _manufacture_requested(evidence, fields, queued)
+                # the insert's store calls can outlast the lease: renew before the chain
+                # write too. A lost lease leaves the run unnamed; the next pass's find names it
+                if renew():
+                    _manufacture_requested(evidence, fields, queued)
                 return queued.run_id
             if not renew():  # the refusal came after a store call: renew before the skip
                 return ""

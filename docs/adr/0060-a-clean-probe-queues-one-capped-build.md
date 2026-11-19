@@ -62,7 +62,8 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
    content: `item_superseded` (a later version is on the backlog), `has_dependencies`,
    `already_built` (a run graded or ended the item after the registration),
    `approver_inactive` (the operator who acted is no longer an active operator), `sealed`,
-   `no_delivery_route` and `refused:<code>` (the submit gate's own code).
+   `no_delivery_route` and `refused:<code>` (the submit gate's own code, or
+   `validation_error` when the run request itself refuses the rung or cap).
 7. **Waits.** A factory run already queued or running, a pass out of time, a lease lost
    (before an act or in the insert transaction) and an error reading the delivery route
    write nothing; the consent stays pending and the next pass tries again. The lease is
@@ -71,9 +72,13 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
 8. **The worker refuses the item** when it is no longer active or depends on other items,
    before it builds.
 9. **Start-up refuses** the switch on without `CRB_INTAKE__GAP_PROBE`, without
-   `CRB_INTAKE__REQUIRE_APPROVAL`, with an empty rung, with a cap whose per-attempt share
-   is above the per-run budget limit, and a rung whose builder, model or provider is longer
-   than a run request accepts (64, 128 and 64 characters).
+   `CRB_INTAKE__REQUIRE_APPROVAL`, with an empty rung, or with a cap whose per-attempt share
+   is above the per-run budget limit. Whenever a rung is set, with the switch on or off,
+   start-up also builds the run request each pass queues (`manufacture_request`, the same
+   function, with a stand-in repository name) and refuses the rung when that request
+   refuses it. That covers each part's length and the one-label ladder: at most 128
+   characters, of letters, digits and `._:/@-`. A pass that still meets a request it
+   refuses records `refused:validation_error` once and does not retry.
 10. **A switch-off does not withdraw a queued run.** Switching the listener or the setting
     off stops new runs. A run already queued stays queued; cancel it like any other run.
 
