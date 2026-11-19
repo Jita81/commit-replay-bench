@@ -157,10 +157,11 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
   read. Any error in that read holds, a programming error included.
 - A store error in a claim check before the hold (the cancel read, or a refusal check)
   ends the automatic build failed with an ordinary error, at $0. That settles its consent;
-  the operator changes the ticket's content, polls it to record a new waiting draft, and
-  then registers it again. The new content has a new `content_revision`, which no build
-  has settled. An edit that leaves the content the same keeps the settled
-  `content_revision` and starts no automatic build. A build held and then cancelled has a
+  the operator changes the ticket's content to words no build of this ticket has settled,
+  polls it to record a new waiting draft, and then registers it again. That content has a
+  `content_revision` no build has settled. An edit that leaves the content the same, or
+  puts back content settled earlier, has a settled `content_revision` and starts no
+  automatic build. A build held and then cancelled has a
   `system/run.refused` event with `intake_build_held` before its `cancelled` finish, so
   count holds from run outcomes, not from those events.
 - An operator's run that wrote a paid grade for the item and then failed or stopped
