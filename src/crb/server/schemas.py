@@ -65,7 +65,7 @@ from crb.core.capability import TIERS
 from crb.core.checks import RepoChecks
 from crb.core.context_arm import CTX_NAME_RE
 from crb.core.git import CloneUrlError, validate_clone_url
-from crb.core.grade import MODES
+from crb.core.grade import MODE_BLIND, MODES
 from crb.core.ledger import CELL_FIELDS
 from crb.core.spec import POOL_HARD, POOL_STANDARD, RUNNERS, SIZE_TIER_NAMES
 from crb.core.spend import BUDGET_PROFILES, ESCALATION_POLICIES, validate_spend_config
@@ -1075,6 +1075,27 @@ def manufacture_request(
         max_rework=max_rework,
         # each attempt gets an equal share, so the first build cannot spend the rework's
         budget=RunBudget(max_cost_usd=attempt_share(max_cost_usd, max_rework)),
+    )
+
+
+def gap_probe_request(repo: str, rung: str, *, max_cost_usd: float) -> RunCreateRequest:
+    """The run request a gap probe meets before it is queued (ADR-0059): the blind build
+    the probe run is (its own kind is not client-creatable, so the gate reads it as the
+    blind build it runs), on ``rung`` (``builder:model[@provider]``, also its one-label
+    ladder) under the probe's cap. Start-up builds this same request, so a rung the request
+    refuses is refused before any probe tries to queue it. Raises pydantic's
+    ``ValidationError`` when the request refuses them."""
+    builder, _, rest = rung.partition(":")
+    model, _, provider = rest.partition("@")
+    return RunCreateRequest(
+        repo=repo,
+        kind=MODE_BLIND,
+        mode=MODE_BLIND,
+        builder=builder,
+        model=model,
+        provider=provider,
+        ladder=[rung],
+        max_cost_usd=max_cost_usd,
     )
 
 

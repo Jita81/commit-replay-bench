@@ -186,9 +186,9 @@ from crb.server.routes.runs import (
     system_trace_id,
 )
 from crb.server.schemas import (
-    RunCreateRequest,
     attempt_share,
     first_refusal,
+    gap_probe_request,
     manufacture_request,
 )
 from crb.server.settings import ROLE_RANK
@@ -348,15 +348,8 @@ def gap_probe_for(settings: Any, sessions: sessionmaker[Session], repo: str) -> 
         )
         # the gate POST /runs applies, on the blind build this run is (the kind itself is
         # not client-creatable, so the gate reads it as the blind build it runs)
-        body = RunCreateRequest(
-            repo=repo,
-            kind=MODE_BLIND,
-            mode=MODE_BLIND,
-            builder=builder,
-            model=model,
-            provider=provider,
-            ladder=[rung_label],
-            max_cost_usd=float(intake.gap_probe_max_cost_usd),
+        body = gap_probe_request(
+            repo, rung_label, max_cost_usd=float(intake.gap_probe_max_cost_usd)
         )
         gate_run = Run(
             repo=repo,

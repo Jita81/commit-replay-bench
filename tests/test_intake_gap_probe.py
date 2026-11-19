@@ -322,6 +322,89 @@ def test_settings_store_the_probe_rung_as_one_canonical_label(raw: str, label: s
     assert _settings(gap_probe=True, gap_probe_rung=raw).gap_probe_rung == label
 
 
+#: Each names claude_code and passed the old start-up check, then the probe's own run
+#: request refused its model or its one-label ladder (at most 128 characters, letters,
+#: digits and ``._:/@-``) at the first poll that tried to queue a probe.
+_REFUSED_PROBE_RUNGS = [
+    "claude_code:" + "m" * 129,
+    "claude_code:claude-sonnet-5@" + "p" * 65,
+    "claude_code:" + "m" * 120 + "@" + "p" * 8,
+    "claude_code:claude sonnet-5",
+    "claude_code:claude-sonnet-5#1",
+]
+
+
+@pytest.mark.parametrize("rung", _REFUSED_PROBE_RUNGS)
+@pytest.mark.parametrize("on", [True, False])
+def test_settings_refuse_a_rung_the_probe_run_request_refuses(rung: str, on: bool) -> None:
+    """Such a rung passed start-up, then the first poll failed to build the probe's run
+    request. ADR-0060 decision 9 applied to the probe: start-up builds that request."""
+    kw = {**_ON, "gap_probe_rung": rung} if on else {"gap_probe_rung": rung}
+    with pytest.raises(ValidationError, match=r"gap_probe_rung .*a run request refuses it"):
+        _settings(**kw)
+
+
+def test_the_longest_probe_rung_start_up_accepts_builds_a_real_run_request() -> None:
+    """The request is built here by hand, not through the shared helper, so a helper that
+    drifts from what the probe's gate reads fails this test."""
+    from crb.server.schemas import RunCreateRequest
+
+    rung = "claude_code:" + "m" * (128 - len("claude_code:"))
+    s = _settings(**{**_ON, "gap_probe_rung": rung})
+    assert s.gap_probe_rung == rung and len(rung) == 128
+    builder, _, model = rung.partition(":")
+    body = RunCreateRequest(
+        repo="alpha",
+        kind="blind",
+        mode="blind",
+        builder=builder,
+        model=model,
+        ladder=[rung],
+        max_cost_usd=1.5,
+    )
+    assert body.stored_ladder() == [rung]
+    with pytest.raises(ValidationError, match="a run request refuses it"):
+        _settings(**{**_ON, "gap_probe_rung": rung + "m"})
+
+
+def test_start_up_and_the_probe_build_their_request_through_one_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check is only worth having if start-up builds the request the probe queues: both
+    call ``schemas.gap_probe_request``, and the probe's gate reads exactly what it returns."""
+    from crb.server import schemas
+    from crb.server import settings as st
+
+    assert sv.gap_probe_request is schemas.gap_probe_request
+    assert st.gap_probe_request is schemas.gap_probe_request
+    real = schemas.gap_probe_request
+    calls: list[tuple[str, str, float]] = []
+
+    def spy(repo: str, rung: str, *, max_cost_usd: float) -> Any:
+        calls.append((repo, rung, max_cost_usd))
+        return real(repo, rung, max_cost_usd=max_cost_usd)
+
+    monkeypatch.setattr(st, "gap_probe_request", spy)
+    monkeypatch.setattr(sv, "gap_probe_request", spy)
+    bodies: list[Any] = []
+    monkeypatch.setattr(sv, "submit_refusals", lambda db, settings, body, run: bodies.append(body))
+    on = _deployment(**_ON)
+    rung = "claude_code:claude-sonnet-5"
+    assert calls == [("start-up-check", rung, 1.5)]
+    probe = sv.gap_probe_for(on, _queue_with_repo(tmp_path), "alpha")
+    assert probe is not None
+    probe.enqueue({"key": "4711", "approved_by": "operator:ada"})
+    assert calls[1:] == [("alpha", rung, 1.5)]
+    (body,) = bodies
+    assert body.model_dump() == real("alpha", rung, max_cost_usd=1.5).model_dump()
+    assert (body.kind, body.mode, body.builder, body.model) == (
+        "blind",
+        "blind",
+        "claude_code",
+        "claude-sonnet-5",
+    )
+
+
 # --- the run kind -----------------------------------------------------------------------
 
 
