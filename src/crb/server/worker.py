@@ -1635,6 +1635,8 @@ class Worker:
                         tracker=tracker.name,
                         auto=auto,
                         renew=tracker.lease.renew,
+                        # and checked again in the transaction that inserts the run
+                        fence=tracker.lease.renew_in,
                         out_of_time=lambda: time.monotonic() - began > budget_s,
                     )
                 except Exception:  # never fail the poll: the next pass sweeps again

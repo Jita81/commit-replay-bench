@@ -981,6 +981,20 @@ class DbLease:
         self.held = int(getattr(done, "rowcount", 0) or 0) == 1
         return self.held
 
+    def renew_in(self, s: Session) -> bool:
+        """:meth:`renew` inside the caller's open transaction, with no commit. The stamp
+        and the caller's own writes then commit or roll back together, and the row stays
+        locked until they do: a takeover or a switch-off cannot land between this check
+        and the caller's commit. ``False`` when the row is no longer this holder's; the
+        caller must then roll back and write nothing."""
+        done = s.execute(
+            update(WorkerRow)
+            .where(WorkerRow.worker_id == self.key, WorkerRow.hostname == self.holder)
+            .values(heartbeat=_iso(self.clock()))
+        )
+        self.held = int(getattr(done, "rowcount", 0) or 0) == 1
+        return self.held
+
     def release(self) -> None:
         """Drop the lease if this holder still owns it (never another holder's)."""
         with self.factory() as s:
@@ -2887,7 +2901,7 @@ def apply_outcome_map(
 
 # --- ADR-0060: one capped build after a consented, clean registration -----------------
 
-#: The system trace the automatic build's enqueue writes, in the same transaction.
+#: The system trace the automatic build writes in the transaction that queues its run.
 ACTION_MANUFACTURE_QUEUED = "intake.manufacture.queued"
 #: Why a consented build was skipped for good at that content (``intake.manufacture.skipped``).
 SKIP_APPROVER_INACTIVE = "approver_inactive"
@@ -2916,20 +2930,35 @@ class ManufactureRefused(Exception):
 
 
 @dataclass(frozen=True)
+class QueuedRun:
+    """A run the automatic build queued, with the cap and rung it was STORED with. The
+    chain records these, never the current settings, which may have changed since."""
+
+    run_id: str
+    max_cost_usd: float
+    rung: str
+
+
+#: The lease check a queue makes inside its insert transaction (``DbLease.renew_in``).
+Fence = Callable[[Session], bool]
+
+
+@dataclass(frozen=True)
 class AutoManufacture:
     """The automatic build's seams (ADR-0060). ``None`` in place of this object is the
     switch off: the sweep is not called and nothing new is read or written.
 
-    ``find_run`` answers the run already queued for a dedupe key, in any status (``""`` for
-    none); ``queue_run`` queues the one capped run for a request and returns its id (the id
-    of the run that already holds the key when one does), raising
+    ``find_run`` answers the run already queued for a dedupe key, in any status (``None``
+    for none); ``queue_run`` queues the one capped run for a request and returns it (the
+    run that already holds the key when one does), ``None`` when ``fence`` says the lease
+    was lost in its insert transaction (nothing is written then), and raises
     :class:`ManufactureRefused` when the submit gate refuses it."""
 
     rung: str
     max_cost_usd: float
     max_rework: int
-    find_run: Callable[[Mapping[str, str]], str]
-    queue_run: Callable[[Mapping[str, Any]], str]
+    find_run: Callable[[Mapping[str, str]], QueuedRun | None]
+    queue_run: Callable[[Mapping[str, Any], Fence], QueuedRun | None]
     run_active: Callable[[], bool]
     delivery_route: Callable[[], str]
     approver_active: Callable[[str], bool]
@@ -2981,20 +3010,30 @@ def auto_manufacture_for(
     rework = int(intake.auto_manufacture_max_rework)
     same = ("tracker", "key", "content_revision")
 
-    def find_run(key: Mapping[str, str]) -> str:
+    def stored(run: Run) -> QueuedRun:
+        params = dict(run.params_json or {})
+        ladder = list(run.ladder_json or [])
+        return QueuedRun(
+            run_id=str(run.id),
+            max_cost_usd=float(params.get("max_cost_usd") or 0.0),
+            rung=str(ladder[0]) if ladder else "",
+        )
+
+    def find_run(key: Mapping[str, str]) -> QueuedRun | None:
         run_id = manufacture_run_id(repo, *(str(key.get(k, "")) for k in same))
         with sessions() as db:
-            if db.get(Run, run_id) is not None:
-                return run_id
+            found = db.get(Run, run_id)
+            if found is not None:
+                return stored(found)
             for run in db.scalars(select(Run).where(Run.repo == repo, Run.kind == KIND_FACTORY)):
                 auto = dict(run.params_json or {}).get("intake_auto")
                 if isinstance(auto, Mapping) and all(
                     str(auto.get(k, "")) == str(key.get(k, "")) for k in same
                 ):
-                    return str(run.id)
-        return ""
+                    return stored(run)
+        return None
 
-    def enqueue(request: Mapping[str, Any]) -> str:
+    def queue(request: Mapping[str, Any], fence: Fence) -> QueuedRun | None:
         run_id = manufacture_run_id(repo, *(str(request.get(k, "")) for k in same))
         approved_by = str(request.get("approved_by", ""))
         body = RunCreateRequest(
@@ -3015,8 +3054,9 @@ def auto_manufacture_for(
         auto = {k: str(request.get(k, "")) for k in (*same, "item_id", "approved_by")}
         try:
             with sessions() as db:
-                if db.get(Run, run_id) is not None:
-                    return run_id
+                held = db.get(Run, run_id)
+                if held is not None:
+                    return stored(held)
                 submit_refusals(db, settings, body, run)
             pin_factory_params(settings, body, run)
         except ApiError as exc:
@@ -3027,6 +3067,11 @@ def auto_manufacture_for(
             "intake_auto": auto,
         }
         with sessions() as db:
+            # the lease is checked in the transaction that inserts the paid run: a
+            # switch-off or a takeover since the last renewal leaves nothing written
+            if not fence(db):
+                db.rollback()
+                return None
             try:
                 stage_queued(db, run)
                 append_system_event(
@@ -3047,7 +3092,9 @@ def auto_manufacture_for(
                 # another pass inserted this key's run first (at the autoflush or the
                 # commit): it stands, and neither the run nor its trace is written twice
                 db.rollback()
-        return run_id
+        with sessions() as db:
+            committed = db.get(Run, run_id)
+            return stored(committed) if committed is not None else None
 
     def approver_active(account: str) -> bool:
         with sessions() as db:
@@ -3063,7 +3110,7 @@ def auto_manufacture_for(
         max_cost_usd=cap,
         max_rework=rework,
         find_run=find_run,
-        queue_run=enqueue,
+        queue_run=queue,
         run_active=run_active,
         delivery_route=delivery_route,
         approver_active=approver_active,
@@ -3097,6 +3144,7 @@ def manufacture_registered(
     tracker: str,
     auto: AutoManufacture,
     renew: Callable[[], bool],
+    fence: Fence,
     out_of_time: Callable[[], bool] = lambda: False,
     actor: str = "worker",
 ) -> str:
@@ -3109,7 +3157,10 @@ def manufacture_registered(
     (the chain write after it failed) is named, never queued again. A wait (a factory run is
     active, the pass is out of time, the delivery route could not be read) writes nothing
     and stops the pass. The caller holds the repository's intake lease; ``renew`` stamps it
-    before each act, and a lease lost stops the pass."""
+    after the last read and before each chain write, and ``fence`` checks it again inside
+    the transaction that inserts the run. A lease lost stops the pass and writes nothing.
+    A renewal before a chain write narrows the window; it does not close it, because the
+    chain is not in the store's transaction."""
     events = list(home.events())
     marked = [
         (i, e)
@@ -3146,9 +3197,11 @@ def manufacture_registered(
         if not renew():
             return ""
         found = auto.find_run(fields)
-        if found:
+        if found is not None:
             # the run stands but the chain never named it: name it, never queue another
-            _manufacture_requested(evidence, auto, fields, found)
+            if not renew():
+                return ""
+            _manufacture_requested(evidence, fields, found)
             continue
         if out_of_time() or auto.run_active():
             return ""
@@ -3160,19 +3213,24 @@ def manufacture_registered(
             if route != ROUTE_FOUND:
                 reason = SKIP_NO_DELIVERY_ROUTE
                 detail = "no delivery route is configured for this repository"
-        if not reason and not renew():
+        # the reads are done: the lease is renewed before the act, skip or queue alike
+        if not renew():
             return ""
         if not reason:
             try:
-                run_id = auto.queue_run(fields)
+                queued = auto.queue_run(fields, fence)
             except ManufactureRefused as exc:
                 reason, detail = f"{SKIP_REFUSED}:{exc.code}", exc.detail
             except Exception:  # a store failure passes: nothing recorded, next pass retries
                 log.warning("automatic build not queued", extra={"repo": home.repo})
                 return ""
             else:
-                _manufacture_requested(evidence, auto, fields, run_id)
-                return run_id
+                if queued is None:  # the lease was lost in the insert: nothing written
+                    return ""
+                _manufacture_requested(evidence, fields, queued)
+                return queued.run_id
+            if not renew():  # the refusal came after a store call: renew before the skip
+                return ""
         evidence.append(
             EV_MANUFACTURE_SKIPPED, item_id, **_keyed(fields), reason=reason, detail=detail[:300]
         )
@@ -3185,16 +3243,15 @@ def _keyed(fields: Mapping[str, str]) -> dict[str, str]:
     return {k: v for k, v in fields.items() if k != "item_id"}
 
 
-def _manufacture_requested(
-    evidence: Any, auto: AutoManufacture, fields: Mapping[str, str], run_id: str
-) -> None:
+def _manufacture_requested(evidence: Any, fields: Mapping[str, str], run: QueuedRun) -> None:
+    """Name the run on the chain with the cap and rung it was stored with."""
     evidence.append(
         EV_MANUFACTURE_REQUESTED,
         str(fields["item_id"]),
         **_keyed(fields),
-        run_id=run_id,
-        max_cost_usd=auto.max_cost_usd,
-        rung=auto.rung,
+        run_id=run.run_id,
+        max_cost_usd=run.max_cost_usd,
+        rung=run.rung,
     )
 
 
@@ -3246,6 +3303,7 @@ __all__ = [
     "ApprovalRefused",
     "AutoManufacture",
     "DbLease",
+    "Fence",
     "FencedTracker",
     "IntakeLease",
     "IntakeRow",
@@ -3253,6 +3311,7 @@ __all__ = [
     "ListenerState",
     "ManufactureRefused",
     "PollReport",
+    "QueuedRun",
     "RunActive",
     "Ticket",
     "already_handled",

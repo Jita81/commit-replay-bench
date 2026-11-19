@@ -127,6 +127,11 @@ BUDGET_MAX_TURNS = 1000
 BUDGET_MAX_TOOL_CALLS = 5000
 BUDGET_MAX_TOKENS = 50_000_000
 BUDGET_MAX_COST_USD = 1000.0
+#: The longest builder, model and provider a run request accepts (``RunCreateRequest``).
+#: Start-up refuses an automatic-build rung past them (ADR-0060).
+RUN_BUILDER_MAX_LENGTH = 64
+RUN_MODEL_MAX_LENGTH = 128
+RUN_PROVIDER_MAX_LENGTH = 64
 BUDGET_MAX_WALL_CLOCK_S = 24 * 3600
 #: The builder's defaults (``crb.builders.base.Budget``) — what a run gets when the request
 #: names no ``budget``; served so the UI shows the same numbers the worker applies.
@@ -683,9 +688,9 @@ class RunCreateRequest(BaseModel):
     repo: str = Field(min_length=1, max_length=64)
     kind: str
     mode: str | None = None
-    builder: str = Field(default="", max_length=64)
-    model: str = Field(default="", max_length=128)
-    provider: str = Field(default="", max_length=64)
+    builder: str = Field(default="", max_length=RUN_BUILDER_MAX_LENGTH)
+    model: str = Field(default="", max_length=RUN_MODEL_MAX_LENGTH)
+    provider: str = Field(default="", max_length=RUN_PROVIDER_MAX_LENGTH)
     #: The escalation ladder — one attempt per rung until an attempt grades clean. Each
     #: entry is a rung LABEL (``r1`` = the run's own builder:model, or
     #: ``builder:model[:provider]``) or a rung OBJECT ``{builder, model, provider?, budget?}``

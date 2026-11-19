@@ -2090,6 +2090,14 @@ export interface Settings {
     /** `FactorySettings.redacted()`: the test author, the delivery licence posture (ADR-0018)
      *  and whether delivery to Azure Repos is switched on (ADR-0057). */
     factory?: { test_author: string; require_signed_cell: boolean; azure_repos_delivery?: boolean }
+    /** `IntakeSettings.redacted()`: the automatic build (ADR-0060), off by default. No
+     *  screen reads these yet; the rest of the intake view is not typed here. */
+    intake?: {
+      auto_manufacture?: boolean
+      auto_manufacture_rung?: string
+      auto_manufacture_max_cost_usd?: number
+      auto_manufacture_max_rework?: number
+    }
   }
 }
 

@@ -256,6 +256,9 @@ def test_with_the_switch_on_one_capped_run_is_queued_and_a_second_poll_queues_no
     assert call["tracker"] == "fake" and call["auto"].rung == RUNG
     assert getattr(call["renew"], "__self__", None) is not None
     assert isinstance(call["renew"].__self__, sv.IntakeLease)
+    # outside review: the insert transaction re-checks that same lease
+    assert call["fence"].__func__ is sv.IntakeLease.renew_in
+    assert call["fence"].__self__ is call["renew"].__self__
     assert stack.app.asked == [77]
     stack.poll()
     assert len(sweeps.calls) == 2

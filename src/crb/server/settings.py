@@ -102,7 +102,12 @@ from crb.provision.config import (
     ProvisionConfig,
     parse_host_list,
 )
-from crb.server.schemas import BUDGET_MAX_COST_USD
+from crb.server.schemas import (
+    BUDGET_MAX_COST_USD,
+    RUN_BUILDER_MAX_LENGTH,
+    RUN_MODEL_MAX_LENGTH,
+    RUN_PROVIDER_MAX_LENGTH,
+)
 
 log = logging.getLogger("crb.server.settings")
 
@@ -830,6 +835,17 @@ class IntakeSettings(BaseModel):
             rung = f"{parsed.builder}:{parsed.model}" + (
                 f"@{parsed.provider}" if parsed.provider else ""
             )
+            # the run request refuses these lengths, so every pass would fail to queue
+            for part, value, most in (
+                ("builder", parsed.builder, RUN_BUILDER_MAX_LENGTH),
+                ("model", parsed.model, RUN_MODEL_MAX_LENGTH),
+                ("provider", parsed.provider, RUN_PROVIDER_MAX_LENGTH),
+            ):
+                if len(value) > most:
+                    raise ValueError(
+                        f"auto_manufacture_rung: the {part} is {len(value)} characters; "
+                        f"a run accepts at most {most}"
+                    )
         self.auto_manufacture_rung = rung
         if not self.auto_manufacture:
             return self

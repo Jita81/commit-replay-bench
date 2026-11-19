@@ -1642,17 +1642,22 @@ probe, without `CRB_INTAKE__REQUIRE_APPROVAL`, without `CRB_INTAKE__AUTO_MANUFAC
 with a cap whose share per attempt is above one run's budget limit. When on, an operator's
 Register act also consents to one build. After a clean probe the ticket registers, and the
 worker's next intake pass queues one delivering `factory` run that builds that item only. Its
-whole spend is capped by `CRB_INTAKE__AUTO_MANUFACTURE_MAX_COST_USD`, shared equally between
-the first build and `CRB_INTAKE__AUTO_MANUFACTURE_MAX_REWORK` reworks. Only an act made while
-the switch is on consents: an allowlisted author, an unattended column, or an act made before
-the switch was turned on never starts a build. One run per ticket content: an edit needs a new
-probe and a new act. The chain records `intake.manufacture.requested` (the run) or
-`intake.manufacture.skipped` (why not, for good at that content), and the system trace records
-`intake.manufacture.queued`. A factory run already active, or an error reading the delivery
-route, waits for the next pass. On a production worker that refuses unsealed builds the run is
-skipped `sealed`; start the worker with `CRB_ALLOW_UNSEALED_PROD=1`, with
-`CRB_ALLOW_UNSEALED_PROD_BY` naming an active admin and `CRB_ALLOW_UNSEALED_PROD_REASON` saying
-why (G-663), to build on purpose.
+build attempts are capped by `CRB_INTAKE__AUTO_MANUFACTURE_MAX_COST_USD`, shared equally
+between the first build and `CRB_INTAKE__AUTO_MANUFACTURE_MAX_REWORK` reworks. The test author
+is not capped. When the item has no person's test, the deployment's test author
+(`CRB_FACTORY__TEST_AUTHOR`) writes one first. Its calls count as the run's spend, but nothing
+bounds them before they are made, so the run can spend more than the cap by what the author
+spent. When it does, the run ends failed, after the spend. Only an act made while the switch is
+on consents: an allowlisted author, an unattended column, or an act made before the switch was
+turned on never starts a build. One run per ticket content: an edit needs a new probe and a new
+act. The chain records `intake.manufacture.requested` (the run) or `intake.manufacture.skipped`
+(why not, for good at that content), and the system trace records `intake.manufacture.queued`.
+A factory run already active, or an error reading the delivery route, is a wait: it writes
+nothing, and the consent stays pending for the next pass. Switching the listener or the setting
+off stops new runs but does not withdraw a run already queued; cancel that run like any other.
+On a production worker that refuses unsealed builds the run is skipped `sealed`; start the
+worker with `CRB_ALLOW_UNSEALED_PROD=1`, with `CRB_ALLOW_UNSEALED_PROD_BY` naming an active
+admin and `CRB_ALLOW_UNSEALED_PROD_REASON` saying why (G-663), to build on purpose.
 
 ## 12. The prevention loop
 

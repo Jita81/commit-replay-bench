@@ -45,29 +45,37 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
    poll route never queues one.
 4. **What it queues.** A `factory` run on `CRB_INTAKE__AUTO_MANUFACTURE_RUNG` with
    `deliver: true` and `max_rework` from `CRB_INTAKE__AUTO_MANUFACTURE_MAX_REWORK`. The run's
-   whole cap is `CRB_INTAKE__AUTO_MANUFACTURE_MAX_COST_USD`, and each attempt gets an equal
-   share of it. The share is rounded down to a millionth of a dollar, so the worker's reserve
-   for the item never passes the cap. `params.intake_item` names the item, and the worker
-   builds that item only.
+   cap is `CRB_INTAKE__AUTO_MANUFACTURE_MAX_COST_USD`, and each build attempt gets an equal
+   share of it. The share is rounded down to a millionth of a dollar, so the build attempts
+   together never pass the cap. The test author's calls are NOT capped: see "Consequences".
+   `params.intake_item` names the item, and the worker builds that item only.
    `params.intake_auto` holds the key fields and who acted. The run meets the one submit gate
    `POST /runs` applies, and the factory params `POST /runs` pins. `POST /runs` cannot set
    either intake field.
 5. **Once per content.** The run id is derived from `(repo, tracker, key, content_revision)`,
    so two passes that race insert one row and the second is refused by the store. The run and
-   the system trace `intake.manufacture.queued` are written in one transaction. A run that
-   already holds the key is named on the chain and never queued again.
+   the system trace `intake.manufacture.queued` are written in one transaction, which first
+   checks that this pass still holds the intake lease; if it does not, nothing is written.
+   A run that already holds the key is named on the chain with the cap and rung it was
+   stored with, and never queued again.
 6. **Final skips.** `intake.manufacture.skipped` with a `reason`, never retried at that
    content: `item_superseded` (a later version is on the backlog), `has_dependencies`,
    `already_built` (a run graded or ended the item after the registration),
    `approver_inactive` (the operator who acted is no longer an active operator), `sealed`,
    `no_delivery_route` and `refused:<code>` (the submit gate's own code).
-7. **Waits.** A factory run already queued or running, a pass out of time, a lease lost and an
-   error reading the delivery route write nothing; the next pass tries again.
+7. **Waits.** A factory run already queued or running, a pass out of time, a lease lost
+   (before an act or in the insert transaction) and an error reading the delivery route
+   write nothing; the consent stays pending and the next pass tries again. The lease is
+   renewed before each chain write, which narrows the window; the chain is not in the
+   store's transaction, so it does not close it.
 8. **The worker refuses the item** when it is no longer active or depends on other items,
    before it builds.
 9. **Start-up refuses** the switch on without `CRB_INTAKE__GAP_PROBE`, without
-   `CRB_INTAKE__REQUIRE_APPROVAL`, with an empty rung, and with a cap whose per-attempt share
-   is above the per-run budget limit.
+   `CRB_INTAKE__REQUIRE_APPROVAL`, with an empty rung, with a cap whose per-attempt share
+   is above the per-run budget limit, and a rung whose builder, model or provider is longer
+   than a run request accepts (64, 128 and 64 characters).
+10. **A switch-off does not withdraw a queued run.** Switching the listener or the setting
+    off stops new runs. A run already queued stays queued; cancel it like any other run.
 
 ### Amended text
 
@@ -88,8 +96,13 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
   operator set, and each new content needs a new act.
 - The chain names the run only after the next sweep with the listener and the switch both on.
   Until then the run's `params.intake_auto` and the system trace are the record.
-- The test author has no cap of its own per call. The run's spend check after the loop
-  (`cap.passed`) catches an overrun, but only after it was spent.
+- The cap does not bound the test author. When the item has no person's test, the run uses
+  the deployment's test author (`CRB_FACTORY__TEST_AUTHOR`). Its calls are counted in the
+  run's spend, but they have no cap per call, and on the run's first authoring pass nothing
+  is reserved for them. That pass (two calls by default) can take the spend past the cap,
+  and the item's build attempts still run after it. The check after the loop
+  (`cap.passed`) then ends the run failed, after the money was spent. A real bound needs a
+  cap per author call; this change does not add one.
 - Proven against fakes only [gap]. No live tracker or paid build was run for this change;
   closing it needs one operator-run reading on a sandbox repository.
 - Not in this change: a ticket comment that says a build was queued or skipped, showing the

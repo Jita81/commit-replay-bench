@@ -14,7 +14,7 @@ What it does: Pins that the switch is off by default and changes nothing when of
               item only while it is active and depends on nothing.
 How:          A real ``FactoryHome`` under ``tmp_path`` (the real hash chain), the
               ``FakeTracker``, a fake :class:`~crb.server.intake.AutoManufacture` that only
-              records, and a SQLite store for the real enqueue. No model, no network, no money.
+              records, and a SQLite store for the real queue. No model, no network, no money.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0060-a-clean-probe-queues-one-capped-build.md
 Works with:   src/crb/server/intake.py (the consent marks and the sweep under test),
@@ -201,19 +201,24 @@ class Factory:
         self.inactive: set[str] = set()
         self.refuse: tuple[str, str] | None = None
         self.boom = False
+        self.stored: dict[str, sv.QueuedRun] = {}
 
-    def find_run(self, key: Any) -> str:
-        return self.runs.get((key["tracker"], key["key"], key["content_revision"]), "")
+    def find_run(self, key: Any) -> sv.QueuedRun | None:
+        run_id = self.runs.get((key["tracker"], key["key"], key["content_revision"]), "")
+        return self.stored.get(run_id) if run_id else None
 
-    def queue_run(self, request: Any) -> str:
+    def queue_run(self, request: Any, fence: Any) -> sv.QueuedRun | None:
         if self.refuse:
             raise sv.ManufactureRefused(*self.refuse)
         if self.boom:
             raise RuntimeError("the store fell over")
+        if not fence(None):
+            return None
         run_id = f"run-{len(self.queued) + 1}"
         self.queued.append(dict(request))
         self.runs[(request["tracker"], request["key"], request["content_revision"])] = run_id
-        return run_id
+        self.stored[run_id] = sv.QueuedRun(run_id, 6.0, RUNG)
+        return self.stored[run_id]
 
     def auto(self, *, sealed: bool = False) -> sv.AutoManufacture:
         return sv.AutoManufacture(
@@ -232,6 +237,7 @@ class Factory:
 def _sweep(home: FactoryHome, factory: Factory, **kw: Any) -> str:
     sealed = bool(kw.pop("sealed", False))
     kw.setdefault("renew", lambda: True)
+    kw.setdefault("fence", lambda db: True)
     return sv.manufacture_registered(home, tracker="fake", auto=factory.auto(sealed=sealed), **kw)
 
 
@@ -297,6 +303,43 @@ def test_settings_refuse_an_unsafe_automatic_build(kw: dict[str, Any], match: st
 def test_settings_refuse_out_of_range_bounds(kw: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         _settings(**kw)
+
+
+@pytest.mark.parametrize(
+    ("rung", "part"),
+    [
+        ("claude_code:" + "m" * 129, "model"),
+        ("b" * 65 + ":claude-sonnet-5", "builder"),
+        ("claude_code:claude-sonnet-5@" + "p" * 65, "provider"),
+    ],
+)
+def test_settings_refuse_a_rung_longer_than_a_run_accepts(rung: str, part: str) -> None:
+    """Outside review: such a rung passed start-up, then every pass failed to build the run
+    request and queued nothing."""
+    with pytest.raises(ValidationError, match=f"the {part} is"):
+        _settings(**{**_ON, "auto_manufacture_rung": rung})
+
+
+def test_the_longest_rung_a_run_accepts_starts() -> None:
+    from crb.server.schemas import RunCreateRequest
+
+    rung = "claude_code:" + "m" * 128 + "@" + "p" * 64
+    s = _settings(**{**_ON, "auto_manufacture_rung": rung})
+    builder, _, rest = s.auto_manufacture_rung.partition(":")
+    model, _, provider = rest.partition("@")
+    RunCreateRequest(repo="alpha", kind="factory", builder=builder, model=model, provider=provider)
+
+
+def test_the_settings_keys_are_in_the_api_doc_and_the_ui_type() -> None:
+    """Outside review: ``GET /settings`` serves these keys, so the API doc and the UI type
+    must name them in the same change."""
+    root = Path(__file__).resolve().parent.parent
+    api = (root / "docs" / "API.md").read_text(encoding="utf-8")
+    types = (root / "ui" / "src" / "api" / "types.ts").read_text(encoding="utf-8")
+    keys = [k for k in _settings().redacted() if k.startswith("auto_manufacture")]
+    assert len(keys) == 4
+    for key in keys:
+        assert f"`{key}`" in api and f"{key}?:" in types
 
 
 def test_settings_accept_a_complete_switch_and_store_one_canonical_rung() -> None:
@@ -453,6 +496,11 @@ def test_content_that_goes_back_to_an_earlier_probe_needs_a_new_act(home: Factor
     _poll(home, tracker, queue, auto=True)
     marked = [e for e in _of(home, sv.EV_REGISTERED) if e.payload.get("manufacture")]
     assert len(marked) == 2
+    # outside review: the reverted words do register, as an evolution of the earlier item
+    # (intake's own rule), but unmarked and with no consent of their own
+    *_, reverted = _of(home, sv.EV_REGISTERED)
+    assert len(_of(home, sv.EV_REGISTERED)) == 3 and reverted.payload["how"] == "evolved"
+    assert "manufacture" not in reverted.payload and "content_revision" not in reverted.payload
     assert _sweep(home, factory) == "" and len(factory.queued) == 2
 
 
@@ -614,9 +662,70 @@ def test_a_store_failure_records_nothing_and_the_next_pass_retries(one: FactoryH
 def test_a_run_the_chain_never_named_is_named_never_queued_again(one: FactoryHome) -> None:
     factory = Factory()
     factory.runs[("fake", "4711", "c-1")] = "run-earlier"
+    factory.stored["run-earlier"] = sv.QueuedRun("run-earlier", 6.0, RUNG)
     assert _sweep(one, factory) == ""
     (named,) = _of(one, EV_INTAKE_MANUFACTURE_REQUESTED)
     assert named.payload["run_id"] == "run-earlier" and factory.queued == []
+
+
+def test_a_recovered_run_is_named_with_its_stored_cap_and_rung(one: FactoryHome) -> None:
+    """Outside review: a $6 run committed, its chain write failed, then the deployment's cap
+    became $10. The recovery named the run with the new cap and rung."""
+    factory = Factory()
+    factory.runs[("fake", "4711", "c-1")] = "run-earlier"
+    factory.stored["run-earlier"] = sv.QueuedRun("run-earlier", 4.0, "claude_code:older-model")
+    assert _sweep(one, factory) == ""
+    (named,) = _of(one, EV_INTAKE_MANUFACTURE_REQUESTED)
+    assert named.payload["max_cost_usd"] == 4.0
+    assert named.payload["rung"] == "claude_code:older-model"
+
+
+@pytest.mark.parametrize("found", [False, True])
+def test_a_lease_lost_after_the_last_read_writes_no_chain_event(
+    one: FactoryHome, found: bool
+) -> None:
+    """Outside review: after the delivery-route read (a skip) or the run lookup (a recovery),
+    the chain write did not renew the lease, so a pass that had lost it still wrote."""
+    factory = Factory()
+    factory.route = sv.ROUTE_NONE
+    if found:
+        factory.runs[("fake", "4711", "c-1")] = "run-earlier"
+        factory.stored["run-earlier"] = sv.QueuedRun("run-earlier", 6.0, RUNG)
+    calls: list[str] = []
+
+    def renew() -> bool:
+        calls.append("renew")
+        return len(calls) < 2  # held for the reads, lost before the chain write
+
+    before = len(list(one.events()))
+    assert _sweep(one, factory, renew=renew) == ""
+    assert len(list(one.events())) == before and factory.queued == []
+
+
+def test_a_lease_lost_during_a_refused_queue_writes_no_skip(one: FactoryHome) -> None:
+    """Outside review: the submit gate's store calls can outlast the lease, and the skip
+    that records the refusal was written without a renewal."""
+    factory = Factory()
+    factory.refuse = ("spend_cap_unpriced", "no price")
+    calls: list[str] = []
+
+    def renew() -> bool:
+        calls.append("renew")
+        return len(calls) < 3  # held for the find and the queue, lost before the skip
+
+    before = len(list(one.events()))
+    assert _sweep(one, factory, renew=renew) == ""
+    assert calls == ["renew"] * 3 and len(list(one.events())) == before
+
+
+def test_a_lease_lost_in_the_insert_transaction_writes_nothing(one: FactoryHome) -> None:
+    """Outside review: the queue's insert did not check the lease, so a switch-off that took
+    it during the submit gate's login check did not stop the paid run."""
+    factory = Factory()
+    before = len(list(one.events()))
+    assert _sweep(one, factory, fence=lambda db: False) == ""
+    assert len(list(one.events())) == before and factory.queued == []
+    assert _sweep(one, factory) == "run-1"
 
 
 def test_one_run_per_pass_oldest_first(home: FactoryHome) -> None:
@@ -630,14 +739,14 @@ def test_one_run_per_pass_oldest_first(home: FactoryHome) -> None:
     assert [q["key"] for q in factory.queued] == ["1", "2"]
 
 
-def test_the_lease_is_renewed_before_the_find_and_before_the_enqueue(one: FactoryHome) -> None:
+def test_the_lease_is_renewed_before_the_find_and_before_the_queue(one: FactoryHome) -> None:
     """Governance review: the sweep ran after a lease lost in the tracker writes, unfenced."""
     calls: list[str] = []
     factory = Factory()
 
     def renew() -> bool:
         calls.append("renew")
-        return len(calls) < 2  # lost between the find and the enqueue
+        return len(calls) < 2  # lost between the find and the queue
 
     assert _sweep(one, factory, renew=renew) == ""
     assert calls == ["renew", "renew"] and factory.queued == [] and not _skipped(one)
@@ -672,6 +781,10 @@ def _real(tmp_path: Path, sessions: Any, **intake: Any) -> sv.AutoManufacture:
     return auto
 
 
+def _held(db: Any) -> bool:
+    return True
+
+
 _REQUEST = {
     "tracker": "fake",
     "key": "4711",
@@ -704,7 +817,10 @@ def test_the_run_delivers_keeps_its_rework_and_shares_the_cap(
     monkeypatch.setattr(sv, "submit_refusals", lambda db, s, body, run: gated.append(body.kind))
     sessions = _store(tmp_path)
     auto = _real(tmp_path, sessions)
-    run_id = auto.queue_run(_REQUEST)
+    queued = auto.queue_run(_REQUEST, _held)
+    assert queued is not None
+    run_id = queued.run_id
+    assert queued == sv.QueuedRun(run_id, 6.0, RUNG)
     assert run_id == sv.manufacture_run_id("alpha", "fake", "4711", "c-1")
     (run,) = _runs(sessions)
     assert run.id == run_id and run.kind == "factory" and gated == ["factory"]
@@ -717,8 +833,50 @@ def test_the_run_delivers_keeps_its_rework_and_shares_the_cap(
     assert p["intake_item"] == "fake-4711" and p["intake_auto"] == _REQUEST
     (trace,) = _traces(sessions)
     assert trace.payload_json["run_id"] == run_id and trace.actor == "ada"
-    assert auto.find_run(_REQUEST) == run_id
-    assert auto.find_run({**_REQUEST, "content_revision": "c-2"}) == ""
+    assert auto.find_run(_REQUEST) == queued
+    assert auto.find_run({**_REQUEST, "content_revision": "c-2"}) is None
+
+
+def test_the_lookup_answers_the_stored_cap_and_rung_not_the_current_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside review: a run queued at $6 was named at $10 after the deployment's cap moved."""
+    monkeypatch.setattr(sv, "submit_refusals", lambda db, s, body, run: None)
+    sessions = _store(tmp_path)
+    _real(tmp_path, sessions).queue_run(_REQUEST, _held)
+    later = _real(
+        tmp_path,
+        sessions,
+        auto_manufacture_max_cost_usd=10.0,
+        auto_manufacture_rung="claude_code:claude-opus-5",
+    )
+    found = later.find_run(_REQUEST)
+    assert found is not None and (found.max_cost_usd, found.rung) == (6.0, RUNG)
+    assert later.queue_run(_REQUEST, _held) == found
+
+
+def test_a_lease_taken_before_the_insert_leaves_no_run_and_no_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside review: the lease was renewed before the submit gate, whose login check can
+    be slow. A switch-off that took the lease meanwhile did not stop the insert."""
+    from crb.store.models import WorkerRow
+
+    sessions = _store(tmp_path)
+    lease = sv.intake_lease(sessions, "alpha", ttl_s=60)
+    assert lease.acquire()
+
+    def switch_off(db: Any, s: Any, body: Any, run: Any) -> None:
+        with sessions() as other:  # the switch-off takes the lease over and commits
+            row = other.get(WorkerRow, lease.key)
+            assert row is not None
+            row.hostname = "switch-off"
+            other.commit()
+
+    monkeypatch.setattr(sv, "submit_refusals", switch_off)
+    auto = _real(tmp_path, sessions)
+    assert auto.queue_run(_REQUEST, lease.renew_in) is None
+    assert _runs(sessions) == [] and _traces(sessions) == [] and not lease.held
 
 
 @pytest.mark.parametrize(
@@ -742,7 +900,7 @@ def test_the_spend_cap_admits_the_item_the_run_was_queued_for(
         auto_manufacture_max_cost_usd=cap,
         auto_manufacture_max_rework=rework,
     )
-    auto.queue_run(_REQUEST)
+    auto.queue_run(_REQUEST, _held)
     (run,) = _runs(sessions)
     p = run.params_json
     share = float(p["budget"]["max_cost_usd"])
@@ -763,17 +921,17 @@ def test_two_passes_that_race_on_one_key_queue_one_run(
     sessions = _store(tmp_path)
     first = _real(tmp_path, sessions)
     second = _real(tmp_path, sessions)
-    raced: list[str] = []
+    raced: list[Any] = []
 
     def gate(db: Any, s: Any, body: Any, run: Any) -> None:
         if not raced:  # the other pass commits between this pass's find and its insert
             raced.append("racing")
-            raced.append(second.queue_run(_REQUEST))
+            raced.append(second.queue_run(_REQUEST, _held))
 
     monkeypatch.setattr(sv, "submit_refusals", gate)
-    assert first.queue_run(_REQUEST) == raced[1]
+    assert first.queue_run(_REQUEST, _held) == raced[1]
     (run,) = _runs(sessions)
-    assert run.id == raced[1] and len(_traces(sessions)) == 1
+    assert run.id == raced[1].run_id and len(_traces(sessions)) == 1
 
 
 def test_a_run_the_submit_gate_refuses_is_never_queued(
@@ -786,7 +944,7 @@ def test_a_run_the_submit_gate_refuses_is_never_queued(
     sessions = _store(tmp_path)
     auto = _real(tmp_path, sessions, auto_manufacture_rung="claude_code:zzz-unknown")
     with pytest.raises(sv.ManufactureRefused) as refused:
-        auto.queue_run(_REQUEST)
+        auto.queue_run(_REQUEST, _held)
     assert refused.value.code == "spend_cap_unpriced"
     assert _runs(sessions) == [] and _traces(sessions) == []
 
