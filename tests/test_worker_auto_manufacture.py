@@ -12,8 +12,10 @@ What it does: Pins that with the switch off the sweep is never called and nothin
               (ADR-0057), ``none`` for neither, and ``error`` when GitHub cannot be asked (a
               network error), which the poll treats as a wait and never as a final skip; that
               a lease lost before the sweep, or a pass out of time, queues nothing and a later
-              pass still queues; that a sealed worker skips; and that a sweep that raises
-              never fails the poll.
+              pass still queues; that a sealed worker skips; that a sweep that raises
+              never fails the poll; and that the worker holds an automatic build at claim
+              (``intake_build_held``) when a factory run is ahead of it or its item was
+              built, leaving the consent pending.
 How:          A real ``Worker`` over a SQLite store under ``tmp_path`` with the in-memory
               ``FakeTracker`` (an empty column), a consented registration written on the real
               hash chain, the real submit gate (its credential and login checks stubbed), and
@@ -517,3 +519,139 @@ def test_a_pass_out_of_time_queues_nothing_and_the_next_pass_does(
     late["on"] = False
     stack.poll()
     assert len(stack.runs()) == 1
+
+
+# --- the hold at claim (F1: an operator run the insert could not see) -------------------
+
+
+def _operator_run(stack: Stack, *, status: str, created: str) -> str:
+    """A factory run an operator queued through ``POST /runs``: a plain insert, no lock,
+    so on Postgres it can commit after the sweep's active-run read and before its insert."""
+    with stack.factory() as s:
+        s.add(
+            Run(
+                id="op-run",
+                repo="alpha",
+                kind="factory",
+                status=status,
+                actor="ada",
+                created=created,
+                params_json={},
+            )
+        )
+        s.commit()
+    return "op-run"
+
+
+def _claim_the_automatic_build(stack: Stack) -> Run:
+    """Claim the automatic build as a worker would and run its claim checks."""
+    (auto,) = [r for r in stack.runs() if (r.params_json or {}).get("intake_auto")]
+    with stack.factory() as s:
+        s.execute(
+            update(Run)
+            .where(Run.id == auto.id)
+            .values(
+                status="running", worker_id="w-auto", started=auto.created, heartbeat=auto.created
+            )
+        )
+        s.commit()
+        claimed = s.get(Run, auto.id)
+        assert claimed is not None
+    # this host has no builder credential or login: those claim checks pass here
+    stack.worker._credential_gone = lambda run: ""  # type: ignore[method-assign]
+    stack.worker._dead_login = lambda run, emitter: None  # type: ignore[method-assign]
+    stack.worker.execute(claimed)
+    with stack.factory() as s:
+        done = s.get(Run, auto.id)
+        assert done is not None
+        return done
+
+
+def _refusals(stack: Stack, run_id: str) -> list[Any]:
+    from crb.store.models import Event
+
+    with stack.factory() as s:
+        return list(
+            s.scalars(select(Event).where(Event.trace_id == run_id, Event.action == "run.refused"))
+        )
+
+
+@pytest.mark.parametrize("ahead", ["running", "queued"])
+def test_an_operator_run_ahead_of_the_automatic_build_holds_it_at_claim(
+    tmp_path: Path, ahead: str
+) -> None:
+    """Outside review (round 4): the insert's active-run read is not serialised with
+    ``POST /runs`` on Postgres, so an operator run could commit unseen and both would
+    build. The worker now holds the automatic build at claim, before any paid step, and
+    the consent stays pending: a later pass queues the next run of the key."""
+    stack = Stack(tmp_path)
+    stack.consent()
+    stack.poll()
+    (first,) = stack.runs()
+    _operator_run(stack, status=ahead, created="2000-01-01T00:00:00.000000+00:00")
+    done = _claim_the_automatic_build(stack)
+    assert done.status == "failed" and done.error.startswith(sv.REFUSAL_BUILD_HELD)
+    assert sv.build_held(done.status, done.error)
+    (refused,) = _refusals(stack, first.id)
+    assert refused.payload_json == {
+        "code": sv.REFUSAL_BUILD_HELD,
+        "item_id": "fake-4711",
+        "held_by": "op-run",
+    }
+    # the operator's run is never refused; while it is active the sweep waits
+    with stack.factory() as s:
+        op = s.get(Run, "op-run")
+        assert op is not None and op.status == ahead
+    stack.poll()
+    assert len(stack.runs()) == 2 and stack.skipped() == []
+    # it ends without building the item: the consent was not spent, the next run is queued
+    with stack.factory() as s:
+        s.execute(update(Run).where(Run.id == "op-run").values(status="succeeded"))
+        s.commit()
+    stack.poll()
+    again = sv.manufacture_run_id("alpha", "fake", "4711", "c-1", 1)
+    assert {r.id for r in stack.runs()} == {first.id, "op-run", again}
+    named = [e.payload["run_id"] for e in stack.of(EV_INTAKE_MANUFACTURE_REQUESTED)]
+    assert named == [first.id, again]
+    stack.poll()
+    assert len(stack.runs()) == 3 and stack.skipped() == []
+
+
+def test_an_item_built_after_the_consent_holds_the_build_and_the_next_pass_skips(
+    tmp_path: Path,
+) -> None:
+    """The run that built the item has ended, so no active run is left to see; the chain
+    says the item was built after the consent, and the worker holds the automatic build.
+    The next pass records ``already_built`` and queues nothing."""
+    from crb.factory.evidence import EV_ITEM_OUTCOME
+
+    stack = Stack(tmp_path)
+    stack.consent()
+    stack.poll()
+    (first,) = stack.runs()
+    stack.chain.evidence(actor="worker").append(EV_ITEM_OUTCOME, "fake-4711", status="merged")
+    done = _claim_the_automatic_build(stack)
+    assert done.status == "failed" and done.error.startswith(sv.REFUSAL_BUILD_HELD)
+    (refused,) = _refusals(stack, first.id)
+    assert refused.payload_json["held_by"] == ""
+    stack.poll()
+    assert [r.id for r in stack.runs()] == [first.id]
+    assert stack.skipped() == [sv.SKIP_ALREADY_BUILT]
+
+
+def test_an_operator_run_queued_after_the_automatic_build_does_not_hold_it(
+    tmp_path: Path,
+) -> None:
+    """Only a run ahead of it holds the automatic build; one queued later waits its turn,
+    and no run that is not an automatic build is ever held."""
+    stack = Stack(tmp_path)
+    stack.consent()
+    stack.poll()
+    (first,) = stack.runs()
+    _operator_run(stack, status="queued", created="2999-01-01T00:00:00.000000+00:00")
+    with stack.factory() as s:
+        auto = s.get(Run, first.id)
+        op = s.get(Run, "op-run")
+        assert auto is not None and op is not None
+    assert stack.worker._intake_build_held(auto, stack.worker._emitter(auto)) is None
+    assert stack.worker._intake_build_held(op, stack.worker._emitter(op)) is None

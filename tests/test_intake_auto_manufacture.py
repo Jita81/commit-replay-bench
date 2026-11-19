@@ -207,12 +207,12 @@ class Factory:
         run_id = self.runs.get((key["tracker"], key["key"], key["content_revision"]), "")
         return self.stored.get(run_id) if run_id else None
 
-    def queue_run(self, request: Any, fence: Any) -> sv.QueuedRun | None:
+    def queue_run(self, request: Any, fence: Any, admit: Any) -> sv.QueuedRun | None:
         if self.refuse:
             raise sv.ManufactureRefused(*self.refuse)
         if self.boom:
             raise RuntimeError("the store fell over")
-        if not fence(None):
+        if not fence(None) or not admit():
             return None
         run_id = f"run-{len(self.queued) + 1}"
         self.queued.append(dict(request))
@@ -526,6 +526,18 @@ def test_content_that_goes_back_to_an_earlier_probe_needs_a_new_act(home: Factor
     assert len(_of(home, sv.EV_REGISTERED)) == 3 and reverted.payload["how"] == "evolved"
     assert "manufacture" not in reverted.payload and "content_revision" not in reverted.payload
     assert _sweep(home, factory) == "" and len(factory.queued) == 2
+    # outside review (round 4): a Register act cannot consent to those words now: they are
+    # registered, and the act registers only a waiting draft later than the registration
+    with pytest.raises(sv.ApprovalRefused) as refused:
+        _act(home, tracker, queue, auto=True, revision="3")
+    assert refused.value.code == "nothing_to_register"
+    # the supported path: a content change, which makes a new waiting draft to act on
+    _edit(tracker, "4", body="a new HTTP endpoint; the 503 body says 'back soon'")
+    _poll(home, tracker, queue, auto=True)
+    _act(home, tracker, queue, auto=True, revision="4")
+    _finish(home, queue)
+    _poll(home, tracker, queue, auto=True)
+    assert _sweep(home, factory) == "run-3" and len(factory.queued) == 3
 
 
 def test_a_later_draft_of_the_same_words_does_not_borrow_the_probes_consent(
@@ -761,11 +773,11 @@ def test_a_deadline_passed_after_the_reads_writes_nothing(one: FactoryHome, wher
             late["now"] = True
         return sv.ROUTE_FOUND
 
-    def queue_run(request: Any, fence: Any) -> sv.QueuedRun | None:
+    def queue_run(request: Any, fence: Any, admit: Any) -> sv.QueuedRun | None:
         late["now"] = True  # the submit gate's store calls outlast the pass
         if where == "refused":
             raise sv.ManufactureRefused("spend_cap_unpriced", "no price")
-        return factory.queue_run(request, fence)
+        return factory.queue_run(request, fence, admit)
 
     auto = replace(factory.auto(), delivery_route=route, queue_run=queue_run)
     before = len(list(one.events()))
@@ -936,6 +948,10 @@ def _held(db: Any) -> bool:
     return True
 
 
+def _admit() -> bool:
+    return True
+
+
 _REQUEST = {
     "tracker": "fake",
     "key": "4711",
@@ -968,7 +984,7 @@ def test_the_run_delivers_keeps_its_rework_and_shares_the_cap(
     monkeypatch.setattr(sv, "submit_refusals", lambda db, s, body, run: gated.append(body.kind))
     sessions = _store(tmp_path)
     auto = _real(tmp_path, sessions)
-    queued = auto.queue_run(_REQUEST, _held)
+    queued = auto.queue_run(_REQUEST, _held, _admit)
     assert queued is not None
     run_id = queued.run_id
     assert queued == sv.QueuedRun(run_id, 6.0, RUNG)
@@ -995,7 +1011,7 @@ def test_the_lookup_answers_the_stored_cap_and_rung_not_the_current_settings(
     """Outside review: a run queued at $6 was named at $10 after the deployment's cap moved."""
     monkeypatch.setattr(sv, "submit_refusals", lambda db, s, body, run: None)
     sessions = _store(tmp_path)
-    _real(tmp_path, sessions).queue_run(_REQUEST, _held)
+    _real(tmp_path, sessions).queue_run(_REQUEST, _held, _admit)
     later = _real(
         tmp_path,
         sessions,
@@ -1004,7 +1020,7 @@ def test_the_lookup_answers_the_stored_cap_and_rung_not_the_current_settings(
     )
     found = later.find_run(_REQUEST)
     assert found is not None and (found.max_cost_usd, found.rung) == (6.0, RUNG)
-    assert later.queue_run(_REQUEST, _held) == found
+    assert later.queue_run(_REQUEST, _held, _admit) == found
 
 
 def test_a_lease_taken_before_the_insert_leaves_no_run_and_no_trace(
@@ -1027,7 +1043,7 @@ def test_a_lease_taken_before_the_insert_leaves_no_run_and_no_trace(
 
     monkeypatch.setattr(sv, "submit_refusals", switch_off)
     auto = _real(tmp_path, sessions)
-    assert auto.queue_run(_REQUEST, lease.renew_in) is None
+    assert auto.queue_run(_REQUEST, lease.renew_in, _admit) is None
     assert _runs(sessions) == [] and _traces(sessions) == [] and not lease.held
 
 
@@ -1040,11 +1056,101 @@ def test_an_active_factory_run_seen_in_the_insert_transaction_leaves_nothing(
     monkeypatch.setattr(sv, "submit_refusals", lambda db, s, body, run: None)
     sessions = _store(tmp_path)
     auto = _real(tmp_path, sessions)
-    other = auto.queue_run({**_REQUEST, "content_revision": "c-0"}, _held)
+    other = auto.queue_run({**_REQUEST, "content_revision": "c-0"}, _held, _admit)
     assert other is not None
-    assert auto.queue_run(_REQUEST, _held) is None
+    assert auto.queue_run(_REQUEST, _held, _admit) is None
     assert [r.id for r in _runs(sessions)] == [other.run_id]
     assert [t.payload_json["run_id"] for t in _traces(sessions)] == [other.run_id]
+
+
+def test_an_outcome_written_while_the_submit_gate_ran_leaves_the_consent_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside review (round 4): an operator's run built the item and ended while the
+    submit gate ran. The insert checked the lease and active runs only, so a second capped
+    run was queued for a built item. The outcome is read again just before the insert."""
+    sessions = _store(tmp_path)
+    auto = _real(tmp_path, sessions)
+    home = FactoryHome(tmp_path, "alpha")
+    _mark(home)
+
+    def built(db: Any, settings: Any, body: Any, run: Any) -> None:
+        home.evidence(actor="worker").append(EV_ITEM_OUTCOME, "fake-4711", status="merged")
+
+    monkeypatch.setattr(sv, "submit_refusals", built)
+    sweep: dict[str, Any] = {"tracker": "fake", "auto": auto, "renew": lambda: True, "fence": _held}
+    assert sv.manufacture_registered(home, **sweep) == ""
+    assert _runs(sessions) == [] and _traces(sessions) == []
+    assert _of(home, EV_INTAKE_MANUFACTURE_REQUESTED) == [] and _skipped(home) == []
+    # the consent stayed pending: the next pass reads the outcome and skips for good
+    monkeypatch.setattr(sv, "submit_refusals", lambda db, s, body, run: None)
+    assert sv.manufacture_registered(home, **sweep) == ""
+    assert _skipped(home) == [sv.SKIP_ALREADY_BUILT] and _runs(sessions) == []
+
+
+def test_a_deadline_passed_during_the_lease_write_inserts_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside review (round 4): the deadline was read before the lease write in the
+    insert transaction, and that write can wait on a lock. It is read again just before
+    the insert, after the lease and the active-run check."""
+    monkeypatch.setattr(sv, "submit_refusals", lambda db, s, body, run: None)
+    sessions = _store(tmp_path)
+    auto = _real(tmp_path, sessions)
+    home = FactoryHome(tmp_path, "alpha")
+    _mark(home)
+    late = {"now": False}
+
+    def slow_lease(db: Any) -> bool:
+        late["now"] = True
+        return True
+
+    got = sv.manufacture_registered(
+        home,
+        tracker="fake",
+        auto=auto,
+        renew=lambda: True,
+        fence=slow_lease,
+        out_of_time=lambda: late["now"],
+    )
+    assert got == "" and _runs(sessions) == [] and _traces(sessions) == []
+    assert _of(home, EV_INTAKE_MANUFACTURE_REQUESTED) == [] and _skipped(home) == []
+    late["now"] = False
+    assert sv.manufacture_registered(
+        home, tracker="fake", auto=auto, renew=lambda: True, fence=_held
+    ) == sv.manufacture_run_id("alpha", "fake", "4711", "c-1")
+
+
+def test_a_run_held_at_claim_frees_the_next_run_id_of_its_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run the worker held at claim does not settle its key: the lookup passes over it,
+    the next queue takes the next id, and racing passes still meet on one id."""
+    from crb.store.models import Run
+
+    monkeypatch.setattr(sv, "submit_refusals", lambda db, s, body, run: None)
+    sessions = _store(tmp_path)
+    auto = _real(tmp_path, sessions)
+    first = auto.queue_run(_REQUEST, _held, _admit)
+    assert first is not None and not auto.run_held(first.run_id)
+    with sessions() as s:
+        row = s.get(Run, first.run_id)
+        assert row is not None
+        row.status, row.error = "failed", f"{sv.REFUSAL_BUILD_HELD}: held"
+        s.commit()
+    assert auto.run_held(first.run_id) and auto.find_run(_REQUEST) is None
+    second = auto.queue_run(_REQUEST, _held, _admit)
+    assert second is not None
+    assert second.run_id == sv.manufacture_run_id("alpha", "fake", "4711", "c-1", 1)
+    assert auto.find_run(_REQUEST) == second
+    assert auto.queue_run(_REQUEST, _held, _admit) == second
+    # a run that failed for any other reason still holds its key: it is never re-queued
+    with sessions() as s:
+        row = s.get(Run, second.run_id)
+        assert row is not None
+        row.status, row.error = "failed", "the build failed"
+        s.commit()
+    assert auto.find_run(_REQUEST) == second and not auto.run_held(second.run_id)
 
 
 @pytest.mark.parametrize(
@@ -1068,7 +1174,7 @@ def test_the_spend_cap_admits_the_item_the_run_was_queued_for(
         auto_manufacture_max_cost_usd=cap,
         auto_manufacture_max_rework=rework,
     )
-    auto.queue_run(_REQUEST, _held)
+    auto.queue_run(_REQUEST, _held, _admit)
     (run,) = _runs(sessions)
     p = run.params_json
     share = float(p["budget"]["max_cost_usd"])
@@ -1094,10 +1200,10 @@ def test_two_passes_that_race_on_one_key_queue_one_run(
     def gate(db: Any, s: Any, body: Any, run: Any) -> None:
         if not raced:  # the other pass commits between this pass's find and its insert
             raced.append("racing")
-            raced.append(second.queue_run(_REQUEST, _held))
+            raced.append(second.queue_run(_REQUEST, _held, _admit))
 
     monkeypatch.setattr(sv, "submit_refusals", gate)
-    assert first.queue_run(_REQUEST, _held) == raced[1]
+    assert first.queue_run(_REQUEST, _held, _admit) == raced[1]
     (run,) = _runs(sessions)
     assert run.id == raced[1].run_id and len(_traces(sessions)) == 1
 
@@ -1112,7 +1218,7 @@ def test_a_run_the_submit_gate_refuses_is_never_queued(
     sessions = _store(tmp_path)
     auto = _real(tmp_path, sessions, auto_manufacture_rung="claude_code:zzz-unknown")
     with pytest.raises(sv.ManufactureRefused) as refused:
-        auto.queue_run(_REQUEST, _held)
+        auto.queue_run(_REQUEST, _held, _admit)
     assert refused.value.code == "spend_cap_unpriced"
     assert _runs(sessions) == [] and _traces(sessions) == []
 

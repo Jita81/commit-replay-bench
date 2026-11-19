@@ -258,7 +258,7 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
 
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, and_, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.builders import builder_for_rung
@@ -459,6 +459,7 @@ from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcome
 from crb.server.flow_record import record_deliver_transitions
 from crb.server.github_app import GitHubApp, GitHubAppError
 from crb.server.intake import (
+    REFUSAL_BUILD_HELD,
     ROUTE_ERROR,
     ROUTE_FOUND,
     ROUTE_NONE,
@@ -469,6 +470,7 @@ from crb.server.intake import (
     apply_outcome_map,
     auto_manufacture_for,
     build_tracker,
+    built_since_consent,
     gap_probe_for,
     intake_lease,
     item_url_for,
@@ -1922,6 +1924,8 @@ class Worker:
                 status, error = STATUS_FAILED, unregistered
             elif (drifted := self._reading_pool_drift(run, emitter)) is not None:
                 status, error = STATUS_FAILED, drifted
+            elif (held := self._intake_build_held(run, emitter)) is not None:
+                status, error = STATUS_FAILED, held
             else:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
@@ -2208,6 +2212,60 @@ class Worker:
             reading_id=reading_id,
             repo=run.repo,
             reason=LINT_DISABLED_BY_CONFIG,
+        )
+        return error
+
+    def _intake_build_held(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that ends an intake automatic build (``params.intake_auto``, ADR-0060)
+        unspent at claim, before any paid step: another factory run on the repository is
+        running, or is queued ahead of it, or the chain says its item was built or ended
+        after the consented registration. The store is read first and the chain after it,
+        so a run that ends between the two reads has already written its outcome. The
+        consent stays pending: the intake's next pass reads the chain and records
+        ``already_built`` or queues the next run of the key. ``None`` for every other run;
+        an operator's run is never refused here."""
+        auto = dict(run.params_json or {}).get("intake_auto")
+        if run.kind != KIND_FACTORY or not isinstance(auto, Mapping):
+            return None
+        with self.factory() as s:
+            ahead = s.scalars(
+                select(Run.id)
+                .where(
+                    Run.repo == run.repo,
+                    Run.kind == KIND_FACTORY,
+                    Run.id != run.id,
+                    or_(
+                        Run.status == STATUS_RUNNING,
+                        and_(
+                            Run.status == STATUS_QUEUED,
+                            or_(
+                                Run.created < run.created,
+                                and_(Run.created == run.created, Run.id < run.id),
+                            ),
+                        ),
+                    ),
+                )
+                .limit(1)
+            ).first()
+        item_id = str(auto.get("item_id", ""))
+        if ahead is not None:
+            reason = f"factory run {str(ahead)[:8]} on this repository builds first"
+        elif built_since_consent(FactoryHome(self.home, run.repo).events(), auto):
+            reason = f"item {item_id} was built after the consent"
+        else:
+            return None
+        error = (
+            f"{REFUSAL_BUILD_HELD}: an automatic build of item {item_id} was held at claim: "
+            f"{reason}; nothing was built, and the intake's next pass acts on the consent"
+        )
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=REFUSAL_BUILD_HELD,
+            item_id=item_id,
+            held_by=str(ahead or ""),
         )
         return error
 

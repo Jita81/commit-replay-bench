@@ -37,8 +37,11 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
 2. **Only a clean probe of that item.** The mark is written only when the probe ended done
    with no question, the build-time stop (`not_built`) is empty, and the probe was requested
    for the same item id, on the poll's path and the Register act's alike. A ticket whose
-   words go back to content probed earlier is a new item; it is registered without the mark
-   and needs a new act.
+   words go back to content probed earlier is a new item; the poll registers it without
+   the mark. A Register act cannot mark it after that: the act registers only a waiting
+   draft later than the last registration, so it is refused `nothing_to_register`. To
+   build those words, change the ticket's content: the change makes a new waiting draft,
+   and a Register act on it starts a new probe.
 3. **The worker's intake pass queues it.** After it tells the tickets, under the repository's
    intake lease, the pass looks for the oldest marked registration of that tracker with no
    `intake.manufacture.requested` or `intake.manufacture.skipped` for its
@@ -55,10 +58,14 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
    either intake field.
 5. **Once per content.** The run id is derived from `(repo, tracker, key, content_revision)`,
    so two passes that race insert one row and the second is refused by the store. The run and
-   the system trace `intake.manufacture.queued` are written in one transaction, which first
-   checks that this pass still holds the intake lease; if it does not, nothing is written.
-   A run that already holds the key is named on the chain with the cap and rung it was
-   stored with, and never queued again.
+   the system trace `intake.manufacture.queued` are written in one transaction. In it, in
+   order: the pass still holds the intake lease; no run holds the key; no factory run on the
+   repository is queued or running; and, just before the insert, the pass is still in time
+   and the chain shows no build or outcome for the item since its registration. If any
+   check fails, nothing is written and the consent stays pending. A run that already holds
+   the key is named on the chain with the cap and rung it was stored with, and never
+   queued again. A run held at claim (decision 8) does not hold the key: the next run of
+   the key takes the next id, `attempt` 1, 2 and so on.
 6. **Final skips.** `intake.manufacture.skipped` with a `reason`, never retried at that
    content: `item_superseded` (a later version is on the backlog), `has_dependencies`,
    `already_built` (a run graded or ended the item after the registration; the chain and the
@@ -71,10 +78,18 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
    (before an act or in the insert transaction) and an error reading the delivery route
    write nothing; the consent stays pending and the next pass tries again. The deadline is
    checked again after the delivery route is read, before a skip is written, and in the
-   transaction that inserts the run, beside the lease. The lease is
+   transaction that inserts the run, after the lease and the active-run check. The lease is
    renewed before each chain write, which narrows the window; the chain is not in the
    store's transaction, so it does not close it.
-8. **The worker refuses the item** when it is no longer active or depends on other items,
+8. **The worker holds the run at claim.** Before any paid step, the worker reads the store
+   and then the chain. It ends the automatic build failed at $0, with `system/run.refused`
+   and code `intake_build_held`, when another factory run on the repository is running or
+   is queued ahead of it, or when the chain shows a build or outcome for the item after
+   its registration. The `intake.manufacture.requested` naming that run then no longer
+   settles the key. The next pass reads the chain again: it records `already_built`, waits
+   for the active run, or queues the next run of the key. This closes the window decision
+   5 leaves open on Postgres (see "Consequences"). An operator's run is never held. The
+   worker also refuses the item when it is no longer active or depends on other items,
    before it builds.
 9. **Start-up refuses** the switch on without `CRB_INTAKE__GAP_PROBE`, without
    `CRB_INTAKE__REQUIRE_APPROVAL`, with an empty rung, or with a cap whose per-attempt share
@@ -113,6 +128,18 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
   and the item's build attempts still run after it. The check after the loop
   (`cap.passed`) then ends the run failed, after the money was spent. A real bound needs a
   cap per author call; this change does not add one.
+- The active-run check in the insert transaction is not serialised with `POST /runs`,
+  which inserts with no lock. On SQLite the lease write serialises every writer, so no
+  run commits unseen. On Postgres at READ COMMITTED, an operator's run can commit after
+  that check and before the insert. Both runs are then queued. The worker's hold at claim
+  (decision 8) stops the automatic build before it spends when the operator's run is
+  ahead of it in queue order, or running. A window remains: a run is stamped with its
+  queue time before it commits, so an operator's run can commit unseen yet sit behind
+  the automatic build. Then the automatic build runs first and the operator's run builds
+  the item again, as any run an operator queues behind an automatic build does. Operator
+  runs are never refused. A lock shared with `POST /runs` would close it; this change
+  does not add one, because its lock order with the event and lease locks is not yet
+  shown to be free of deadlock.
 - Proven against fakes only [gap]. No live tracker or paid build was run for this change;
   closing it needs one operator-run reading on a sandbox repository.
 - Not in this change: a ticket comment that says a build was queued or skipped, showing the

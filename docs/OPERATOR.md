@@ -1655,7 +1655,10 @@ turned on never starts a build. One run per ticket content: an edit needs a new 
 act. The chain records `intake.manufacture.requested` (the run) or `intake.manufacture.skipped`
 (why not, for good at that content), and the system trace records `intake.manufacture.queued`.
 A factory run already active, or an error reading the delivery route, is a wait: it writes
-nothing, and the consent stays pending for the next pass. Switching the listener or the setting
+nothing, and the consent stays pending for the next pass. If another factory run is ahead of
+the automatic build when a worker claims it, or the item was built since, the worker ends it
+failed at $0 with code `intake_build_held`; the consent stays pending, and the next pass skips
+`already_built` or queues the build again. Your own runs are never held. Switching the listener or the setting
 off stops new runs but does not withdraw a run already queued; cancel that run like any other.
 On a production worker that refuses unsealed builds the run is skipped `sealed`; start the
 worker with `CRB_ALLOW_UNSEALED_PROD=1`, with `CRB_ALLOW_UNSEALED_PROD_BY` naming an active
