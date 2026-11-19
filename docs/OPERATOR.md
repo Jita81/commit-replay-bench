@@ -1495,6 +1495,10 @@ CRB_INTAKE__GAP_PROBE=false                   # OFF by default: no trial build b
 CRB_INTAKE__GAP_PROBE_RUNG=""                 # required when on; a claude_code rung only
 CRB_INTAKE__GAP_PROBE_MAX_QUESTIONS=5         # 1..10, at most the gap limit
 CRB_INTAKE__GAP_PROBE_MAX_COST_USD=2.0        # each trial build's spend cap, 0.0001..1e6
+CRB_INTAKE__AUTO_MANUFACTURE=false            # OFF by default: no build without a run started by hand (ADR-0060)
+CRB_INTAKE__AUTO_MANUFACTURE_RUNG=""          # required when on; the factory rung it builds on
+CRB_INTAKE__AUTO_MANUFACTURE_MAX_COST_USD=10.0  # the whole run's spend cap, shared per attempt
+CRB_INTAKE__AUTO_MANUFACTURE_MAX_REWORK=1     # 0..5 rework attempts after the first build
 CRB_PUBLIC_URL=https://crb.example.com        # THIS deployment's address (required, see below)
 ```
 
@@ -1613,7 +1617,8 @@ are in §8.
 
 **Cost.** Reading a column, drafting an item and posting the feedback call no model and
 spend nothing. Only a factory run spends, and it is still started the same way (§3) — and,
-where `CRB_INTAKE__GAP_PROBE` is on, one trial build per approved ticket content.
+where `CRB_INTAKE__GAP_PROBE` is on, one trial build per approved ticket content; and, where
+`CRB_INTAKE__AUTO_MANUFACTURE` is on, one capped factory run per content an operator approved.
 
 **The gap probe (ADR-0059).** Off by default. When on, a ready ticket that has been approved
 (by the Register act, or an author on `CRB_INTAKE__APPROVE_AUTHORS`) is built once, blind,
@@ -1631,6 +1636,41 @@ production a worker that refuses unsealed builds (ADR-0023) refuses every probe 
 approved ticket stops `gap_probe_failed`. Start the worker with `CRB_ALLOW_UNSEALED_PROD=1`,
 with `CRB_ALLOW_UNSEALED_PROD_BY` naming an active admin and `CRB_ALLOW_UNSEALED_PROD_REASON`
 saying why (G-663), to run probes on purpose.
+
+**The automatic build (ADR-0060).** Off by default, and refused at start-up without the gap
+probe, without `CRB_INTAKE__REQUIRE_APPROVAL`, without `CRB_INTAKE__AUTO_MANUFACTURE_RUNG`,
+with a cap whose share per attempt is above one run's budget limit, or with a rung the run
+request it queues would refuse (for example a space, or more than 128 characters in all;
+checked whenever the rung is set). When on, an operator's
+Register act also consents to one build. After a clean probe the ticket registers, and the
+worker's next intake pass queues one delivering `factory` run that builds that item only. Its
+build attempts are capped by `CRB_INTAKE__AUTO_MANUFACTURE_MAX_COST_USD`, shared equally
+between the first build and `CRB_INTAKE__AUTO_MANUFACTURE_MAX_REWORK` reworks. The test author
+is not capped. When the item has no person's test, the deployment's test author
+(`CRB_FACTORY__TEST_AUTHOR`) writes one first. Its calls count as the run's spend, but nothing
+bounds them before they are made, so the run can spend more than the cap by what the author
+spent. When it does, the run ends failed, after the spend. Only an act made while the switch is
+on consents: an allowlisted author, an unattended column, or an act made before the switch was
+turned on never starts a build. One run per ticket content: an edit needs a new probe and a new
+act. The chain records `intake.manufacture.requested` (the run) or `intake.manufacture.skipped`
+(why not, for good at that content), and the system trace records `intake.manufacture.queued`.
+A factory run already active, or an error reading the delivery route, is a wait: it writes
+nothing, and the consent stays pending for the next pass. If any other factory run on the
+repository is queued or running when a worker first claims the automatic build, or the item
+was built since, the worker ends it failed at $0 with code `intake_build_held`. One
+exception: an automatic build queued later does not hold an earlier one. The worker also
+holds the build when it cannot read the active runs or the factory chain, even with no
+other run active; the error then says which could not be read. Then check the store or
+the factory home, not another run. The consent stays pending, and the next pass skips
+`already_built` or queues the build again. A cancel accepted before the worker finishes
+the hold wins: the build ends cancelled, or failed but settled, and it is not queued again
+for that content. To stop a build that was already held, cancel the next run the intake
+queues. Your own runs are never held,
+and neither is a reclaimed automatic build. Switching the listener or the setting
+off stops new runs but does not withdraw a run already queued; cancel that run like any other.
+On a production worker that refuses unsealed builds the run is skipped `sealed`; start the
+worker with `CRB_ALLOW_UNSEALED_PROD=1`, with `CRB_ALLOW_UNSEALED_PROD_BY` naming an active
+admin and `CRB_ALLOW_UNSEALED_PROD_REASON` saying why (G-663), to build on purpose.
 
 ## 12. The prevention loop
 

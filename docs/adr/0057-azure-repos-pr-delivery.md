@@ -1,6 +1,8 @@
 # ADR-0057 — Azure Repos pull request delivery, attached to the Azure DevOps ticket
 
-**Status:** Proposed (DL-425)
+**Status:** Proposed (DL-425) · **Amended by
+[ADR-0060](0060-a-clean-probe-queues-one-capped-build.md)** (2026-11-18: intake may start a
+delivering run)
 **Date:** 2026-11-18
 **Apparatus impact:** none. APPARATUS_VERSION stays 2.6. No grade, belt, row or route changes.
 The switch is off by default; with it off every request, header, event and stored row is the
@@ -92,7 +94,8 @@ passes the gap check cannot end in a pull request:
 - Azure shows the first 4000 characters of a long description; the evidence pack holds the
   rest.
 - Not in this change: the delivery preflight and the Factory screen (an Azure delivering run
-  is started through the API or MCP only), outcome sync for Azure pull requests, SSH remotes,
+  is started through the API or MCP only (Amended by ADR-0060: or by intake's automatic
+  build)), outcome sync for Azure pull requests, SSH remotes,
   Azure DevOps Server, repositories in another organisation and a separate repository token.
   The REST shapes are written from the published API and pinned by hermetic fixtures; they are
   not yet checked against a live organisation.

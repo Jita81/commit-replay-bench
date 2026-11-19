@@ -718,6 +718,34 @@ def active_backlog_hash(settings: Any, repo: str, expected: str | None) -> tuple
     return str(backlog.backlog_hash), str(backlog.evolutions_hash)
 
 
+def pin_factory_params(settings: Any, body: RunCreateRequest, run: Run) -> None:
+    """The factory block of a run's params, set at ENQUEUE time by every path that queues a
+    factory run (``POST /runs`` and the intake's automatic build, ADR-0060).
+
+    It pins the backlog the run will work: the frozen hash AND the evolutions chain, since an
+    evolution registered in the same window changes what is worked without moving the frozen
+    hash; the worker re-verifies both on claim. That closes the window between the register
+    and evolutions routes' "no active run" check and the enqueue (CodeRabbit on PR #4,
+    2026-09-15; verifier 2026-09-22). It also keeps ``deliver``, ``max_rework`` and the
+    test author, which :func:`new_run` does not copy, so a run queued on one path cannot
+    lose them."""
+    pinned, pinned_evolutions = active_backlog_hash(settings, body.repo, body.backlog_hash)
+    params = {
+        **dict(run.params_json or {}),
+        "backlog_hash": pinned,
+        "evolutions_hash": pinned_evolutions,
+    }
+    if body.deliver is not None:
+        params["deliver"] = bool(body.deliver)
+    if body.max_rework is not None:
+        params["max_rework"] = int(body.max_rework)
+    if body.test_author is not None:
+        # G-904 — this run's test-author rung (or ``none``); the worker refuses one
+        # that is also a rung on the ladder before anything is built
+        params["test_author"] = body.test_author.strip()
+    run.params_json = params
+
+
 def refuse_class_set(db: Session, body: RunCreateRequest) -> None:
     """A run stamps its rows with an organisation's class set only when it is a replay of a
     repository the version covers and the version routes (signed by two people, its validity
@@ -1633,26 +1661,7 @@ def create_run(
     run = new_run(body, actor=operator.id)
     submit_refusals(db, settings, body, run)
     if body.kind == KIND_FACTORY:
-        # Pin the backlog the run will work at ENQUEUE time — the frozen hash AND the
-        # evolutions chain, since an evolution registered in the same window changes what
-        # is worked without moving the frozen hash; the worker re-verifies both on claim.
-        # Closes the window between the register / evolutions routes' "no active run"
-        # check and this enqueue (CodeRabbit on PR #4, 2026-09-15; verifier 2026-09-22).
-        pinned, pinned_evolutions = active_backlog_hash(settings, body.repo, body.backlog_hash)
-        params = {
-            **dict(run.params_json or {}),
-            "backlog_hash": pinned,
-            "evolutions_hash": pinned_evolutions,
-        }
-        if body.deliver is not None:
-            params["deliver"] = bool(body.deliver)
-        if body.max_rework is not None:
-            params["max_rework"] = int(body.max_rework)
-        if body.test_author is not None:
-            # G-904 — this run's test-author rung (or ``none``); the worker refuses one
-            # that is also a rung on the ladder before anything is built
-            params["test_author"] = body.test_author.strip()
-        run.params_json = params
+        pin_factory_params(settings, body, run)
     if body.campaign_id is not None:
         # G-957: the campaign's tally is read and the run staged under one lock
         run = admit_under_campaign(factory, settings, body, run, actor=operator.id)
@@ -1958,6 +1967,7 @@ __all__ = [
     "event_to_dict",
     "event_to_model",
     "new_run",
+    "pin_factory_params",
     "read_events",
     "require_jobs",
     "router",

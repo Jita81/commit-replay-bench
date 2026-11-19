@@ -1,6 +1,8 @@
 # ADR-0059 — A gap probe asks what the build guessed
 
-**Status:** Proposed (DL-427)
+**Status:** Proposed (DL-427) · **Amended by
+[ADR-0060](0060-a-clean-probe-queues-one-capped-build.md)** (2026-11-18: an optional capped build
+after a clean probe)
 **Date:** 2026-11-18
 **Apparatus impact:** none. APPARATUS_VERSION stays 2.6. A probe writes no ledger row, so no
 grade, belt, cell, route, threshold or sign-off clause changes. With `CRB_INTAKE__GAP_PROBE`
@@ -107,7 +109,8 @@ The question loop was read on the bench before it was built here:
   quality of the answers people write are unmeasured; closing it needs a registered
   reading on tickets the loop was not tuned on.
 - Not in this change: a probe on another builder, manufacturing straight after a clean
-  probe, and showing the probe's run on the intake screen.
+  probe (Amended by ADR-0060: built behind `CRB_INTAKE__AUTO_MANUFACTURE`, off by default),
+  and showing the probe's run on the intake screen.
 
 ## Alternatives considered
 

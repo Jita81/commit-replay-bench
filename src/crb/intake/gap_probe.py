@@ -89,6 +89,10 @@ class ProbeState:
     questions: tuple[OpenGap, ...] = ()
     reason: str = ""
     recorded: bool = True
+    #: ADR-0060: ``"auto"`` when the act that asked for this probe consented to one capped
+    #: build after it (the switch was on and an operator acted); the item it was asked for.
+    manufacture: str = ""
+    item_id: str = ""
 
 
 NO_PROBE = ProbeState(STATE_NONE)
@@ -133,7 +137,14 @@ def probe_state(
                 for q in e.payload.get("questions") or ()
                 if isinstance(q, Mapping) and str(q.get("decision", "")) in GAP_DECISIONS
             )
-            return ProbeState(STATE_DONE, run_id, approved_by, questions)
+            return ProbeState(
+                STATE_DONE,
+                run_id,
+                approved_by,
+                questions,
+                manufacture=str(request.payload.get("manufacture", "")),
+                item_id=str(getattr(request, "item_id", "") or ""),
+            )
         if _matches(e, EV_INTAKE_GAP_PROBE_FAILED, tracker, key):
             return ProbeState(
                 STATE_FAILED, run_id, approved_by, reason=str(e.payload.get("reason", ""))

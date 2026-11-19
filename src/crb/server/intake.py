@@ -96,6 +96,7 @@ import json
 import logging
 import secrets
 import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -104,6 +105,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from pydantic import ValidationError
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -113,17 +115,21 @@ from crb.core.grade import MODE_BLIND
 from crb.core.spec import SIZE_TIER_NAMES
 from crb.factory.backlog import BacklogItem
 from crb.factory.evidence import (
+    EV_BUILD,
     EV_INTAKE_AWAITING,
     EV_INTAKE_DELIVERED,
     EV_INTAKE_FEEDBACK,
     EV_INTAKE_GAP_PROBE_FAILED,
     EV_INTAKE_GAP_PROBE_REQUESTED,
+    EV_INTAKE_MANUFACTURE_REQUESTED,
+    EV_INTAKE_MANUFACTURE_SKIPPED,
     EV_INTAKE_POLLED,
     EV_INTAKE_QUEUED,
     EV_INTAKE_READ,
     EV_INTAKE_REGISTERED,
     EV_INTAKE_STOPPED,
     EV_INTAKE_TRANSITIONED,
+    EV_ITEM_OUTCOME,
     INTAKE_EVENT_KINDS,
 )
 from crb.factory.readiness import assess
@@ -170,11 +176,31 @@ from crb.intake.gap_probe import (
     unresolved_request,
 )
 from crb.intake.jira import JiraConfig, JiraTracker
+from crb.server.deps import ApiError
 from crb.server.factory_state import FactoryHome
-from crb.server.routes.runs import submit_refusals
-from crb.server.schemas import RunCreateRequest
-from crb.store.jobs import KIND_GAP_PROBE, TERMINAL_STATUSES, JobQueue
-from crb.store.models import LEASE_ROW_PREFIX, Repo, Run, WorkerRow
+from crb.server.routes.runs import (
+    append_system_event,
+    new_run,
+    pin_factory_params,
+    submit_refusals,
+    system_trace_id,
+)
+from crb.server.schemas import (
+    RunCreateRequest,
+    attempt_share,
+    first_refusal,
+    manufacture_request,
+)
+from crb.server.settings import ROLE_RANK
+from crb.store.jobs import (
+    KIND_FACTORY,
+    KIND_GAP_PROBE,
+    STATUS_FAILED,
+    TERMINAL_STATUSES,
+    JobQueue,
+    stage_queued,
+)
+from crb.store.models import LEASE_ROW_PREFIX, Repo, Run, User, WorkerRow
 
 log = logging.getLogger("crb.server.intake")
 
@@ -192,6 +218,8 @@ EV_STOPPED = EV_INTAKE_STOPPED
 EV_AWAITING = EV_INTAKE_AWAITING
 EV_GAP_PROBE_REQUESTED = EV_INTAKE_GAP_PROBE_REQUESTED
 EV_GAP_PROBE_FAILED = EV_INTAKE_GAP_PROBE_FAILED
+EV_MANUFACTURE_REQUESTED = EV_INTAKE_MANUFACTURE_REQUESTED
+EV_MANUFACTURE_SKIPPED = EV_INTAKE_MANUFACTURE_SKIPPED
 INTAKE_EVENTS: tuple[str, ...] = INTAKE_EVENT_KINDS
 
 #: The bounds a pass is run with when a caller names none. They are the SETTINGS' defaults
@@ -241,6 +269,12 @@ GAP_PROBE_FAILED_ADVICE = (
 )
 
 
+#: ADR-0060: the mark an operator's consent to one capped build carries on the chain (on the
+#: probe request, then on the registration), and the prefix only an operator's act has.
+MANUFACTURE_AUTO = "auto"
+OPERATOR_PREFIX = "operator:"
+
+
 @dataclass(frozen=True)
 class GapProbe:
     """The gap probe's seams (ADR-0059): queue one probe run for a request, and read a
@@ -253,6 +287,9 @@ class GapProbe:
     #: cancel a queued probe run whose request could not be recorded, so a pass that then
     #: finds no request never leaves a second paid probe running beside the first
     cancel: Callable[[str], None] | None = None
+    #: ADR-0060: an operator's act that asks for a probe also consents to one capped build
+    #: after a clean result (``CRB_INTAKE__AUTO_MANUFACTURE``); recorded on the request
+    auto_manufacture: bool = False
 
 
 def gap_probe_for(settings: Any, sessions: sessionmaker[Session], repo: str) -> GapProbe | None:
@@ -342,7 +379,13 @@ def gap_probe_for(settings: Any, sessions: sessionmaker[Session], repo: str) -> 
     def cancel(run_id: str) -> None:
         queue.request_cancel(run_id, actor="intake")
 
-    return GapProbe(enqueue, run_status, int(intake.gap_probe_max_questions), cancel)
+    return GapProbe(
+        enqueue,
+        run_status,
+        int(intake.gap_probe_max_questions),
+        cancel,
+        auto_manufacture=bool(getattr(intake, "auto_manufacture", False)),
+    )
 
 
 #: The advice on a row whose return did not happen for a reason that passes (the tracker
@@ -947,6 +990,20 @@ class DbLease:
                 .values(heartbeat=stamp)
             )
             s.commit()
+        self.held = int(getattr(done, "rowcount", 0) or 0) == 1
+        return self.held
+
+    def renew_in(self, s: Session) -> bool:
+        """:meth:`renew` inside the caller's open transaction, with no commit. The stamp
+        and the caller's own writes then commit or roll back together, and the row stays
+        locked until they do: a takeover or a switch-off cannot land between this check
+        and the caller's commit. ``False`` when the row is no longer this holder's; the
+        caller must then roll back and write nothing."""
+        done = s.execute(
+            update(WorkerRow)
+            .where(WorkerRow.worker_id == self.key, WorkerRow.hostname == self.holder)
+            .values(heartbeat=_iso(self.clock()))
+        )
         self.held = int(getattr(done, "rowcount", 0) or 0) == 1
         return self.held
 
@@ -1763,6 +1820,11 @@ def _handle_ticket(
             ),
             label=registered_label,
             not_built=not_built,
+            manufacture_content=(
+                draft.item.labels.get("content_revision", "")
+                if _consented(probe, draft.item.id, gap_probe, not_built)
+                else ""
+            ),
         )
         awaiting = outcome == OUTCOME_QUEUED
         if outcome == OUTCOME_REGISTERED:
@@ -2038,6 +2100,29 @@ def _probe_now(
     return probe
 
 
+def _consented(probe: ProbeState, item_id: str, gap_probe: GapProbe | None, not_built: str) -> bool:
+    """ADR-0060: whether this registration carries an operator's consent to one capped
+    build. The probe finished clean, was asked for THIS item by an act that recorded the
+    consent, the switch is still on, and no entry stop holds the item unbuilt."""
+    return bool(
+        gap_probe is not None
+        and gap_probe.auto_manufacture
+        and probe.state == STATE_DONE
+        and probe.manufacture == MANUFACTURE_AUTO
+        and probe.item_id == item_id
+        and not probe.questions
+        and not not_built
+    )
+
+
+def _manufacture_mark(content: str) -> dict[str, str]:
+    """The fields a consented registration carries (none at all when it is not one, so a
+    deployment with the switch off writes the bytes it always wrote)."""
+    if not content:
+        return {}
+    return {"manufacture": MANUFACTURE_AUTO, "content_revision": content}
+
+
 def _request_gap_probe(
     item: BacklogItem,
     *,
@@ -2070,6 +2155,13 @@ def _request_gap_probe(
             "max_questions": int(gap_probe.max_questions),
         }
     )
+    # ADR-0060: consent to one capped build is recorded at the act that asked for the
+    # probe, never inferred later — only an operator's act, with the switch on at that act
+    consent = (
+        {"manufacture": MANUFACTURE_AUTO}
+        if gap_probe.auto_manufacture and approved_by.startswith(OPERATOR_PREFIX)
+        else {}
+    )
     try:
         evidence.append(
             EV_GAP_PROBE_REQUESTED,
@@ -2081,6 +2173,7 @@ def _request_gap_probe(
             approved_by=approved_by,
             approved_by_name=approved_by_name or approved_by,
             run_id=run_id,
+            **consent,
         )
     except BaseException:
         # the run is queued but the chain does not name it: the next pass would find no
@@ -2166,6 +2259,7 @@ def _register_and_queue(
     approved_by: str = "",
     label: str = LABEL_QUEUED,
     not_built: str = "",
+    manufacture_content: str = "",
 ) -> str:
     """Register the draft and tell the ticket. One of three words, because these are three
     different things to say to the person reading the screen (``label`` / ``not_built`` —
@@ -2210,6 +2304,7 @@ def _register_and_queue(
         supersedes=draft.item.supersedes,
         url=url,
         approved_by=approved_by,
+        **_manufacture_mark(manufacture_content),
     )
     try:
         check_budget("queued note")
@@ -2430,6 +2525,14 @@ def _register_approved(
         )
     item = BacklogItem.from_dict(dict(waiting.payload.get("item") or {}))
     evidence = home.evidence(actor=approver)
+    # worked out before the registration is written: the ADR-0060 mark depends on it
+    told = dict(waiting.payload.get("entry") or {})
+    entry_stop = str(told.get("code", ""))
+    registered_label = label_once_registered(entry_stop)
+    not_built = str(told.get("reason", "")) if entry_stop in WAITING_STOPS else ""
+    # ADR-0060: this act consents to one capped build when the switch is on now, an
+    # operator acts, and the probe below passed clean (a refusal raises before any write)
+    consent = ""
     if gap_probe is not None:
         probe = _probe_now(
             home,
@@ -2453,6 +2556,14 @@ def _register_approved(
                 approver_name=approver_name,
             )
         _refuse_unless_probed_clean(key, probe)
+        if (
+            gap_probe.auto_manufacture
+            and approver.startswith(OPERATOR_PREFIX)
+            and probe.state == STATE_DONE
+            and probe.item_id == item.id
+            and not not_built
+        ):
+            consent = now_content
     try:
         how = _register(home, item, actor=approver)
     except Exception as exc:  # a frozen-record refusal: say so, register nothing
@@ -2477,12 +2588,9 @@ def _register_approved(
         approved_by=approver,
         approved_by_name=approver_name or approver,
         revision=str(revision),
+        **_manufacture_mark(consent),
     )
     stopped: TrackerError | None = None
-    told = dict(waiting.payload.get("entry") or {})
-    entry_stop = str(told.get("code", ""))
-    registered_label = label_once_registered(entry_stop)
-    not_built = str(told.get("reason", "")) if entry_stop in WAITING_STOPS else ""
     try:
         tracker.label(key, registered_label)
         tracker.comment(
@@ -2804,7 +2912,497 @@ def apply_outcome_map(
     return moved
 
 
+# --- ADR-0060: one capped build after a consented, clean registration -----------------
+
+#: The system trace the automatic build writes in the transaction that queues its run.
+ACTION_MANUFACTURE_QUEUED = "intake.manufacture.queued"
+#: Why a consented build was skipped for good at that content (``intake.manufacture.skipped``).
+SKIP_APPROVER_INACTIVE = "approver_inactive"
+SKIP_ITEM_SUPERSEDED = "item_superseded"
+SKIP_HAS_DEPENDENCIES = "has_dependencies"
+SKIP_ALREADY_BUILT = "already_built"
+SKIP_SEALED = "sealed"
+SKIP_NO_DELIVERY_ROUTE = "no_delivery_route"
+SKIP_REFUSED = "refused"
+#: What the delivery-route check found: a route, none configured, or an error reading it
+#: (a passing error waits for the next pass; it never spends the consent).
+ROUTE_FOUND = "found"
+ROUTE_NONE = "none"
+ROUTE_ERROR = "error"
+#: The chain kinds that say an item was already built (graded or ended) by some run.
+_BUILT_KINDS = (EV_BUILD, EV_ITEM_OUTCOME)
+#: The worker's code (``system/run.refused``) for an automatic build it ends unspent at
+#: claim: another factory run on the repository builds first, or the item is already built.
+#: The run is held, not spent: the consent stays pending and a later pass acts on it.
+REFUSAL_BUILD_HELD = "intake_build_held"
+
+
+def build_held(status: str, error: str | None, cancel_requested: bool = False) -> bool:
+    """Did the worker end this automatic build unspent at claim (``REFUSAL_BUILD_HELD``)?
+    Not when a cancel was accepted for it: a cancelled build settles its key, whatever the
+    worker's finish wrote."""
+    return (
+        not cancel_requested
+        and status == STATUS_FAILED
+        and str(error or "").startswith(REFUSAL_BUILD_HELD)
+    )
+
+
+def built_since_consent(events: Sequence[Any], intake_auto: Mapping[str, Any]) -> bool:
+    """Does the chain say the item of ``intake_auto`` (a run's ``params.intake_auto``) was
+    built or ended after its consented registration? With no such registration on the
+    chain, any build of the item counts."""
+    same = ("tracker", "key", "content_revision")
+    item_id = str(intake_auto.get("item_id", ""))
+    start = 0
+    for i, e in enumerate(events):
+        if (
+            e.kind == EV_REGISTERED
+            and e.payload.get("manufacture") == MANUFACTURE_AUTO
+            and str(e.item_id) == item_id
+            and all(str(e.payload.get(k, "")) == str(intake_auto.get(k, "")) for k in same)
+        ):
+            start = i + 1
+    return any(e.kind in _BUILT_KINDS and str(e.item_id) == item_id for e in events[start:])
+
+
+class ManufactureRefused(Exception):
+    """The submit gate refused the automatic build (``code`` is the gate's own code)."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+
+
+@dataclass(frozen=True)
+class QueuedRun:
+    """A run the automatic build queued, with the cap and rung it was STORED with. The
+    chain records these, never the current settings, which may have changed since."""
+
+    run_id: str
+    max_cost_usd: float
+    rung: str
+
+
+#: The lease check a queue makes inside its insert transaction (``DbLease.renew_in``).
+Fence = Callable[[Session], bool]
+#: The sweep's last word before the insert: still in time, and the item still unbuilt.
+Admit = Callable[[], bool]
+
+
+def _never_held(run_id: str) -> bool:
+    return False
+
+
+@dataclass(frozen=True)
+class AutoManufacture:
+    """The automatic build's seams (ADR-0060). ``None`` in place of this object is the
+    switch off: the sweep is not called and nothing new is read or written.
+
+    ``find_run`` answers the run already queued for a dedupe key, in any status but held
+    (``None`` for none); ``queue_run`` queues the one capped run for a request and returns
+    it (the run that already holds the key when one does). It returns ``None``, writing
+    nothing, when in its insert transaction ``fence`` says the lease was lost, a factory
+    run on the repository is queued or running, or ``admit`` says the pass is out of time
+    or the item was built since the sweep read the chain; the next pass tries again. It
+    raises :class:`ManufactureRefused` when the submit gate refuses it. ``run_held`` says
+    the worker ended that run unspent at claim (``REFUSAL_BUILD_HELD``): its consent is
+    still pending."""
+
+    rung: str
+    max_cost_usd: float
+    max_rework: int
+    find_run: Callable[[Mapping[str, str]], QueuedRun | None]
+    queue_run: Callable[[Mapping[str, Any], Fence, Admit], QueuedRun | None]
+    run_active: Callable[[], bool]
+    delivery_route: Callable[[], str]
+    approver_active: Callable[[str], bool]
+    sealed: bool = False
+    run_held: Callable[[str], bool] = _never_held
+
+
+def manufacture_run_id(repo: str, tracker: str, key: str, content: str, attempt: int = 0) -> str:
+    """The automatic build's run id: one per ``(repo, tracker, key, content_revision)``, so
+    two passes that race on one key insert the same primary key and only one wins.
+    ``attempt`` counts the runs of that key the worker held at claim: each held run frees
+    the next id, and attempt 0 is the id without a count."""
+    parts = ["crb.intake.manufacture", repo, tracker, key, content]
+    if attempt:
+        parts.append(str(attempt))
+    return uuid.uuid5(uuid.NAMESPACE_URL, "\n".join(parts)).hex
+
+
+def auto_manufacture_for(
+    settings: Any,
+    sessions: sessionmaker[Session],
+    repo: str,
+    *,
+    run_active: Callable[[], bool],
+    delivery_route: Callable[[], str],
+    sealed: bool = False,
+) -> AutoManufacture | None:
+    """The deployment's automatic build for ``repo``, or ``None`` while
+    ``CRB_INTAKE__AUTO_MANUFACTURE`` is off. The run it queues is a ``factory`` run on the
+    configured rung under the configured cap, delivering, with ``params.intake_item`` (the
+    worker builds that item only) and ``params.intake_auto`` (the dedupe key and who
+    acted). Before it is queued it meets ``submit_refusals``, the gate ``POST /runs``
+    applies (P-160), and the factory params ``POST /runs`` pins."""
+    intake: Any = getattr(settings, "intake", None)
+    if intake is None or not bool(getattr(intake, "auto_manufacture", False)):
+        return None
+    rung = str(intake.auto_manufacture_rung)
+    cap = float(intake.auto_manufacture_max_cost_usd)
+    rework = int(intake.auto_manufacture_max_rework)
+    same = ("tracker", "key", "content_revision")
+
+    def stored(run: Run) -> QueuedRun:
+        params = dict(run.params_json or {})
+        ladder = list(run.ladder_json or [])
+        return QueuedRun(
+            run_id=str(run.id),
+            max_cost_usd=float(params.get("max_cost_usd") or 0.0),
+            rung=str(ladder[0]) if ladder else "",
+        )
+
+    def slot(db: Session, key: Mapping[str, Any]) -> tuple[str, Run | None]:
+        """The key's first run id the worker has not held at claim, and its row if any."""
+        attempt = 0
+        while True:
+            run_id = manufacture_run_id(
+                repo,
+                str(key.get("tracker", "")),
+                str(key.get("key", "")),
+                str(key.get("content_revision", "")),
+                attempt,
+            )
+            row = db.get(Run, run_id)
+            if row is None or not build_held(
+                str(row.status), row.error, bool(row.cancel_requested)
+            ):
+                return run_id, row
+            attempt += 1
+
+    def find_run(key: Mapping[str, str]) -> QueuedRun | None:
+        with sessions() as db:
+            _, found = slot(db, key)
+            if found is not None:
+                return stored(found)
+            for run in db.scalars(select(Run).where(Run.repo == repo, Run.kind == KIND_FACTORY)):
+                auto = dict(run.params_json or {}).get("intake_auto")
+                if (
+                    isinstance(auto, Mapping)
+                    and all(str(auto.get(k, "")) == str(key.get(k, "")) for k in same)
+                    and not build_held(str(run.status), run.error, bool(run.cancel_requested))
+                ):
+                    return stored(run)
+        return None
+
+    def run_held(run_id: str) -> bool:
+        with sessions() as db:
+            row = db.get(Run, run_id)
+            return row is not None and build_held(
+                str(row.status), row.error, bool(row.cancel_requested)
+            )
+
+    def queue(request: Mapping[str, Any], fence: Fence, admit: Admit) -> QueuedRun | None:
+        approved_by = str(request.get("approved_by", ""))
+        auto = {k: str(request.get(k, "")) for k in (*same, "item_id", "approved_by")}
+        try:
+            # built inside the try: a request the schema refuses is a recorded refusal,
+            # never an error every pass retries (start-up builds this same request)
+            body = manufacture_request(repo, rung, max_cost_usd=cap, max_rework=rework)
+        except ValidationError as exc:
+            raise ManufactureRefused(
+                "validation_error", f"the run request was refused: {first_refusal(exc)}"
+            ) from exc
+        run = new_run(body, actor=approved_by.removeprefix(OPERATOR_PREFIX) or "intake")
+        try:
+            with sessions() as db:
+                run_id, held = slot(db, request)
+                if held is not None:
+                    return stored(held)
+                run.id = run_id
+                submit_refusals(db, settings, body, run)
+            pin_factory_params(settings, body, run)
+        except ApiError as exc:
+            raise ManufactureRefused(exc.code, exc.message) from exc
+        run.params_json = {
+            **dict(run.params_json or {}),
+            "intake_item": auto["item_id"],
+            "intake_auto": auto,
+        }
+        with sessions() as db:
+            # the lease is checked in the transaction that inserts the paid run: a
+            # switch-off or a takeover since the last renewal leaves nothing written
+            if not fence(db):
+                db.rollback()
+                return None
+            # another pass that inserted this key's run since the gate: it stands
+            now_id, held = slot(db, request)
+            if held is not None:
+                db.rollback()
+                return stored(held)
+            if now_id != run_id:  # a run of this key was held since the gate: next pass
+                db.rollback()
+                return None
+            # and an active factory run on the repository, read in this transaction. It
+            # sees a run committed before this read. On SQLite the fence's write above
+            # serialises the insert with every other writer, so none commits between this
+            # read and the commit below. On Postgres at READ COMMITTED, an operator's
+            # POST /runs (which takes no lock) can still commit in that window and is not
+            # seen. It is seen at this run's first claim, which reads after this commit:
+            # the worker holds this run then, unspent (REFUSAL_BUILD_HELD)
+            if db.scalars(
+                select(Run.id)
+                .where(
+                    Run.repo == repo,
+                    Run.kind == KIND_FACTORY,
+                    Run.status.in_(("queued", "running")),
+                )
+                .limit(1)
+            ).first():
+                db.rollback()
+                return None
+            # the operator who acted, read in this transaction: an account deactivated since
+            # the sweep's check queues nothing, and the next pass skips approver_inactive
+            if not eligible(db, approved_by.removeprefix(OPERATOR_PREFIX)):
+                db.rollback()
+                return None
+            # the sweep's last word, read just before the insert: the deadline (the lease
+            # write and the reads above can outlast it) and an outcome for the item written
+            # since the sweep read the chain (an operator's run that built it while the
+            # submit gate ran). Either way nothing is written and the consent stays pending
+            if not admit():
+                db.rollback()
+                return None
+            try:
+                stage_queued(db, run)
+                append_system_event(
+                    db,
+                    trace_id=system_trace_id("intake", repo),
+                    action=ACTION_MANUFACTURE_QUEUED,
+                    repo=repo,
+                    actor=str(run.actor),
+                    payload={
+                        "key": auto["key"],
+                        "item_id": auto["item_id"],
+                        "run_id": run_id,
+                        "approved_by": approved_by,
+                    },
+                )
+                db.commit()
+            except IntegrityError:
+                # another pass inserted this key's run first (at the autoflush or the
+                # commit): it stands, and neither the run nor its trace is written twice
+                db.rollback()
+        with sessions() as db:
+            committed = db.get(Run, run_id)
+            return stored(committed) if committed is not None else None
+
+    def eligible(db: Session, account: str) -> bool:
+        user = db.get(User, account)
+        return bool(
+            user is not None
+            and user.active
+            and ROLE_RANK.get(str(user.role), -1) >= ROLE_RANK["operator"]
+        )
+
+    def approver_active(account: str) -> bool:
+        with sessions() as db:
+            return eligible(db, account)
+
+    return AutoManufacture(
+        rung=rung,
+        max_cost_usd=cap,
+        max_rework=rework,
+        find_run=find_run,
+        queue_run=queue,
+        run_active=run_active,
+        delivery_route=delivery_route,
+        approver_active=approver_active,
+        sealed=sealed,
+        run_held=run_held,
+    )
+
+
+def _manufacture_skip(
+    later: Sequence[Any], item_id: str, approved_by: str, backlog: Any, auto: AutoManufacture
+) -> tuple[str, str]:
+    """The final reason a consented build is not queued, or ``("", "")``. ``later`` is the
+    chain after the marked registration."""
+    item = backlog.get(item_id) if backlog is not None else None
+    active = {i.id for i in backlog.active_items()} if backlog is not None else set()
+    if item is None or item_id not in active or backlog.resolve(item_id) != item_id:
+        return SKIP_ITEM_SUPERSEDED, "a later version of this item is on the backlog"
+    if item.depends_on:
+        return SKIP_HAS_DEPENDENCIES, "the item depends on other items: run the backlog"
+    if any(e.kind in _BUILT_KINDS and str(e.item_id) == item_id for e in later):
+        return SKIP_ALREADY_BUILT, "a factory run already built this item"
+    if not auto.approver_active(approved_by.removeprefix(OPERATOR_PREFIX)):
+        return SKIP_APPROVER_INACTIVE, "the operator who acted is no longer active"
+    if auto.sealed:
+        return SKIP_SEALED, "this worker refuses factory runs on an unsealed production host"
+    return "", ""
+
+
+def manufacture_registered(
+    home: FactoryHome,
+    *,
+    tracker: str,
+    auto: AutoManufacture,
+    renew: Callable[[], bool],
+    fence: Fence,
+    out_of_time: Callable[[], bool] = lambda: False,
+    actor: str = "worker",
+) -> str:
+    """Queue at most ONE capped build for the oldest consented registration of ``tracker``'s
+    tickets that has none yet (ADR-0060), and return its run id (``""`` when none).
+
+    Each marked ``intake.registered`` is keyed on ``(tracker, key, content_revision)`` and
+    acted on once: ``intake.manufacture.requested`` names the run, and
+    ``intake.manufacture.skipped`` says why it never will. A run already holding the key
+    (the chain write after it failed) is named, never queued again. A wait (a factory run is
+    active, the pass is out of time, the delivery route could not be read) writes nothing
+    and stops the pass. The caller holds the repository's intake lease; ``renew`` stamps it
+    after the last read and before each chain write, and ``fence`` checks it again inside
+    the transaction that inserts the run, with the pass's deadline. A lease lost or the
+    deadline passed before the act stops the pass and writes nothing. In that transaction,
+    after the lease, the active-run check and a fresh read of the approver, and just before
+    the insert, ``admit`` reads the deadline and the chain once more: a pass out of time, or
+    an item built since the first read, writes nothing (the next pass records
+    ``already_built``). A request whose run the worker held at claim does not settle its
+    key; its runs are read only after a deadline check, and never for a key a skip settled.
+    A renewal before a chain write narrows the window; it does not close it, because the
+    chain is not in the store's transaction."""
+    events = list(home.events())
+    marked = [
+        (i, e)
+        for i, e in enumerate(events)
+        if e.kind == EV_REGISTERED
+        and e.payload.get("manufacture") == MANUFACTURE_AUTO
+        and str(e.payload.get("tracker")) == tracker
+    ]
+    if not marked:
+        return ""
+    # a skip settles its key with no store read. A request settles it unless the worker held
+    # its run at claim: the consent then stays pending, and this pass reads the chain again
+    # and skips or queues the next run. Those runs are read in the loop below, one key at a
+    # time after a deadline check, and never for a key a skip already settled
+    settled: set[tuple[str, str]] = set()
+    requested: dict[tuple[str, str], list[str]] = {}
+    for e in events:
+        if str(e.payload.get("tracker")) != tracker:
+            continue
+        pair = (str(e.payload.get("key", "")), str(e.payload.get("content_revision", "")))
+        if e.kind == EV_MANUFACTURE_SKIPPED:
+            settled.add(pair)
+        elif e.kind == EV_MANUFACTURE_REQUESTED:
+            requested.setdefault(pair, []).append(str(e.payload.get("run_id", "")))
+    evidence = home.evidence(actor=actor)
+    for at, registered in marked:
+        key = str(registered.payload.get("key", ""))
+        content = str(registered.payload.get("content_revision", ""))
+        if (key, content) in settled:
+            continue
+        settled.add((key, content))
+        if out_of_time():
+            return ""
+        if any(not auto.run_held(run_id) for run_id in requested.get((key, content), ())):
+            continue
+        item_id = str(registered.item_id)
+        approved_by = str(registered.payload.get("approved_by", ""))
+        fields = {
+            "tracker": tracker,
+            "key": key,
+            "content_revision": content,
+            "item_id": item_id,
+            "approved_by": approved_by,
+        }
+        if not renew():
+            return ""
+        found = auto.find_run(fields)
+        if found is not None:
+            # the run stands but the chain never named it: name it, never queue another
+            if not renew():
+                return ""
+            _manufacture_requested(evidence, fields, found)
+            continue
+        # the delivery route is read first: for GitHub it is a network call, and the
+        # active-run check and the re-read below must come after it, just before the act
+        route = auto.delivery_route()
+        if route == ROUTE_ERROR:
+            return ""
+        if out_of_time() or auto.run_active():
+            return ""
+        # the chain and the backlog are read again after the active-run check: a run that
+        # ended since the pass's first read has built the item, and the chain says so now.
+        # The chain is append-only, so the registration's index still holds.
+        later = list(home.events())[at + 1 :]
+        reason, detail = _manufacture_skip(later, item_id, approved_by, home.load_backlog(), auto)
+        if not reason and route != ROUTE_FOUND:
+            reason = SKIP_NO_DELIVERY_ROUTE
+            detail = "no delivery route is configured for this repository"
+        # the reads are done: the lease is renewed and the deadline checked again before
+        # the act, skip or queue alike
+        if not renew() or out_of_time():
+            return ""
+        if not reason:
+
+            def admit(at: int = at, item_id: str = item_id) -> bool:
+                if out_of_time():
+                    return False
+                built = list(home.events())[at + 1 :]
+                if any(e.kind in _BUILT_KINDS and str(e.item_id) == item_id for e in built):
+                    return False
+                # the chain read can outlast the deadline too: read it once more
+                return not out_of_time()
+
+            try:
+                # the deadline and the item's outcome are read again in the transaction that
+                # inserts the run, just before the insert: the submit gate can outlast both
+                queued = auto.queue_run(fields, fence, admit)
+            except ManufactureRefused as exc:
+                reason, detail = f"{SKIP_REFUSED}:{exc.code}", exc.detail
+            except Exception:  # a store failure passes: nothing recorded, next pass retries
+                log.warning("automatic build not queued", extra={"repo": home.repo})
+                return ""
+            else:
+                if queued is None:  # the insert transaction wrote nothing: wait
+                    return ""
+                # the insert's store calls can outlast the lease: renew before the chain
+                # write too. A lost lease leaves the run unnamed; the next pass's find names it
+                if renew():
+                    _manufacture_requested(evidence, fields, queued)
+                return queued.run_id
+            if not renew() or out_of_time():  # the refusal came after a store call
+                return ""
+        evidence.append(
+            EV_MANUFACTURE_SKIPPED, item_id, **_keyed(fields), reason=reason, detail=detail[:300]
+        )
+    return ""
+
+
+def _keyed(fields: Mapping[str, str]) -> dict[str, str]:
+    """The chain payload of a sweep event: the request's fields less ``item_id``, which the
+    event carries as its own item id."""
+    return {k: v for k, v in fields.items() if k != "item_id"}
+
+
+def _manufacture_requested(evidence: Any, fields: Mapping[str, str], run: QueuedRun) -> None:
+    """Name the run on the chain with the cap and rung it was stored with."""
+    evidence.append(
+        EV_MANUFACTURE_REQUESTED,
+        str(fields["item_id"]),
+        **_keyed(fields),
+        run_id=run.run_id,
+        max_cost_usd=run.max_cost_usd,
+        rung=run.rung,
+    )
+
+
 __all__ = [
+    "ACTION_MANUFACTURE_QUEUED",
     "APPROVED_BY_ALLOWLIST",
     "APPROVED_UNATTENDED",
     "CONFIG_KEY",
@@ -2814,6 +3412,8 @@ __all__ = [
     "EV_AWAITING",
     "EV_DELIVERED",
     "EV_FEEDBACK",
+    "EV_MANUFACTURE_REQUESTED",
+    "EV_MANUFACTURE_SKIPPED",
     "EV_POLLED",
     "EV_QUEUED",
     "EV_READ",
@@ -2823,34 +3423,57 @@ __all__ = [
     "FENCE_READ_VERBS",
     "FENCE_WRITE_VERBS",
     "INTAKE_EVENTS",
+    "MANUFACTURE_AUTO",
+    "OPERATOR_PREFIX",
     "OUTCOME_CLOSED",
     "OUTCOME_MERGED",
     "OUTCOME_QUEUED",
     "OUTCOME_REFUSED",
     "OUTCOME_REGISTERED",
     "OUTCOME_RETURNED",
+    "REFUSAL_BUILD_HELD",
     "RETURN_RETRY_ADVICE",
     "RETURN_STOP_ADVICE",
+    "ROUTE_ERROR",
+    "ROUTE_FOUND",
+    "ROUTE_NONE",
+    "SKIP_ALREADY_BUILT",
+    "SKIP_APPROVER_INACTIVE",
+    "SKIP_HAS_DEPENDENCIES",
+    "SKIP_ITEM_SUPERSEDED",
+    "SKIP_NO_DELIVERY_ROUTE",
+    "SKIP_REFUSED",
+    "SKIP_SEALED",
     "STATE_FILE",
     "STOPPED_STATUSES",
     "ApprovalPolicy",
     "ApprovalRefused",
+    "AutoManufacture",
     "DbLease",
+    "Fence",
     "FencedTracker",
     "IntakeLease",
     "IntakeRow",
     "IntakeStore",
     "ListenerState",
+    "ManufactureRefused",
     "PollReport",
+    "QueuedRun",
     "RunActive",
     "Ticket",
     "already_handled",
     "apply_outcome_map",
+    "attempt_share",
+    "auto_manufacture_for",
+    "build_held",
     "build_tracker",
+    "built_since_consent",
     "intake_lease",
     "is_absolute_url",
     "item_for_ticket",
     "item_url_for",
+    "manufacture_registered",
+    "manufacture_run_id",
     "needs_credential",
     "poll_repository",
     "post_delivery",

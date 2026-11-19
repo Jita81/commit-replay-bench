@@ -156,6 +156,11 @@ EV_INTAKE_AWAITING = "intake.awaiting_approval"
 EV_INTAKE_GAP_PROBE_REQUESTED = "intake.gap_probe.requested"
 EV_INTAKE_GAP_PROBE_FINISHED = "intake.gap_probe.finished"
 EV_INTAKE_GAP_PROBE_FAILED = "intake.gap_probe.failed"
+#: ADR-0060 — after an operator's Register act and a clean probe, ONE capped factory run
+#: was queued for that ticket's content (the run, the cap, the rung, who acted), or it was
+#: skipped for good at that content (why). Keyed on the ticket and the content digest.
+EV_INTAKE_MANUFACTURE_REQUESTED = "intake.manufacture.requested"
+EV_INTAKE_MANUFACTURE_SKIPPED = "intake.manufacture.skipped"
 INTAKE_EVENT_KINDS: tuple[str, ...] = (
     EV_INTAKE_POLLED,
     EV_INTAKE_READ,
@@ -169,6 +174,8 @@ INTAKE_EVENT_KINDS: tuple[str, ...] = (
     EV_INTAKE_GAP_PROBE_REQUESTED,
     EV_INTAKE_GAP_PROBE_FINISHED,
     EV_INTAKE_GAP_PROBE_FAILED,
+    EV_INTAKE_MANUFACTURE_REQUESTED,
+    EV_INTAKE_MANUFACTURE_SKIPPED,
 )
 EVENT_KINDS: tuple[str, ...] = (
     EV_BACKLOG_FROZEN,

@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from decimal import ROUND_DOWN, Decimal
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends, Query
@@ -53,6 +54,7 @@ from pydantic import (
     Discriminator,
     Field,
     Tag,
+    ValidationError,
     field_validator,
     model_serializer,
     model_validator,
@@ -127,6 +129,10 @@ BUDGET_MAX_TURNS = 1000
 BUDGET_MAX_TOOL_CALLS = 5000
 BUDGET_MAX_TOKENS = 50_000_000
 BUDGET_MAX_COST_USD = 1000.0
+#: The longest builder, model and provider a run request accepts (``RunCreateRequest``).
+RUN_BUILDER_MAX_LENGTH = 64
+RUN_MODEL_MAX_LENGTH = 128
+RUN_PROVIDER_MAX_LENGTH = 64
 BUDGET_MAX_WALL_CLOCK_S = 24 * 3600
 #: The builder's defaults (``crb.builders.base.Budget``) — what a run gets when the request
 #: names no ``budget``; served so the UI shows the same numbers the worker applies.
@@ -683,9 +689,9 @@ class RunCreateRequest(BaseModel):
     repo: str = Field(min_length=1, max_length=64)
     kind: str
     mode: str | None = None
-    builder: str = Field(default="", max_length=64)
-    model: str = Field(default="", max_length=128)
-    provider: str = Field(default="", max_length=64)
+    builder: str = Field(default="", max_length=RUN_BUILDER_MAX_LENGTH)
+    model: str = Field(default="", max_length=RUN_MODEL_MAX_LENGTH)
+    provider: str = Field(default="", max_length=RUN_PROVIDER_MAX_LENGTH)
     #: The escalation ladder — one attempt per rung until an attempt grades clean. Each
     #: entry is a rung LABEL (``r1`` = the run's own builder:model, or
     #: ``builder:model[:provider]``) or a rung OBJECT ``{builder, model, provider?, budget?}``
@@ -1022,6 +1028,54 @@ class RunCreateRequest(BaseModel):
     def object_rungs_only(self) -> bool:
         """Every ladder entry is an object rung — the ladder carries the identity itself."""
         return bool(self.ladder) and all(isinstance(e, LadderRung) for e in self.ladder)
+
+
+def attempt_share(cap: float, max_rework: int) -> float:
+    """One attempt's cost cap: an equal share of the run's ``cap`` over the first build
+    and each rework. It is rounded DOWN to a millionth of a dollar, so the worker's
+    reserve for the item (``item_reserve``: the share once per attempt) never passes the
+    cap. Rounded to the nearest, $2 over 3 attempts gave $0.6667 each, a reserve of
+    $2.0001, and the run stopped before it built. It stays above 0, since a budget of 0
+    means no cap at all; below a millionth the share is the exact quotient."""
+    attempts = 1 + max(0, max_rework)
+    exact = Decimal(repr(float(cap))) / attempts
+    share = float(exact.quantize(Decimal("0.000001"), rounding=ROUND_DOWN))
+    return share if share > 0 else float(cap) / attempts
+
+
+def first_refusal(exc: ValidationError) -> str:
+    """A request's first refusal as ``field: message``, with no echoed input."""
+    errors = exc.errors()
+    if not errors:
+        return "request: invalid"
+    first = errors[0]
+    where = ".".join(str(part) for part in first.get("loc", ())) or "request"
+    return f"{where}: {first.get('msg', 'invalid')}"
+
+
+def manufacture_request(
+    repo: str, rung: str, *, max_cost_usd: float, max_rework: int
+) -> RunCreateRequest:
+    """The run request intake's automatic build queues (ADR-0060): a delivering ``factory``
+    run on ``rung`` (``builder:model[@provider]``, also its one-label ladder) under the
+    cap, shared per attempt. Start-up builds this same request, so a rung or a cap the
+    request refuses is refused before any pass tries to queue it. Raises pydantic's
+    ``ValidationError`` when the request refuses them."""
+    builder, _, rest = rung.partition(":")
+    model, _, provider = rest.partition("@")
+    return RunCreateRequest(
+        repo=repo,
+        kind="factory",
+        builder=builder,
+        model=model,
+        provider=provider,
+        ladder=[rung],
+        max_cost_usd=max_cost_usd,
+        deliver=True,
+        max_rework=max_rework,
+        # each attempt gets an equal share, so the first build cannot spend the rework's
+        budget=RunBudget(max_cost_usd=attempt_share(max_cost_usd, max_rework)),
+    )
 
 
 class Belts(BaseModel):
