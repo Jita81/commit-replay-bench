@@ -2957,7 +2957,8 @@ class AutoManufacture:
     ``find_run`` answers the run already queued for a dedupe key, in any status (``None``
     for none); ``queue_run`` queues the one capped run for a request and returns it (the
     run that already holds the key when one does), ``None`` when ``fence`` says the lease
-    was lost in its insert transaction (nothing is written then), and raises
+    was lost in its insert transaction or a factory run on the repository is queued or
+    running there (nothing is written then; the next pass tries again), and raises
     :class:`ManufactureRefused` when the submit gate refuses it."""
 
     rung: str
@@ -3056,6 +3057,25 @@ def auto_manufacture_for(
             # the lease is checked in the transaction that inserts the paid run: a
             # switch-off or a takeover since the last renewal leaves nothing written
             if not fence(db):
+                db.rollback()
+                return None
+            # another pass that inserted this key's run since the gate: it stands
+            held = db.get(Run, run_id)
+            if held is not None:
+                db.rollback()
+                return stored(held)
+            # and an active factory run on the repository, read in the same transaction: a
+            # run queued since the sweep's own check (an operator's) builds first, and this
+            # pass writes nothing — the next pass reads the chain after that run
+            if db.scalars(
+                select(Run.id)
+                .where(
+                    Run.repo == repo,
+                    Run.kind == KIND_FACTORY,
+                    Run.status.in_(("queued", "running")),
+                )
+                .limit(1)
+            ).first():
                 db.rollback()
                 return None
             try:
@@ -3189,6 +3209,11 @@ def manufacture_registered(
                 return ""
             _manufacture_requested(evidence, fields, found)
             continue
+        # the delivery route is read first: for GitHub it is a network call, and the
+        # active-run check and the re-read below must come after it, just before the act
+        route = auto.delivery_route()
+        if route == ROUTE_ERROR:
+            return ""
         if out_of_time() or auto.run_active():
             return ""
         # the chain and the backlog are read again after the active-run check: a run that
@@ -3196,15 +3221,11 @@ def manufacture_registered(
         # The chain is append-only, so the registration's index still holds.
         later = list(home.events())[at + 1 :]
         reason, detail = _manufacture_skip(later, item_id, approved_by, home.load_backlog(), auto)
-        if not reason:
-            route = auto.delivery_route()
-            if route == ROUTE_ERROR:
-                return ""
-            if route != ROUTE_FOUND:
-                reason = SKIP_NO_DELIVERY_ROUTE
-                detail = "no delivery route is configured for this repository"
+        if not reason and route != ROUTE_FOUND:
+            reason = SKIP_NO_DELIVERY_ROUTE
+            detail = "no delivery route is configured for this repository"
         # the reads are done: the lease is renewed and the deadline checked again before
-        # the act, skip or queue alike (the route read can outlast the pass)
+        # the act, skip or queue alike
         if not renew() or out_of_time():
             return ""
         if not reason:

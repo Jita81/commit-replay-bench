@@ -732,6 +732,23 @@ def test_the_skip_reads_the_chain_and_backlog_after_the_active_run_check(
     assert _skipped(one) == [want]
 
 
+def test_a_run_queued_during_the_route_read_is_seen_before_the_act(one: FactoryHome) -> None:
+    """Outside review: the active-run check ran before the delivery route, a network call for
+    GitHub. A factory run an operator queued during that read was not seen, and the item was
+    built twice."""
+    factory = Factory()
+
+    def slow_route() -> str:
+        factory.active = True  # an operator's run is queued while GitHub answers
+        return sv.ROUTE_FOUND
+
+    auto = replace(factory.auto(), delivery_route=slow_route)
+    got = sv.manufacture_registered(
+        one, tracker="fake", auto=auto, renew=lambda: True, fence=lambda db: True
+    )
+    assert got == "" and factory.queued == [] and not _skipped(one)
+
+
 @pytest.mark.parametrize("where", ["route", "submit", "refused"])
 def test_a_deadline_passed_after_the_reads_writes_nothing(one: FactoryHome, where: str) -> None:
     """Outside review: the deadline was checked only before the delivery route was read, so
@@ -1012,6 +1029,22 @@ def test_a_lease_taken_before_the_insert_leaves_no_run_and_no_trace(
     auto = _real(tmp_path, sessions)
     assert auto.queue_run(_REQUEST, lease.renew_in) is None
     assert _runs(sessions) == [] and _traces(sessions) == [] and not lease.held
+
+
+def test_an_active_factory_run_seen_in_the_insert_transaction_leaves_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside review: the insert fence checked the lease and the deadline, never an active
+    run, so a factory run queued after the sweep's own check (an operator's ``POST /runs``)
+    and this automatic build were both queued."""
+    monkeypatch.setattr(sv, "submit_refusals", lambda db, s, body, run: None)
+    sessions = _store(tmp_path)
+    auto = _real(tmp_path, sessions)
+    other = auto.queue_run({**_REQUEST, "content_revision": "c-0"}, _held)
+    assert other is not None
+    assert auto.queue_run(_REQUEST, _held) is None
+    assert [r.id for r in _runs(sessions)] == [other.run_id]
+    assert [t.payload_json["run_id"] for t in _traces(sessions)] == [other.run_id]
 
 
 @pytest.mark.parametrize(
