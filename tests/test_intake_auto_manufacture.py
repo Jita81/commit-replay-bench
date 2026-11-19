@@ -1266,6 +1266,132 @@ def test_only_an_active_operator_counts_as_the_approver(tmp_path: Path) -> None:
     assert not auto.approver_active("nobody")
 
 
+def test_an_approver_deactivated_while_the_submit_gate_ran_leaves_the_consent_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside review (round 5): the approver was checked before the submit gate only. An
+    account deactivated while the gate ran still queued a paid run in its name. It is read
+    again in the insert transaction; the next pass records ``approver_inactive``."""
+    from crb.store.models import User
+
+    sessions = _store(tmp_path)
+    auto = _real(tmp_path, sessions)
+    home = FactoryHome(tmp_path, "alpha")
+    _mark(home)
+
+    def deactivate(db: Any, settings: Any, body: Any, run: Any) -> None:
+        with sessions() as other:  # an admin deactivates the operator and commits
+            user = other.get(User, "ada")
+            assert user is not None
+            user.active = False
+            other.commit()
+
+    monkeypatch.setattr(sv, "submit_refusals", deactivate)
+    sweep: dict[str, Any] = {"tracker": "fake", "auto": auto, "renew": lambda: True, "fence": _held}
+    assert sv.manufacture_registered(home, **sweep) == ""
+    assert _runs(sessions) == [] and _traces(sessions) == []
+    assert _of(home, EV_INTAKE_MANUFACTURE_REQUESTED) == [] and _skipped(home) == []
+    assert sv.manufacture_registered(home, **sweep) == ""
+    assert _skipped(home) == [sv.SKIP_APPROVER_INACTIVE] and _runs(sessions) == []
+
+
+def test_a_cancelled_build_the_worker_finished_as_held_still_settles_its_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside review (round 5): a cancel accepted while the worker held the run did not
+    stop its finish writing a hold, and the key was freed for a second run. A run with an
+    accepted cancel is never read as held."""
+    from crb.store.models import Run
+
+    monkeypatch.setattr(sv, "submit_refusals", lambda db, s, body, run: None)
+    sessions = _store(tmp_path)
+    auto = _real(tmp_path, sessions)
+    first = auto.queue_run(_REQUEST, _held, _admit)
+    assert first is not None
+    with sessions() as s:
+        row = s.get(Run, first.run_id)
+        assert row is not None
+        row.status, row.error = "failed", f"{sv.REFUSAL_BUILD_HELD}: held"
+        row.cancel_requested = True
+        s.commit()
+    assert not sv.build_held("failed", f"{sv.REFUSAL_BUILD_HELD}: held", True)
+    assert not auto.run_held(first.run_id) and auto.find_run(_REQUEST) == first
+    assert auto.queue_run(_REQUEST, _held, _admit) == first
+    assert [r.id for r in _runs(sessions)] == [first.run_id]
+
+
+def test_the_settled_phase_reads_no_run_for_a_skipped_key_and_stops_at_the_deadline(
+    home: FactoryHome,
+) -> None:
+    """Outside review (round 5): every earlier request's run was read before the first
+    deadline check, even for a key a skip had settled. A key settled by a skip is not read
+    now, and the deadline is read before each key's run lookups."""
+    home.register_backlog([_item("fake-4711"), _item("fake-4712")], actor="t")
+    evidence = home.evidence(actor="worker")
+    old = {
+        "tracker": "fake",
+        "key": "4711",
+        "content_revision": "c-1",
+        "item_id": "fake-4711",
+        "approved_by": "operator:ada",
+    }
+    _mark(home)
+    sv._manufacture_requested(evidence, old, sv.QueuedRun("run-old", 6.0, RUNG))
+    evidence.append(
+        EV_INTAKE_MANUFACTURE_SKIPPED, "fake-4711", **sv._keyed(old), reason="sealed", detail="x"
+    )
+    new = {**old, "key": "4712", "item_id": "fake-4712"}
+    _mark(home, "fake-4712", key="4712")
+    sv._manufacture_requested(evidence, new, sv.QueuedRun("run-new", 6.0, RUNG))
+    factory = Factory()
+    read: list[str] = []
+
+    def run_held(run_id: str) -> bool:
+        read.append(run_id)
+        return False
+
+    auto = replace(factory.auto(), run_held=run_held)
+    sweep: dict[str, Any] = {"tracker": "fake", "auto": auto, "renew": lambda: True}
+    before = len(list(home.events()))
+    assert sv.manufacture_registered(home, fence=_held, out_of_time=lambda: True, **sweep) == ""
+    assert read == [] and len(list(home.events())) == before
+    assert sv.manufacture_registered(home, fence=_held, **sweep) == ""
+    assert read == ["run-new"] and factory.queued == []
+
+
+def test_a_chain_scan_that_crosses_the_deadline_inserts_nothing(
+    one: FactoryHome, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside review (round 5): ``admit`` read the deadline before it scanned the chain,
+    so a scan that crossed it still queued a run. The deadline is read again after it."""
+    factory = Factory()
+    late = {"now": False}
+    real = one.events
+
+    def queue_run(request: Any, fence: Any, admit: Any) -> sv.QueuedRun | None:
+        def slow_scan() -> Any:
+            late["now"] = True  # the chain read in the insert transaction crosses the deadline
+            return real()
+
+        with monkeypatch.context() as m:
+            m.setattr(one, "events", slow_scan)
+            return factory.queue_run(request, fence, admit)
+
+    auto = replace(factory.auto(), queue_run=queue_run)
+    before = len(list(one.events()))
+    got = sv.manufacture_registered(
+        one,
+        tracker="fake",
+        auto=auto,
+        renew=lambda: True,
+        fence=_held,
+        out_of_time=lambda: late["now"],
+    )
+    assert got == "" and factory.queued == [] and len(list(one.events())) == before
+    late["now"] = False
+    assert _sweep(one, factory) == "run-1"
+
+
 # --- the worker -------------------------------------------------------------------------
 
 

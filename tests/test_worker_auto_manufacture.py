@@ -736,3 +736,86 @@ def test_a_chain_that_cannot_be_read_holds_the_build(
     monkeypatch.setattr(FactoryHome, "events", broken)
     held = _held(stack, first.id)
     assert held is not None and "the chain could not be read (OSError)" in held
+
+
+def test_active_runs_that_cannot_be_read_hold_the_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside review (round 5): a failed read of the active runs at claim ended the run as
+    an ordinary failure, which settled the consent although nothing was built. It is now an
+    unspent hold, as a chain that cannot be read is."""
+    stack = Stack(tmp_path)
+    stack.consent()
+    stack.poll()
+    (first,) = stack.runs()
+    with stack.factory() as s:
+        run = s.get(Run, first.id)
+        assert run is not None
+
+    def broken() -> Any:
+        raise RuntimeError("store unreachable")
+
+    emitter = stack.worker._emitter(run)
+    monkeypatch.setattr(stack.worker, "factory", broken)
+    held = stack.worker._intake_build_held(run, emitter)
+    assert held is not None and held.startswith(sv.REFUSAL_BUILD_HELD)
+    assert "the active runs could not be read (RuntimeError)" in held
+
+
+def test_a_cancel_accepted_while_the_build_is_held_ends_it_cancelled_and_settles_the_key(
+    tmp_path: Path,
+) -> None:
+    """Outside review (round 5): an operator cancelled the automatic build after the claim's
+    cancel check and before its hold was finished. The run was stored as a retryable hold,
+    and a replacement was queued once the other run ended. The cancel now wins."""
+    stack = Stack(tmp_path)
+    stack.consent()
+    stack.poll()
+    (first,) = stack.runs()
+    _operator_run(stack, status="running", created="2000-01-01T00:00:00.000000+00:00")
+    real = stack.worker._intake_build_held
+
+    def cancelled_meanwhile(run: Run, emitter: Any) -> str | None:
+        stack.worker.queue.request_cancel(run.id, actor="ada")
+        return real(run, emitter)
+
+    stack.worker._intake_build_held = cancelled_meanwhile  # type: ignore[method-assign]
+    done = _claim_the_automatic_build(stack)
+    assert done.status == "cancelled" and done.error == ""
+    # the operator's run ends without building the item: nothing is queued again
+    with stack.factory() as s:
+        s.execute(update(Run).where(Run.id == "op-run").values(status="succeeded"))
+        s.commit()
+    stack.poll()
+    assert {r.id for r in stack.runs()} == {first.id, "op-run"}
+
+
+def test_a_cancel_that_cannot_be_read_after_the_hold_leaves_the_hold(
+    tmp_path: Path,
+) -> None:
+    """Internal review (round 5): the cancel read after the hold raised, and the run ended
+    as an ordinary failure, which settled the consent although nothing was built. A cancel
+    that cannot be read now leaves the hold, so the consent stays pending."""
+    stack = Stack(tmp_path)
+    stack.consent()
+    stack.poll()
+    _operator_run(stack, status="running", created="2000-01-01T00:00:00.000000+00:00")
+    real_held = stack.worker._intake_build_held
+    real_cancel = stack.worker.queue.is_cancel_requested
+    decided = {"on": False}
+
+    def held_then_store_down(run: Run, emitter: Any) -> str | None:
+        out = real_held(run, emitter)
+        decided["on"] = True
+        return out
+
+    def cancel_read(run_id: str) -> bool:
+        if decided["on"]:
+            raise RuntimeError("store unreachable")
+        return real_cancel(run_id)
+
+    stack.worker._intake_build_held = held_then_store_down  # type: ignore[method-assign]
+    stack.worker.queue.is_cancel_requested = cancel_read  # type: ignore[method-assign]
+    done = _claim_the_automatic_build(stack)
+    assert done.status == "failed" and done.error.startswith(sv.REFUSAL_BUILD_HELD)
+    assert sv.build_held(done.status, done.error, bool(done.cancel_requested))

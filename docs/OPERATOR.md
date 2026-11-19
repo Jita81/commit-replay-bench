@@ -1657,9 +1657,16 @@ act. The chain records `intake.manufacture.requested` (the run) or `intake.manuf
 A factory run already active, or an error reading the delivery route, is a wait: it writes
 nothing, and the consent stays pending for the next pass. If any other factory run on the
 repository is queued or running when a worker first claims the automatic build, or the item
-was built since, the worker ends it failed at $0 with code `intake_build_held`. The consent
-stays pending, and the next pass skips `already_built` or queues the build again. Your own
-runs are never held, and neither is a reclaimed automatic build. Switching the listener or the setting
+was built since, the worker ends it failed at $0 with code `intake_build_held`. One
+exception: an automatic build queued later does not hold an earlier one. The worker also
+holds the build when it cannot read the active runs or the factory chain, even with no
+other run active; the error then says which could not be read. Then check the store or
+the factory home, not another run. The consent stays pending, and the next pass skips
+`already_built` or queues the build again. A cancel accepted before the worker finishes
+the hold wins: the build ends cancelled, or failed but settled, and it is not queued again
+for that content. To stop a build that was already held, cancel the next run the intake
+queues. Your own runs are never held,
+and neither is a reclaimed automatic build. Switching the listener or the setting
 off stops new runs but does not withdraw a run already queued; cancel that run like any other.
 On a production worker that refuses unsealed builds the run is skipped `sealed`; start the
 worker with `CRB_ALLOW_UNSEALED_PROD=1`, with `CRB_ALLOW_UNSEALED_PROD_BY` naming an active

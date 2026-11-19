@@ -60,12 +60,14 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
    so two passes that race insert one row and the second is refused by the store. The run and
    the system trace `intake.manufacture.queued` are written in one transaction. In it, in
    order: the pass still holds the intake lease; no run holds the key; no factory run on the
-   repository is queued or running; and, just before the insert, the pass is still in time
-   and the chain shows no build or outcome for the item since its registration. If any
-   check fails, nothing is written and the consent stays pending. A run that already holds
-   the key is named on the chain with the cap and rung it was stored with, and never
-   queued again. A run held at claim (decision 8) does not hold the key: the next run of
-   the key takes the next id, `attempt` 1, 2 and so on.
+   repository is queued or running; the operator who acted is still an active operator;
+   and, just before the insert, the pass is still in time and the chain shows no build or
+   outcome for the item since its registration (the deadline is read again after that
+   chain read). If any check fails, nothing is written and the consent stays pending; an
+   approver found inactive there is recorded `approver_inactive` by the next pass. A run
+   that already holds the key is named on the chain with the cap and rung it was stored
+   with, and never queued again. A run held at claim (decision 8) does not hold the key:
+   the next run of the key takes the next id, `attempt` 1, 2 and so on.
 6. **Final skips.** `intake.manufacture.skipped` with a `reason`, never retried at that
    content: `item_superseded` (a later version is on the backlog), `has_dependencies`,
    `already_built` (a run graded or ended the item after the registration; the chain and the
@@ -80,16 +82,21 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
    checked again after the delivery route is read, before a skip is written, and in the
    transaction that inserts the run, after the lease and the active-run check. The lease is
    renewed before each chain write, which narrows the window; the chain is not in the
-   store's transaction, so it does not close it.
+   store's transaction, so it does not close it. Before it reads the runs of a key's
+   earlier requests, the pass checks the deadline. It never reads them for a key a skip
+   settled.
 8. **The worker holds the run at its first claim.** Before any paid step, the worker reads
    the store and then the chain. It ends the automatic build failed at $0, with
    `system/run.refused` and code `intake_build_held`, when any other factory run on the
    repository is queued or running, in any order; when the chain shows a build or outcome
-   for the item after its registration; or when the chain cannot be read. Another
-   automatic build holds it only when that build was queued earlier, so two never hold
-   each other. The `intake.manufacture.requested` naming a held run no longer settles the
+   for the item after its registration; or when the active runs or the chain cannot be
+   read. Another automatic build holds it only when that build was queued earlier, so two
+   never hold each other. The `intake.manufacture.requested` naming a held run no longer settles the
    key. The next pass reads the chain again: it records `already_built`, waits for the
-   active run, or queues the next run of the key. A reclaimed run is never held: it may
+   active run, or queues the next run of the key. A cancel accepted for the run wins over
+   the hold: the worker ends it cancelled, and a run with an accepted cancel is never read
+   as held, so its key stays settled. A cancel that cannot be read leaves the hold. A
+   reclaimed run is never held: it may
    have spent before its worker stopped, so it goes on as the same run under its own cap.
    An operator's run is never held. This closes the window decision 5 leaves open on
    Postgres (see "Consequences"). The worker also refuses the item when it is no longer
@@ -145,8 +152,25 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
   A run that is reclaimed after it spent is not held, so it can build beside a run that
   started while it was stopped; reclaim does not change which runs may spend. Each hold
   is one failed $0 run, and a stuck active run makes each pass wait, not hold again; a
-  run left `running` by a dead worker is reclaimed first. A chain that cannot be read at
-  claim holds the build each time a run is queued, at $0, until the chain reads.
+  run left `running` by a dead worker is reclaimed first. Active runs or a chain that
+  cannot be read at claim hold the build each time a run is queued, at $0, until they
+  read. Any error in that read holds, a programming error included.
+- A store error in a claim check before the hold (the cancel read, or a refusal check)
+  ends the automatic build failed with an ordinary error, at $0. That settles its consent;
+  the operator marks the ticket again. A build held and then cancelled has a
+  `system/run.refused` event with `intake_build_held` before its `cancelled` finish, so
+  count holds from run outcomes, not from those events.
+- An operator's run that wrote a paid grade for the item and then failed or stopped
+  before its chain record (`build.graded`), without being reclaimed, leaves no build on
+  the chain. A chain write that raises after the grade committed is enough; no dead worker
+  is needed. The automatic build then reads the item as unbuilt and can build it once
+  more, under its own cap. The window is the time between the grade's commit and the
+  chain write in one attempt. Closing it needs the grades read beside the chain; this change does
+  not add that.
+- Each pass reads one run row per earlier request of a key that no skip settled, until it
+  finds a run not held. The chain only grows, so a long history makes that read longer. A
+  pass that runs out of time writes nothing and waits; it never spends. One bounded query
+  per pass would remove this cost; this change does not add one.
 - Holds cost the automatic build some turns. An operator's run queued after the
   automatic build, but before a worker claims it, also holds it. The consent is not
   lost: the next pass records `already_built` or queues the build again.

@@ -1925,7 +1925,14 @@ class Worker:
             elif (drifted := self._reading_pool_drift(run, emitter)) is not None:
                 status, error = STATUS_FAILED, drifted
             elif (held := self._intake_build_held(run, emitter)) is not None:
-                status, error = STATUS_FAILED, held
+                # a cancel accepted while the hold was decided wins: the run ends cancelled,
+                # and a cancelled automatic build settles its key (never queued again). A
+                # cancel that cannot be read leaves the hold, so the consent stays pending
+                try:
+                    cancelled = self.queue.is_cancel_requested(run.id)
+                except Exception:
+                    cancelled = False
+                status, error = (STATUS_CANCELLED, "") if cancelled else (STATUS_FAILED, held)
             else:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
@@ -2221,11 +2228,11 @@ class Worker:
         run on the repository is queued or running, in any order (an automatic build defers
         only to an earlier automatic build, so two never hold each other), or when the
         chain says its item was built or ended after the consented registration, or when
-        the chain cannot be read. The store is read first and the chain after it, so a run
-        that ends between the two reads has already written its outcome. A run the insert
-        could not see committed before this run did, so it is seen here. The consent stays
-        pending: the intake's next pass records ``already_built``, waits, or queues the next
-        run of the key. ``None`` for a reclaimed run (it may have spent; it goes on under
+        the active runs or the chain cannot be read. The store is read first and the chain
+        after it, so a run that ends between the two reads has already written its outcome.
+        A run the insert could not see committed before this run did, so it is seen here.
+        The consent stays pending: the intake's next pass records ``already_built``, waits,
+        or queues the next run of the key. ``None`` for a reclaimed run (it may have spent; it goes on under
         its own cap) and for every other run: an operator's run is never refused here."""
         auto = dict(run.params_json or {}).get("intake_auto")
         if run.kind != KIND_FACTORY or not isinstance(auto, Mapping):
@@ -2233,30 +2240,36 @@ class Worker:
         if int((run.counts_json or {}).get(RECLAIMS_KEY, 0) or 0) > 0:
             return None
         mine = (run.created or "", run.id)
-        with self.factory() as s:
-            others = s.execute(
-                select(Run.id, Run.created, Run.params_json)
-                .where(
-                    Run.repo == run.repo,
-                    Run.kind == KIND_FACTORY,
-                    Run.id != run.id,
-                    Run.status.in_((STATUS_QUEUED, STATUS_RUNNING)),
-                )
-                .order_by(Run.created, Run.id)
-            ).all()
-        holder = next(
-            (
-                o.id
-                for o in others
-                if not isinstance(dict(o.params_json or {}).get("intake_auto"), Mapping)
-                or (o.created or "", o.id) < mine
-            ),
-            None,
-        )
         item_id = str(auto.get("item_id", ""))
+        holder: str | None = None
+        try:
+            with self.factory() as s:
+                others = s.execute(
+                    select(Run.id, Run.created, Run.params_json)
+                    .where(
+                        Run.repo == run.repo,
+                        Run.kind == KIND_FACTORY,
+                        Run.id != run.id,
+                        Run.status.in_((STATUS_QUEUED, STATUS_RUNNING)),
+                    )
+                    .order_by(Run.created, Run.id)
+                ).all()
+        except Exception as exc:  # active runs that cannot be read must not spend either
+            reason = f"the active runs could not be read ({type(exc).__name__})"
+        else:
+            holder = next(
+                (
+                    o.id
+                    for o in others
+                    if not isinstance(dict(o.params_json or {}).get("intake_auto"), Mapping)
+                    or (o.created or "", o.id) < mine
+                ),
+                None,
+            )
+            reason = ""
         if holder is not None:
             reason = f"factory run {str(holder)[:8]} on this repository builds first"
-        else:
+        elif not reason:
             try:
                 built = built_since_consent(FactoryHome(self.home, run.repo).events(), auto)
             except Exception as exc:  # a chain that cannot be read must not spend

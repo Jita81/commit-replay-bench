@@ -2937,9 +2937,15 @@ _BUILT_KINDS = (EV_BUILD, EV_ITEM_OUTCOME)
 REFUSAL_BUILD_HELD = "intake_build_held"
 
 
-def build_held(status: str, error: str | None) -> bool:
-    """Did the worker end this automatic build unspent at claim (``REFUSAL_BUILD_HELD``)?"""
-    return status == STATUS_FAILED and str(error or "").startswith(REFUSAL_BUILD_HELD)
+def build_held(status: str, error: str | None, cancel_requested: bool = False) -> bool:
+    """Did the worker end this automatic build unspent at claim (``REFUSAL_BUILD_HELD``)?
+    Not when a cancel was accepted for it: a cancelled build settles its key, whatever the
+    worker's finish wrote."""
+    return (
+        not cancel_requested
+        and status == STATUS_FAILED
+        and str(error or "").startswith(REFUSAL_BUILD_HELD)
+    )
 
 
 def built_since_consent(events: Sequence[Any], intake_auto: Mapping[str, Any]) -> bool:
@@ -3071,7 +3077,9 @@ def auto_manufacture_for(
                 attempt,
             )
             row = db.get(Run, run_id)
-            if row is None or not build_held(str(row.status), row.error):
+            if row is None or not build_held(
+                str(row.status), row.error, bool(row.cancel_requested)
+            ):
                 return run_id, row
             attempt += 1
 
@@ -3085,7 +3093,7 @@ def auto_manufacture_for(
                 if (
                     isinstance(auto, Mapping)
                     and all(str(auto.get(k, "")) == str(key.get(k, "")) for k in same)
-                    and not build_held(str(run.status), run.error)
+                    and not build_held(str(run.status), run.error, bool(run.cancel_requested))
                 ):
                     return stored(run)
         return None
@@ -3093,7 +3101,9 @@ def auto_manufacture_for(
     def run_held(run_id: str) -> bool:
         with sessions() as db:
             row = db.get(Run, run_id)
-            return row is not None and build_held(str(row.status), row.error)
+            return row is not None and build_held(
+                str(row.status), row.error, bool(row.cancel_requested)
+            )
 
     def queue(request: Mapping[str, Any], fence: Fence, admit: Admit) -> QueuedRun | None:
         approved_by = str(request.get("approved_by", ""))
@@ -3154,6 +3164,11 @@ def auto_manufacture_for(
             ).first():
                 db.rollback()
                 return None
+            # the operator who acted, read in this transaction: an account deactivated since
+            # the sweep's check queues nothing, and the next pass skips approver_inactive
+            if not eligible(db, approved_by.removeprefix(OPERATOR_PREFIX)):
+                db.rollback()
+                return None
             # the sweep's last word, read just before the insert: the deadline (the lease
             # write and the reads above can outlast it) and an outcome for the item written
             # since the sweep read the chain (an operator's run that built it while the
@@ -3185,14 +3200,17 @@ def auto_manufacture_for(
             committed = db.get(Run, run_id)
             return stored(committed) if committed is not None else None
 
+    def eligible(db: Session, account: str) -> bool:
+        user = db.get(User, account)
+        return bool(
+            user is not None
+            and user.active
+            and ROLE_RANK.get(str(user.role), -1) >= ROLE_RANK["operator"]
+        )
+
     def approver_active(account: str) -> bool:
         with sessions() as db:
-            user = db.get(User, account)
-            return bool(
-                user is not None
-                and user.active
-                and ROLE_RANK.get(str(user.role), -1) >= ROLE_RANK["operator"]
-            )
+            return eligible(db, account)
 
     return AutoManufacture(
         rung=rung,
@@ -3250,10 +3268,11 @@ def manufacture_registered(
     after the last read and before each chain write, and ``fence`` checks it again inside
     the transaction that inserts the run, with the pass's deadline. A lease lost or the
     deadline passed before the act stops the pass and writes nothing. In that transaction,
-    after the lease and the active-run check and just before the insert, ``admit`` reads
-    the deadline and the chain once more: a pass out of time, or an item built since the
-    first read, writes nothing (the next pass records ``already_built``). A request whose
-    run the worker held at claim does not settle its key.
+    after the lease, the active-run check and a fresh read of the approver, and just before
+    the insert, ``admit`` reads the deadline and the chain once more: a pass out of time, or
+    an item built since the first read, writes nothing (the next pass records
+    ``already_built``). A request whose run the worker held at claim does not settle its
+    key; its runs are read only after a deadline check, and never for a key a skip settled.
     A renewal before a chain write narrows the window; it does not close it, because the
     chain is not in the store's transaction."""
     events = list(home.events())
@@ -3266,20 +3285,20 @@ def manufacture_registered(
     ]
     if not marked:
         return ""
-    # a request whose run the worker held at claim does not settle its key: the consent
-    # stays pending, and this pass reads the chain again and skips or queues the next run
-    settled = {
-        (str(e.payload.get("key", "")), str(e.payload.get("content_revision", "")))
-        for e in events
-        if str(e.payload.get("tracker")) == tracker
-        and (
-            e.kind == EV_MANUFACTURE_SKIPPED
-            or (
-                e.kind == EV_MANUFACTURE_REQUESTED
-                and not auto.run_held(str(e.payload.get("run_id", "")))
-            )
-        )
-    }
+    # a skip settles its key with no store read. A request settles it unless the worker held
+    # its run at claim: the consent then stays pending, and this pass reads the chain again
+    # and skips or queues the next run. Those runs are read in the loop below, one key at a
+    # time after a deadline check, and never for a key a skip already settled
+    settled: set[tuple[str, str]] = set()
+    requested: dict[tuple[str, str], list[str]] = {}
+    for e in events:
+        if str(e.payload.get("tracker")) != tracker:
+            continue
+        pair = (str(e.payload.get("key", "")), str(e.payload.get("content_revision", "")))
+        if e.kind == EV_MANUFACTURE_SKIPPED:
+            settled.add(pair)
+        elif e.kind == EV_MANUFACTURE_REQUESTED:
+            requested.setdefault(pair, []).append(str(e.payload.get("run_id", "")))
     evidence = home.evidence(actor=actor)
     for at, registered in marked:
         key = str(registered.payload.get("key", ""))
@@ -3287,6 +3306,10 @@ def manufacture_registered(
         if (key, content) in settled:
             continue
         settled.add((key, content))
+        if out_of_time():
+            return ""
+        if any(not auto.run_held(run_id) for run_id in requested.get((key, content), ())):
+            continue
         item_id = str(registered.item_id)
         approved_by = str(registered.payload.get("approved_by", ""))
         fields = {
@@ -3330,7 +3353,10 @@ def manufacture_registered(
                 if out_of_time():
                     return False
                 built = list(home.events())[at + 1 :]
-                return not any(e.kind in _BUILT_KINDS and str(e.item_id) == item_id for e in built)
+                if any(e.kind in _BUILT_KINDS and str(e.item_id) == item_id for e in built):
+                    return False
+                # the chain read can outlast the deadline too: read it once more
+                return not out_of_time()
 
             try:
                 # the deadline and the item's outcome are read again in the transaction that
