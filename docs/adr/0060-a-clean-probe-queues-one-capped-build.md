@@ -81,16 +81,19 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
    transaction that inserts the run, after the lease and the active-run check. The lease is
    renewed before each chain write, which narrows the window; the chain is not in the
    store's transaction, so it does not close it.
-8. **The worker holds the run at claim.** Before any paid step, the worker reads the store
-   and then the chain. It ends the automatic build failed at $0, with `system/run.refused`
-   and code `intake_build_held`, when another factory run on the repository is running or
-   is queued ahead of it, or when the chain shows a build or outcome for the item after
-   its registration. The `intake.manufacture.requested` naming that run then no longer
-   settles the key. The next pass reads the chain again: it records `already_built`, waits
-   for the active run, or queues the next run of the key. This closes the window decision
-   5 leaves open on Postgres (see "Consequences"). An operator's run is never held. The
-   worker also refuses the item when it is no longer active or depends on other items,
-   before it builds.
+8. **The worker holds the run at its first claim.** Before any paid step, the worker reads
+   the store and then the chain. It ends the automatic build failed at $0, with
+   `system/run.refused` and code `intake_build_held`, when any other factory run on the
+   repository is queued or running, in any order; when the chain shows a build or outcome
+   for the item after its registration; or when the chain cannot be read. Another
+   automatic build holds it only when that build was queued earlier, so two never hold
+   each other. The `intake.manufacture.requested` naming a held run no longer settles the
+   key. The next pass reads the chain again: it records `already_built`, waits for the
+   active run, or queues the next run of the key. A reclaimed run is never held: it may
+   have spent before its worker stopped, so it goes on as the same run under its own cap.
+   An operator's run is never held. This closes the window decision 5 leaves open on
+   Postgres (see "Consequences"). The worker also refuses the item when it is no longer
+   active or depends on other items, before it builds.
 9. **Start-up refuses** the switch on without `CRB_INTAKE__GAP_PROBE`, without
    `CRB_INTAKE__REQUIRE_APPROVAL`, with an empty rung, or with a cap whose per-attempt share
    is above the per-run budget limit. Whenever a rung is set, with the switch on or off,
@@ -131,15 +134,22 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
 - The active-run check in the insert transaction is not serialised with `POST /runs`,
   which inserts with no lock. On SQLite the lease write serialises every writer, so no
   run commits unseen. On Postgres at READ COMMITTED, an operator's run can commit after
-  that check and before the insert. Both runs are then queued. The worker's hold at claim
-  (decision 8) stops the automatic build before it spends when the operator's run is
-  ahead of it in queue order, or running. A window remains: a run is stamped with its
-  queue time before it commits, so an operator's run can commit unseen yet sit behind
-  the automatic build. Then the automatic build runs first and the operator's run builds
-  the item again, as any run an operator queues behind an automatic build does. Operator
-  runs are never refused. A lock shared with `POST /runs` would close it; this change
-  does not add one, because its lock order with the event and lease locks is not yet
-  shown to be free of deadlock.
+  that check and before the insert. Both runs are then queued. The worker's hold at the
+  first claim (decision 8) closes this on any database. The claim reads after the
+  automatic build committed, so a run the insert missed is seen then: queued or running,
+  and the build is held; or ended, and its build or outcome for the item is already on
+  the chain, and the build is held; or ended without building the item, and the build
+  is right to go on. No lock is added to `POST /runs`.
+- What stays open. An operator's run submitted after the automatic build's claim check
+  can build the item again; that is the operator's own choice to queue a second build.
+  A run that is reclaimed after it spent is not held, so it can build beside a run that
+  started while it was stopped; reclaim does not change which runs may spend. Each hold
+  is one failed $0 run, and a stuck active run makes each pass wait, not hold again; a
+  run left `running` by a dead worker is reclaimed first. A chain that cannot be read at
+  claim holds the build each time a run is queued, at $0, until the chain reads.
+- Holds cost the automatic build some turns. An operator's run queued after the
+  automatic build, but before a worker claims it, also holds it. The consent is not
+  lost: the next pass records `already_built` or queues the build again.
 - Proven against fakes only [gap]. No live tracker or paid build was run for this change;
   closing it needs one operator-run reading on a sandbox repository.
 - Not in this change: a ticket comment that says a build was queued or skipped, showing the

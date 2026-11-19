@@ -3141,7 +3141,8 @@ def auto_manufacture_for(
             # serialises the insert with every other writer, so none commits between this
             # read and the commit below. On Postgres at READ COMMITTED, an operator's
             # POST /runs (which takes no lock) can still commit in that window and is not
-            # seen; the worker holds this run at claim then (REFUSAL_BUILD_HELD)
+            # seen. It is seen at this run's first claim, which reads after this commit:
+            # the worker holds this run then, unspent (REFUSAL_BUILD_HELD)
             if db.scalars(
                 select(Run.id)
                 .where(

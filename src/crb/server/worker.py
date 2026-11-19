@@ -258,7 +258,7 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
 
-from sqlalchemy import Engine, and_, func, or_, select
+from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.builders import builder_for_rung
@@ -2217,43 +2217,55 @@ class Worker:
 
     def _intake_build_held(self, run: Run, emitter: Emitter) -> str | None:
         """The error that ends an intake automatic build (``params.intake_auto``, ADR-0060)
-        unspent at claim, before any paid step: another factory run on the repository is
-        running, or is queued ahead of it, or the chain says its item was built or ended
-        after the consented registration. The store is read first and the chain after it,
-        so a run that ends between the two reads has already written its outcome. The
-        consent stays pending: the intake's next pass reads the chain and records
-        ``already_built`` or queues the next run of the key. ``None`` for every other run;
-        an operator's run is never refused here."""
+        unspent at its first claim, before any paid step. It is held when another factory
+        run on the repository is queued or running, in any order (an automatic build defers
+        only to an earlier automatic build, so two never hold each other), or when the
+        chain says its item was built or ended after the consented registration, or when
+        the chain cannot be read. The store is read first and the chain after it, so a run
+        that ends between the two reads has already written its outcome. A run the insert
+        could not see committed before this run did, so it is seen here. The consent stays
+        pending: the intake's next pass records ``already_built``, waits, or queues the next
+        run of the key. ``None`` for a reclaimed run (it may have spent; it goes on under
+        its own cap) and for every other run: an operator's run is never refused here."""
         auto = dict(run.params_json or {}).get("intake_auto")
         if run.kind != KIND_FACTORY or not isinstance(auto, Mapping):
             return None
+        if int((run.counts_json or {}).get(RECLAIMS_KEY, 0) or 0) > 0:
+            return None
+        mine = (run.created or "", run.id)
         with self.factory() as s:
-            ahead = s.scalars(
-                select(Run.id)
+            others = s.execute(
+                select(Run.id, Run.created, Run.params_json)
                 .where(
                     Run.repo == run.repo,
                     Run.kind == KIND_FACTORY,
                     Run.id != run.id,
-                    or_(
-                        Run.status == STATUS_RUNNING,
-                        and_(
-                            Run.status == STATUS_QUEUED,
-                            or_(
-                                Run.created < run.created,
-                                and_(Run.created == run.created, Run.id < run.id),
-                            ),
-                        ),
-                    ),
+                    Run.status.in_((STATUS_QUEUED, STATUS_RUNNING)),
                 )
-                .limit(1)
-            ).first()
+                .order_by(Run.created, Run.id)
+            ).all()
+        holder = next(
+            (
+                o.id
+                for o in others
+                if not isinstance(dict(o.params_json or {}).get("intake_auto"), Mapping)
+                or (o.created or "", o.id) < mine
+            ),
+            None,
+        )
         item_id = str(auto.get("item_id", ""))
-        if ahead is not None:
-            reason = f"factory run {str(ahead)[:8]} on this repository builds first"
-        elif built_since_consent(FactoryHome(self.home, run.repo).events(), auto):
-            reason = f"item {item_id} was built after the consent"
+        if holder is not None:
+            reason = f"factory run {str(holder)[:8]} on this repository builds first"
         else:
-            return None
+            try:
+                built = built_since_consent(FactoryHome(self.home, run.repo).events(), auto)
+            except Exception as exc:  # a chain that cannot be read must not spend
+                built = True
+                reason = f"the chain could not be read ({type(exc).__name__})"
+            else:
+                reason = f"item {item_id} was built after the consent"
+            if not built:
+                return None
         error = (
             f"{REFUSAL_BUILD_HELD}: an automatic build of item {item_id} was held at claim: "
             f"{reason}; nothing was built, and the intake's next pass acts on the consent"
@@ -2265,7 +2277,7 @@ class Worker:
             error=error,
             code=REFUSAL_BUILD_HELD,
             item_id=item_id,
-            held_by=str(ahead or ""),
+            held_by=str(holder or ""),
         )
         return error
 

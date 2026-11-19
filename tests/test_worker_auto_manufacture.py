@@ -13,9 +13,10 @@ What it does: Pins that with the switch off the sweep is never called and nothin
               network error), which the poll treats as a wait and never as a final skip; that
               a lease lost before the sweep, or a pass out of time, queues nothing and a later
               pass still queues; that a sealed worker skips; that a sweep that raises
-              never fails the poll; and that the worker holds an automatic build at claim
-              (``intake_build_held``) when a factory run is ahead of it or its item was
-              built, leaving the consent pending.
+              never fails the poll; and that the worker holds an automatic build at its
+              first claim (``intake_build_held``) when another factory run is active, its
+              item was built, or the chain cannot be read, leaving the consent pending,
+              and never holds a reclaimed run or an operator's run.
 How:          A real ``Worker`` over a SQLite store under ``tmp_path`` with the in-memory
               ``FakeTracker`` (an empty column), a consented registration written on the real
               hash chain, the real submit gate (its credential and login checks stubbed), and
@@ -639,19 +640,99 @@ def test_an_item_built_after_the_consent_holds_the_build_and_the_next_pass_skips
     assert stack.skipped() == [sv.SKIP_ALREADY_BUILT]
 
 
-def test_an_operator_run_queued_after_the_automatic_build_does_not_hold_it(
+def test_an_operator_run_queued_after_the_automatic_build_also_holds_it(
     tmp_path: Path,
 ) -> None:
-    """Only a run ahead of it holds the automatic build; one queued later waits its turn,
-    and no run that is not an automatic build is ever held."""
+    """Close round: an operator run the insert could not see is stamped later than the
+    automatic build, so a hold ordered by ``created`` let both build. Any other active
+    factory run now holds the automatic build at claim, whatever its order; the operator's
+    run itself is never held."""
     stack = Stack(tmp_path)
     stack.consent()
     stack.poll()
     (first,) = stack.runs()
     _operator_run(stack, status="queued", created="2999-01-01T00:00:00.000000+00:00")
     with stack.factory() as s:
-        auto = s.get(Run, first.id)
         op = s.get(Run, "op-run")
-        assert auto is not None and op is not None
-    assert stack.worker._intake_build_held(auto, stack.worker._emitter(auto)) is None
+        assert op is not None
     assert stack.worker._intake_build_held(op, stack.worker._emitter(op)) is None
+    done = _claim_the_automatic_build(stack)
+    assert done.status == "failed" and sv.build_held(done.status, done.error)
+    (refused,) = _refusals(stack, first.id)
+    assert refused.payload_json["held_by"] == "op-run"
+
+
+def _held(stack: Stack, run_id: str) -> str | None:
+    with stack.factory() as s:
+        run = s.get(Run, run_id)
+        assert run is not None
+    return stack.worker._intake_build_held(run, stack.worker._emitter(run))
+
+
+@pytest.mark.parametrize("why", ["operator_running", "own_build_graded"])
+def test_a_reclaimed_automatic_build_is_never_held(tmp_path: Path, why: str) -> None:
+    """Close round: a reclaimed run may have spent before its worker died. Holding it
+    would free the key for a second paid build, and its own ``build.graded`` would hold
+    it. Only a first claim is held; a reclaimed run goes on under its own cap."""
+    from crb.factory.evidence import EV_ITEM_OUTCOME
+
+    stack = Stack(tmp_path)
+    stack.consent()
+    stack.poll()
+    (first,) = stack.runs()
+    if why == "operator_running":
+        _operator_run(stack, status="running", created="2000-01-01T00:00:00.000000+00:00")
+    else:
+        stack.chain.evidence(actor="worker").append(EV_ITEM_OUTCOME, "fake-4711", status="merged")
+    assert _held(stack, first.id) is not None
+    with stack.factory() as s:
+        s.execute(update(Run).where(Run.id == first.id).values(counts_json={"reclaims": 1}))
+        s.commit()
+    assert _held(stack, first.id) is None
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_two_automatic_builds_never_hold_each_other(tmp_path: Path, status: str) -> None:
+    """Close round: an automatic build defers only to an earlier automatic build, so two
+    of them on one repository cannot both be held; the earlier one goes on."""
+    stack = Stack(tmp_path)
+    stack.consent()
+    stack.poll()
+    (first,) = stack.runs()
+    with stack.factory() as s:
+        mine = s.get(Run, first.id)
+        assert mine is not None
+        for rid, created in (("auto-early", "2000-01-01"), ("auto-late", "2999-01-01")):
+            s.add(
+                Run(
+                    id=rid,
+                    repo="alpha",
+                    kind="factory",
+                    status=status,
+                    actor="intake",
+                    created=f"{created}T00:00:00.000000+00:00",
+                    params_json=dict(mine.params_json or {}),
+                )
+            )
+        s.commit()
+    assert _held(stack, first.id) is not None  # auto-early is ahead of it
+    assert _held(stack, "auto-early") is None  # both others are later automatic builds
+    assert _held(stack, "auto-late") is not None
+
+
+def test_a_chain_that_cannot_be_read_holds_the_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Close round: a chain read error at claim holds the build unspent, so the consent
+    stays pending instead of being settled by a failed run that built nothing."""
+    stack = Stack(tmp_path)
+    stack.consent()
+    stack.poll()
+    (first,) = stack.runs()
+
+    def broken(*_a: Any, **_k: Any) -> Any:
+        raise OSError("chain unreadable")
+
+    monkeypatch.setattr(FactoryHome, "events", broken)
+    held = _held(stack, first.id)
+    assert held is not None and "the chain could not be read (OSError)" in held
