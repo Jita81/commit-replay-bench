@@ -2553,6 +2553,7 @@ def _register_approved(
             gap_probe.auto_manufacture
             and approver.startswith(OPERATOR_PREFIX)
             and probe.state == STATE_DONE
+            and probe.item_id == item.id
             and not not_built
         ):
             consent = now_content
@@ -3143,7 +3144,8 @@ def manufacture_registered(
     active, the pass is out of time, the delivery route could not be read) writes nothing
     and stops the pass. The caller holds the repository's intake lease; ``renew`` stamps it
     after the last read and before each chain write, and ``fence`` checks it again inside
-    the transaction that inserts the run. A lease lost stops the pass and writes nothing.
+    the transaction that inserts the run, with the pass's deadline. A lease lost or the
+    deadline passed before the act stops the pass and writes nothing.
     A renewal before a chain write narrows the window; it does not close it, because the
     chain is not in the store's transaction."""
     events = list(home.events())
@@ -3163,7 +3165,6 @@ def manufacture_registered(
         and str(e.payload.get("tracker")) == tracker
     }
     evidence = home.evidence(actor=actor)
-    backlog = home.load_backlog()
     for at, registered in marked:
         key = str(registered.payload.get("key", ""))
         content = str(registered.payload.get("content_revision", ""))
@@ -3190,7 +3191,11 @@ def manufacture_registered(
             continue
         if out_of_time() or auto.run_active():
             return ""
-        reason, detail = _manufacture_skip(events[at + 1 :], item_id, approved_by, backlog, auto)
+        # the chain and the backlog are read again after the active-run check: a run that
+        # ended since the pass's first read has built the item, and the chain says so now.
+        # The chain is append-only, so the registration's index still holds.
+        later = list(home.events())[at + 1 :]
+        reason, detail = _manufacture_skip(later, item_id, approved_by, home.load_backlog(), auto)
         if not reason:
             route = auto.delivery_route()
             if route == ROUTE_ERROR:
@@ -3198,12 +3203,15 @@ def manufacture_registered(
             if route != ROUTE_FOUND:
                 reason = SKIP_NO_DELIVERY_ROUTE
                 detail = "no delivery route is configured for this repository"
-        # the reads are done: the lease is renewed before the act, skip or queue alike
-        if not renew():
+        # the reads are done: the lease is renewed and the deadline checked again before
+        # the act, skip or queue alike (the route read can outlast the pass)
+        if not renew() or out_of_time():
             return ""
         if not reason:
             try:
-                queued = auto.queue_run(fields, fence)
+                # the deadline is checked again in the transaction that inserts the run: the
+                # submit gate's store calls can outlast the pass too
+                queued = auto.queue_run(fields, _in_time(fence, out_of_time))
             except ManufactureRefused as exc:
                 reason, detail = f"{SKIP_REFUSED}:{exc.code}", exc.detail
             except Exception:  # a store failure passes: nothing recorded, next pass retries
@@ -3217,12 +3225,22 @@ def manufacture_registered(
                 if renew():
                     _manufacture_requested(evidence, fields, queued)
                 return queued.run_id
-            if not renew():  # the refusal came after a store call: renew before the skip
+            if not renew() or out_of_time():  # the refusal came after a store call
                 return ""
         evidence.append(
             EV_MANUFACTURE_SKIPPED, item_id, **_keyed(fields), reason=reason, detail=detail[:300]
         )
     return ""
+
+
+def _in_time(fence: Fence, out_of_time: Callable[[], bool]) -> Fence:
+    """``fence`` that also refuses once the pass is out of time, so a run is never inserted
+    after the pass's deadline."""
+
+    def fenced(db: Session) -> bool:
+        return not out_of_time() and fence(db)
+
+    return fenced
 
 
 def _keyed(fields: Mapping[str, str]) -> dict[str, str]:

@@ -36,8 +36,9 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
    becomes consent when the switch is turned on later.
 2. **Only a clean probe of that item.** The mark is written only when the probe ended done
    with no question, the build-time stop (`not_built`) is empty, and the probe was requested
-   for the same item id. A ticket whose words go back to content probed earlier is a new
-   item; it is registered without the mark and needs a new act.
+   for the same item id, on the poll's path and the Register act's alike. A ticket whose
+   words go back to content probed earlier is a new item; it is registered without the mark
+   and needs a new act.
 3. **The worker's intake pass queues it.** After it tells the tickets, under the repository's
    intake lease, the pass looks for the oldest marked registration of that tracker with no
    `intake.manufacture.requested` or `intake.manufacture.skipped` for its
@@ -60,13 +61,17 @@ switch, `CRB_INTAKE__AUTO_MANUFACTURE`, off by default, adds one step after regi
    stored with, and never queued again.
 6. **Final skips.** `intake.manufacture.skipped` with a `reason`, never retried at that
    content: `item_superseded` (a later version is on the backlog), `has_dependencies`,
-   `already_built` (a run graded or ended the item after the registration),
+   `already_built` (a run graded or ended the item after the registration; the chain and the
+   backlog are read again after the check for an active run, so a run that has just ended
+   counts),
    `approver_inactive` (the operator who acted is no longer an active operator), `sealed`,
    `no_delivery_route` and `refused:<code>` (the submit gate's own code, or
    `validation_error` when the run request itself refuses the rung or cap).
 7. **Waits.** A factory run already queued or running, a pass out of time, a lease lost
    (before an act or in the insert transaction) and an error reading the delivery route
-   write nothing; the consent stays pending and the next pass tries again. The lease is
+   write nothing; the consent stays pending and the next pass tries again. The deadline is
+   checked again after the delivery route is read, before a skip is written, and in the
+   transaction that inserts the run, beside the lease. The lease is
    renewed before each chain write, which narrows the window; the chain is not in the
    store's transaction, so it does not close it.
 8. **The worker refuses the item** when it is no longer active or depends on other items,

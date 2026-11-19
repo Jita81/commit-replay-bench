@@ -528,6 +528,32 @@ def test_content_that_goes_back_to_an_earlier_probe_needs_a_new_act(home: Factor
     assert _sweep(home, factory) == "" and len(factory.queued) == 2
 
 
+def test_a_later_draft_of_the_same_words_does_not_borrow_the_probes_consent(
+    home: FactoryHome,
+) -> None:
+    """Outside review: the act's mark checked the probe's state, not its item. A draft for
+    the same words under another item id took the consent of a probe asked for an earlier
+    item, and a build ran for an item no probe was asked for."""
+    queue, factory = Queue(), Factory()
+    tracker = _tracker(_ticket())
+    _poll(home, tracker, queue, auto=True)
+    _act(home, tracker, queue, auto=True)
+    _finish(home, queue)
+    (waiting,) = _of(home, sv.EV_AWAITING)
+    other = "fake-4711.r9"
+    home.evidence(actor="worker").append(
+        sv.EV_AWAITING,
+        other,
+        **{**waiting.payload, "item": {**waiting.payload["item"], "id": other}},
+    )
+    row = _act(home, tracker, queue, auto=True)
+    assert row.registered and row.item_id == other
+    (reg,) = _of(home, sv.EV_REGISTERED)
+    assert reg.item_id == other
+    assert "manufacture" not in reg.payload and "content_revision" not in reg.payload
+    assert _sweep(home, factory) == "" and factory.queued == []
+
+
 # --- the sweep: skips and waits ---------------------------------------------------------
 
 
@@ -671,6 +697,71 @@ def test_a_delivery_route_that_cannot_be_read_waits(one: FactoryHome) -> None:
     factory.route = sv.ROUTE_ERROR
     assert _sweep(one, factory) == "" and not _skipped(one) and factory.queued == []
     factory.route = sv.ROUTE_FOUND
+    assert _sweep(one, factory) == "run-1"
+
+
+@pytest.mark.parametrize(
+    "late",
+    [
+        "events",
+        "backlog",
+    ],
+)
+def test_the_skip_reads_the_chain_and_backlog_after_the_active_run_check(
+    one: FactoryHome, late: str
+) -> None:
+    """Outside review: the chain and the backlog were read once, before the active-run
+    check. A run that built the item, or a later version registered, between that read and
+    the check was not seen, and a second capped run was queued."""
+    factory = Factory()
+    auto = factory.auto()
+
+    def ended_just_now() -> bool:
+        if late == "events":
+            one.evidence(actor="worker").append(EV_ITEM_OUTCOME, "fake-4711", status="rejected")
+        else:
+            one.register_evolution(_item("fake-4711.r2", supersedes="fake-4711"), actor="t")
+        return False
+
+    auto = replace(auto, run_active=ended_just_now)
+    got = sv.manufacture_registered(
+        one, tracker="fake", auto=auto, renew=lambda: True, fence=lambda db: True
+    )
+    assert got == "" and factory.queued == []
+    want = sv.SKIP_ALREADY_BUILT if late == "events" else sv.SKIP_ITEM_SUPERSEDED
+    assert _skipped(one) == [want]
+
+
+@pytest.mark.parametrize("where", ["route", "submit", "refused"])
+def test_a_deadline_passed_after_the_reads_writes_nothing(one: FactoryHome, where: str) -> None:
+    """Outside review: the deadline was checked only before the delivery route was read, so
+    a route read or a submit check that crossed it still queued a run or wrote a skip."""
+    factory = Factory()
+    late = {"now": False}
+
+    def route() -> str:
+        if where == "route":
+            late["now"] = True
+        return sv.ROUTE_FOUND
+
+    def queue_run(request: Any, fence: Any) -> sv.QueuedRun | None:
+        late["now"] = True  # the submit gate's store calls outlast the pass
+        if where == "refused":
+            raise sv.ManufactureRefused("spend_cap_unpriced", "no price")
+        return factory.queue_run(request, fence)
+
+    auto = replace(factory.auto(), delivery_route=route, queue_run=queue_run)
+    before = len(list(one.events()))
+    got = sv.manufacture_registered(
+        one,
+        tracker="fake",
+        auto=auto,
+        renew=lambda: True,
+        fence=lambda db: True,
+        out_of_time=lambda: late["now"],
+    )
+    assert got == "" and factory.queued == []
+    assert len(list(one.events())) == before
     assert _sweep(one, factory) == "run-1"
 
 
@@ -872,7 +963,8 @@ def test_the_run_delivers_keeps_its_rework_and_shares_the_cap(
     p = run.params_json
     assert p["deliver"] is True and p["max_rework"] == 2
     assert p["max_cost_usd"] == 6.0 and p["budget"]["max_cost_usd"] == 2.0
-    assert p["backlog_hash"] == FactoryHome(tmp_path, "alpha").load_backlog().backlog_hash
+    backlog = FactoryHome(tmp_path, "alpha").load_backlog()
+    assert backlog is not None and p["backlog_hash"] == backlog.backlog_hash
     assert p["intake_item"] == "fake-4711" and p["intake_auto"] == _REQUEST
     (trace,) = _traces(sessions)
     assert trace.payload_json["run_id"] == run_id and trace.actor == "ada"
