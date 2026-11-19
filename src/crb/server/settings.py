@@ -109,7 +109,12 @@ from crb.provision.config import (
     ProvisionConfig,
     parse_host_list,
 )
-from crb.server.schemas import BUDGET_MAX_COST_USD, first_refusal, manufacture_request
+from crb.server.schemas import (
+    BUDGET_MAX_COST_USD,
+    first_refusal,
+    gap_probe_request,
+    manufacture_request,
+)
 
 log = logging.getLogger("crb.server.settings")
 
@@ -719,8 +724,8 @@ class IntakeSettings(BaseModel):
     #: undelivered, worktree discarded) and post the decisions the builder had to guess as
     #: questions. OFF BY DEFAULT: it spends model budget on every approved ticket. Start-up
     #: refuses it without ``gap_probe_rung``, on a builder other than ``claude_code`` (the
-    #: only one that reports its guesses), and with ``require_approval`` off (every probe
-    #: is then spent by nobody's act).
+    #: only one that reports its guesses), with ``require_approval`` off (every probe
+    #: is then spent by nobody's act), and with a rung the run request it meets would refuse.
     gap_probe: bool = False
     #: The most questions one probe posts (1..10, never more than a context set's gap cap).
     gap_probe_max_questions: int = Field(default=5, ge=1, le=10)
@@ -816,6 +821,8 @@ class IntakeSettings(BaseModel):
                     f"gap_probe_rung {rung!r} names builder {builder!r}; only "
                     f"{GAP_PROBE_BUILDER} reports the decisions it guessed"
                 )
+            # a rung set with the switch off is refused as it would be when on
+            self._probe_request_accepts(rung)
         if not self.gap_probe:
             return self
         if not rung:
@@ -826,6 +833,17 @@ class IntakeSettings(BaseModel):
                 "ready ticket with no person's act"
             )
         return self
+
+    def _probe_request_accepts(self, rung: str) -> None:
+        """Build the very request each probe meets before it is queued
+        (``gap_probe_request``; the repository is the one part start-up does not know), so
+        a rung that request refuses is refused here, at start-up, and never fails a poll."""
+        try:
+            gap_probe_request("start-up-check", rung, max_cost_usd=self.gap_probe_max_cost_usd)
+        except ValidationError as exc:
+            raise ValueError(
+                f"gap_probe_rung {rung!r}: a run request refuses it ({first_refusal(exc)})"
+            ) from None
 
     @model_validator(mode="after")
     def _auto_manufacture_is_complete(self) -> IntakeSettings:

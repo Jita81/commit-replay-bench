@@ -1492,7 +1492,7 @@ CRB_INTAKE__REQUIRE_APPROVAL=true             # the default: an operator registe
 CRB_INTAKE__APPROVE_AUTHORS='[]'              # EMPTY by default: nobody skips the Register act
 CRB_INTAKE__RETURN_STATE=""                   # EMPTY by default: a ticket with open questions stays in the column
 CRB_INTAKE__GAP_PROBE=false                   # OFF by default: no trial build before registering (ADR-0059)
-CRB_INTAKE__GAP_PROBE_RUNG=""                 # required when on; a claude_code rung only
+CRB_INTAKE__GAP_PROBE_RUNG=""                 # required when on; a claude_code rung the probe's run request accepts
 CRB_INTAKE__GAP_PROBE_MAX_QUESTIONS=5         # 1..10, at most the gap limit
 CRB_INTAKE__GAP_PROBE_MAX_COST_USD=2.0        # each trial build's spend cap, 0.0001..1e6
 CRB_INTAKE__AUTO_MANUFACTURE=false            # OFF by default: no build without a run started by hand (ADR-0060)
@@ -1630,7 +1630,9 @@ comment, the label becomes `crb:needs-info` and the ticket goes back where a ret
 set. A failed trial build registers nothing (`gap_probe_failed`); edit the ticket to ask for
 another. One trial build runs per ticket content, so this product's own comments, labels and
 moves never start a second. Start-up refuses the probe without a rung, on a builder other than
-`claude_code`, or with `CRB_INTAKE__REQUIRE_APPROVAL=false`. A probe's spend is its run's
+`claude_code`, with `CRB_INTAKE__REQUIRE_APPROVAL=false`, or with a rung the probe's own run
+request would refuse (for example a space, or more than 128 characters in all; checked
+whenever the rung is set, as for the automatic build). A probe's spend is its run's
 served cost (`GET /runs/{id}`); it writes no ledger row, so it never reaches a route. In
 production a worker that refuses unsealed builds (ADR-0023) refuses every probe run, so each
 approved ticket stops `gap_probe_failed`. Start the worker with `CRB_ALLOW_UNSEALED_PROD=1`,
