@@ -66,10 +66,16 @@ config:
   CRB_AZURE_KEY_ENV: "AZURE_OPENAI_API_KEY"
   # Sandbox: docker (fail-closed unless worker.sandbox.mode provides a daemon) | local (dev)
   CRB_SANDBOX__EXECUTOR: "docker"
-  # The default image for repositories that name no sandbox_image of their own: one of the
-  # shipped reference images (deploy/sandbox/README.md) pushed to your registry, pinned by
-  # digest, and pre-pulled into the daemon the worker talks to (the worker never pulls).
+  # The deployment's sandbox image: one of the shipped reference images
+  # (deploy/sandbox/README.md) pushed to your registry, pinned by digest, and pre-pulled into
+  # the daemon the worker talks to (the worker never pulls). It is NOT a silent default
+  # (ADR-0061): a docker run for a repository that names no sandbox_image of its own is
+  # refused (sandbox_image_missing) unless CRB_SANDBOX__ALLOW_DEFAULT_IMAGE is "1" below.
+  # Prefer each repository naming its own sandbox_image (`crb repo add --sandbox-image`).
   CRB_SANDBOX__IMAGE: ""
+  # Opt-in, off by default: "1" lets a repository with no sandbox_image run its tests in
+  # CRB_SANDBOX__IMAGE; every such run records a run.sandbox_default_image event.
+  # CRB_SANDBOX__ALLOW_DEFAULT_IMAGE: "1"
   # ADR-0019 §7: tests run in a throwaway copy of the read-only worktree (a tmpfs capped at
   # WORK_SIZE — it counts against the sandbox's memory). `readonly` keeps the worktree
   # itself read-only: a different posture, qualified separately.
@@ -206,9 +212,22 @@ worker:
   # with config.CRB_ALLOW_UNSEALED_PROD_BY (an active admin's username) and
   # config.CRB_ALLOW_UNSEALED_PROD_REASON (why) — without both, neither the API nor the worker
   # starts (ADR-0023; docs/DEPLOYMENT.md §2.1).
+  # The image is chosen per run from the repository's language (ADR-0061): `images.<lang>`
+  # (python, go, javascript, jvm, rust → CRB_BUILDER__IMAGE_<LANG>) when set, else `image` for
+  # the languages `imageLanguages` lists (a comma list, e.g. "python"). A run whose language
+  # has no image is refused before any model call; `image` alone serves no language. The
+  # egress sidecar runs python3 from config.CRB_BUILDER__PROXY_IMAGE, else from `image`, else
+  # the run's own image; the Go and Node builder images carry no python3, so with no `image`
+  # set config.CRB_BUILDER__PROXY_IMAGE to an image with python3 when serving them.
   builder:
     executor: ""
     image: ""
+    imageLanguages: ""
+    images: {}
+  # The repository languages this worker claims runs for (CRB_WORKER_LANGUAGES, a comma
+  # list; "" = every language). One worker per toolchain = one release (or a second worker
+  # Deployment) per value.
+  languages: ""
   # The worker's own Prometheus exposition (docs/DEPLOYMENT.md §9): the build / grade /
   # cost / delivery / token-mint series are recorded in the worker process, so the api's
   # /metrics never carries them. A headless Service exposes the port to the scraper;

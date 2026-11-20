@@ -60,6 +60,7 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
@@ -1245,7 +1246,14 @@ def test_docker_settings_resolution(h: Harness) -> None:
 
     cfg = h.pyrepo.config
     base = DockerSettings(image="base:1", memory="4g")
-    assert docker_settings_for(cfg, base, {}) is base
+    # ADR-0061: a repository with no sandbox_image is REFUSED, not given the worker's image
+    # (this assertion was ``docker_settings_for(cfg, base, {}) is base`` — the silent default)
+    with pytest.raises(SandboxUnavailable, match="sandbox_image_missing") as refused:
+        docker_settings_for(cfg, base, {})
+    assert cfg.name in str(refused.value)
+    assert "CRB_SANDBOX__ALLOW_DEFAULT_IMAGE=1" in str(refused.value)
+    # ... unless the worker opts in: then its image, with its caps
+    assert docker_settings_for(cfg, base, {}, allow_default_image=True) is base
     over = docker_settings_for(cfg, base, {"image": "other:2"})
     assert over.image == "other:2" and over.memory == "4g"
     repo_cfg = cfg.__class__(
@@ -1257,8 +1265,216 @@ def test_docker_settings_resolution(h: Harness) -> None:
     repo_on_base = docker_settings_for(repo_cfg, base, {})
     assert repo_on_base.image == "repo:3" and repo_on_base.memory == "4g"
     assert docker_settings_for(repo_cfg, base, {"image": "other:2"}).image == "other:2"
-    with pytest.raises(SandboxUnavailable):
+    with pytest.raises(SandboxUnavailable, match="sandbox_image_missing"):
         docker_settings_for(cfg, None, {})
+    # the opt-in cannot conjure an image the worker does not have
+    with pytest.raises(SandboxUnavailable, match="sandbox_image_missing"):
+        docker_settings_for(cfg, None, {}, allow_default_image=True)
+
+
+def test_a_repository_without_a_sandbox_image_is_refused_under_docker(h: Harness) -> None:
+    """ADR-0061: the worker's CRB_SANDBOX__IMAGE is one toolchain, so a docker run for a
+    repository that names no sandbox_image is refused — as the CLI refuses it — and the
+    error names the repository and the opt-in. Nothing is built, no row is written."""
+    from crb.core.execution import DockerSettings
+
+    h.worker.settings = dc_replace(
+        h.settings, executor="docker", docker=DockerSettings(image="base:1")
+    )
+    run = h.enqueue("replay")
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("sandbox unavailable: sandbox_image_missing: "), done.error
+    assert repr(pr.REPO_NAME) in done.error
+    assert "CRB_SANDBOX__ALLOW_DEFAULT_IMAGE=1" in done.error
+    assert FakeBuilder.briefs == [] and list(h.worker.ledger.rows(run_id=run.id)) == []
+    events = h.events(run.id)
+    actions = [e.action for e in events]
+    assert "run.sandbox_default_image" not in actions and "run.executor" not in actions
+    # a configuration refusal with its code — as builder_image_missing is — not a sandbox
+    # outage: no run.error, so crb_sandbox_unavailable_total and its alert are not fed
+    assert "run.error" not in actions
+    refused = [e for e in events if e.action == "run.refused"]
+    assert len(refused) == 1 and refused[0].status == StepStatus.ERROR
+    assert refused[0].error_message == done.error
+    assert refused[0].payload == {
+        "code": "sandbox_image_missing",
+        "repo": pr.REPO_NAME,
+        "language": "python",
+        "setting": "CRB_SANDBOX__ALLOW_DEFAULT_IMAGE",
+    }
+
+
+def test_the_default_image_opt_in_is_recorded_on_the_run(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0061: with CRB_SANDBOX__ALLOW_DEFAULT_IMAGE on, the worker's image serves a
+    repository that names none, and the run says so in ``run.sandbox_default_image`` —
+    never quietly — once its executor is built: a run whose executor fails to start names no
+    image it never ran in. A repository's own image needs no opt-in and records nothing."""
+    from crb.core.execution import DockerSettings
+
+    seen: list[str] = []
+    real_make_executor = worker_mod.make_executor
+    fail = [True]
+
+    def build(kind: str, *, docker: Any = None, **kw: Any) -> Any:
+        # the docker settings resolve as a real run's would; the executor that runs them is
+        # the local one (no daemon here), or a refusal when the daemon "is down"
+        seen.append(docker.image)
+        if fail[0]:
+            raise SandboxUnavailable("docker daemon not reachable")
+        return real_make_executor("local", **kw)
+
+    monkeypatch.setattr(worker_mod, "make_executor", build)
+    h.worker.settings = dc_replace(
+        h.settings,
+        executor="docker",
+        docker=DockerSettings(image="base:1"),
+        sandbox_allow_default_image=True,
+    )
+    down = h.enqueue("replay")
+    assert h.run_one().status == STATUS_FAILED
+    assert seen == ["base:1"]
+    assert not [e for e in h.events(down.id) if e.action == "run.sandbox_default_image"]
+    fail[0] = False
+    run = h.enqueue("replay")
+    h.run_one()
+    assert seen == ["base:1", "base:1"]
+    events = h.events(run.id)
+    used = [e for e in events if e.action == "run.sandbox_default_image"]
+    assert len(used) == 1
+    assert used[0].payload == {
+        "image": "base:1",
+        "language": "python",
+        "setting": "CRB_SANDBOX__ALLOW_DEFAULT_IMAGE",
+    }
+    actions = [e.action for e in events]
+    assert actions.index("run.sandbox_default_image") < actions.index("run.executor")
+    own = h.enqueue("replay", params_json={"image": "crb/py:1"})
+    h.run_one()
+    assert seen == ["base:1", "base:1", "crb/py:1"]
+    assert not [e for e in h.events(own.id) if e.action == "run.sandbox_default_image"]
+
+
+def test_a_sealed_run_whose_language_has_no_builder_image_is_refused_before_anything(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0061: under the docker builder, a run whose repository language no builder image
+    serves is refused at its start — before anything is qualified or any model is called —
+    with one ``run.refused`` naming the language and the variable to set. CRB_BUILDER__IMAGE
+    alone serves no language: it must be listed in CRB_BUILDER__IMAGE_LANGUAGES."""
+    monkeypatch.setenv(f"{CONTAINER_ENV_PREFIX}IMAGE", "crb-builder:go")
+    monkeypatch.delenv(f"{CONTAINER_ENV_PREFIX}IMAGE_LANGUAGES", raising=False)
+    monkeypatch.delenv(f"{CONTAINER_ENV_PREFIX}IMAGE_PYTHON", raising=False)
+    h.worker.settings = dc_replace(h.settings, builder_executor="docker")
+    run = h.enqueue("replay")
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("builder_image_missing: "), done.error
+    assert "'python'" in done.error and "CRB_BUILDER__IMAGE_PYTHON" in done.error
+    events = h.events(run.id)
+    refused = [e for e in events if e.action == "run.refused"]
+    assert len(refused) == 1 and refused[0].status == StepStatus.ERROR
+    assert refused[0].error_message == done.error
+    assert refused[0].payload == {
+        "code": "builder_image_missing",
+        "language": "python",
+        "variable": "CRB_BUILDER__IMAGE_PYTHON",
+    }
+    # refused before the posture was resolved, a task qualified or a builder briefed
+    assert "run.posture" not in [e.action for e in events]
+    assert FakeBuilder.briefs == [] and list(h.worker.ledger.rows(run_id=run.id)) == []
+
+
+def test_a_worker_claims_only_the_languages_it_serves(h: Harness) -> None:
+    """ADR-0061: a worker started for ``go`` leaves the Python repository's run queued for a
+    worker that can build it; one for ``python`` (or for every language) claims it."""
+    run = h.enqueue("probe")
+    h.worker.settings = dc_replace(h.settings, languages=("go",))
+    assert h.worker.run_once() is None
+    assert h.queue.get(run.id).status == STATUS_QUEUED
+    h.worker.settings = dc_replace(h.settings, languages=("go", "python"))
+    claimed = h.worker.run_once()
+    assert claimed is not None and claimed.id == run.id
+
+
+def test_worker_languages_and_the_default_image_opt_in_are_read_at_start(tmp_path: Path) -> None:
+    """``--languages`` wins over CRB_WORKER_LANGUAGES (aliases read canonically); an unknown
+    language or an unreadable switch stops the worker at start-up rather than claim nothing
+    or read a typo as off."""
+    env = {"CRB_HOME": str(tmp_path / "h"), "CRB_ENV": "dev"}
+    parse = worker_main.build_parser().parse_args
+    s = worker_main.settings_from_args(parse(["--once"]), env)
+    assert s.languages == () and s.sandbox_allow_default_image is False
+    s = worker_main.settings_from_args(
+        parse(["--once"]),
+        {**env, "CRB_WORKER_LANGUAGES": "golang, ts", "CRB_SANDBOX__ALLOW_DEFAULT_IMAGE": "1"},
+    )
+    assert s.languages == ("go", "javascript") and s.sandbox_allow_default_image is True
+    s = worker_main.settings_from_args(
+        parse(["--once", "--languages", "py"]), {**env, "CRB_WORKER_LANGUAGES": "go"}
+    )
+    assert s.languages == ("python",)
+    with pytest.raises(ValueError, match="unknown language"):
+        worker_main.settings_from_args(parse(["--once", "--languages", "cobol"]), env)
+    with pytest.raises(ValueError, match="CRB_SANDBOX__ALLOW_DEFAULT_IMAGE"):
+        worker_main.settings_from_args(
+            parse(["--once"]), {**env, "CRB_SANDBOX__ALLOW_DEFAULT_IMAGE": "yess"}
+        )
+    # one reading of the switch: the worker accepts exactly what the API's pydantic bool
+    # accepts, so the two never disagree on whether the opt-in is on
+    from pydantic import TypeAdapter, ValidationError
+
+    api_bool = TypeAdapter(bool)
+    for value in ("t", "y", "On", "TRUE", "0", "f", "n", "off", "no", "maybe", "2"):
+        try:
+            expected: bool | None = api_bool.validate_python(value)
+        except ValidationError:
+            expected = None
+        got: bool | None
+        try:
+            got = worker_main.settings_from_args(
+                parse(["--once"]), {**env, "CRB_SANDBOX__ALLOW_DEFAULT_IMAGE": value}
+            ).sandbox_allow_default_image
+        except ValueError:
+            got = None
+        assert got == expected, value
+
+
+def test_a_worker_configured_to_serve_nothing_says_so_at_start(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ADR-0061: a sealed worker whose builder images serve no language, or whose
+    ``--languages`` names a language with no builder image, logs why at start — it would
+    otherwise claim runs only to refuse them. A served language is silent."""
+    env = {
+        "CRB_HOME": str(tmp_path / "h"),
+        "CRB_ENV": "dev",
+        "CRB_BUILDER__EXECUTOR": "docker",
+        "CRB_BUILDER__USER": "10001:10001",
+    }
+    parse = worker_main.build_parser().parse_args
+    with caplog.at_level(logging.WARNING, logger=worker_main.__name__):
+        worker_main.settings_from_args(
+            parse(["--once", "--languages", "go"]),
+            {**env, "CRB_BUILDER__IMAGE_PYTHON": "crb-builder-python:1"},
+        )
+    text = caplog.text
+    assert "CRB_BUILDER__IMAGE_GO" in text and "CRB_WORKER_LANGUAGES names go" in text
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger=worker_main.__name__):
+        worker_main.settings_from_args(
+            parse(["--once"]), {**env, "CRB_BUILDER__IMAGE": "crb-builder:1"}
+        )
+    assert "no builder image serves any language" in caplog.text
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger=worker_main.__name__):
+        worker_main.settings_from_args(
+            parse(["--once", "--languages", "python"]),
+            {**env, "CRB_BUILDER__IMAGE_PYTHON": "crb-builder-python:1"},
+        )
+    assert "ADR-0061" not in caplog.text and "no builder image serves" not in caplog.text
 
 
 # --- oracle / controls -----------------------------------------------------------------------

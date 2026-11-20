@@ -132,6 +132,8 @@ def sealed_unconfirmed(
     monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
     monkeypatch.setenv("CRB_BUILDER__USER", "10001:10001")
     monkeypatch.setenv("CRB_BUILDER__IMAGE", "crb-builder:test")
+    # ADR-0061: the shared image serves only the languages it names
+    monkeypatch.setenv("CRB_BUILDER__IMAGE_LANGUAGES", "python")
     monkeypatch.setattr(adapter_mod, "SEALABLE_BUILDERS", frozenset({"fake"}))
     real = worker_mod.build_fn_for
 

@@ -131,22 +131,28 @@ nothing is pulled and nothing runs on the host ([OPERATOR.md §7](../../docs/OPE
 
 ## 3. Select an image
 
-Two settings, one rule — **the repository's own image wins; the deployment's is the
-default for a repository that names none** (`crb.server.worker.docker_settings_for`):
+One rule — **the repository's own image (or a run's `image`) is the image; a repository
+that names none is refused** (`sandbox_image_missing`, `crb.server.worker.docker_settings_for`,
+[ADR-0061](../../docs/adr/0061-builder-image-by-language.md)). The deployment's image is used
+for it only when the worker opts in with `CRB_SANDBOX__ALLOW_DEFAULT_IMAGE=1` (off by
+default), and each run that uses it records a `run.sandbox_default_image` event:
 
 | Where | Key | Meaning |
 |---|---|---|
 | per repository | `sandbox_image` on the `RepoConfig` — `crb repo add … --sandbox-image <ref>`, the *Sandbox image* field on the Repos screen, `PUT /repos/{name}` | the image THIS repository's tests run in; choose the reference image of its toolchain, or your extension of it (§4) |
-| per deployment | `CRB_SANDBOX__IMAGE` — `deploy/.env` (compose), `config.CRB_SANDBOX__IMAGE` in Helm values, or the worker flag `crb worker --image` | the default when a repository config has none; **one toolchain only** — a Go repository left on a python default fails its probe (`go: not found` in the tail), never silently passes |
+| per deployment | `CRB_SANDBOX__IMAGE` — `deploy/.env` (compose), `config.CRB_SANDBOX__IMAGE` in Helm values, or the worker flag `crb worker --image` | the image a repository with none runs in, **only under `CRB_SANDBOX__ALLOW_DEFAULT_IMAGE=1`**; **one toolchain only** — which is why it is not a silent default: a Go repository left on a python image fails its probe (`go: not found` in the tail) |
 | per deployment | `CRB_SANDBOX__EXECUTOR` — `docker` (default, fail-closed) or `local` (development) | read by the API (`/settings`, `/health`) **and by the worker** (`crb worker`; also `--executor`). Until 2026-09-21 the worker read only its short form `CRB_EXECUTOR` and a compose / Helm worker ran `local` while `/settings` reported `docker` — fixed with this directory; the short forms still work when the deployment keys are absent |
 | per run | `image` in the run's params (`POST /runs`) | an explicit override for one run (a canary of a re-pinned image) |
 
-Helm values, naming the shipped python image pushed to a private ACR:
+Helm values, naming the shipped python image pushed to a private ACR as the image a
+repository with no `sandbox_image` runs in. Without the opt-in line such a repository is
+refused (`sandbox_image_missing`); with it, each such run records `run.sandbox_default_image`:
 
 ```yaml
 config:
   CRB_SANDBOX__EXECUTOR: docker
   CRB_SANDBOX__IMAGE: <acr>.azurecr.io/crb-sandbox/python@sha256:<digest from §2>
+  CRB_SANDBOX__ALLOW_DEFAULT_IMAGE: "1"   # opt-in, off by default (ADR-0061)
 worker:
   sandbox: { mode: dind }
 ```

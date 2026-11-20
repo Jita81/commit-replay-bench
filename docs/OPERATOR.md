@@ -420,8 +420,10 @@ It is a different posture — the image's ID is part of what a qualification rec
 repository moved onto it is qualified again. The derived-image recipe is the README's and is
 **[hypothesis]** until a repository is measured on one.
 
-**Which image a run uses.** Name the sandbox image in the repository's `sandbox_image` (it wins) or the deployment's
-`CRB_SANDBOX__IMAGE` (the default for repositories that name none); the worker never pulls,
+**Which image a run uses.** Name the sandbox image in the repository's `sandbox_image`. A
+docker run for a repository that names none is refused (`sandbox_image_missing`) unless the
+worker sets `CRB_SANDBOX__ALLOW_DEFAULT_IMAGE=1`, which lets it use `CRB_SANDBOX__IMAGE` and
+records a `run.sandbox_default_image` event on the run (ADR-0061); the worker never pulls,
 so it must be in the daemon's store. A JVM reference image is not shipped — the Maven
 runner cannot resolve plugins offline under docker yet (README §6), so under the compose /
 Helm default (`CRB_SANDBOX__EXECUTOR=docker`) a JVM run fails closed rather than falling

@@ -61,11 +61,27 @@ def deployment_executor(settings: Any, requested: str = "") -> str:
 
 
 def deployment_image(settings: Any, repo: Repo | None) -> str:
-    """The sandbox image a docker run of ``repo`` would use (its own, else the default)."""
+    """The sandbox image a docker run of ``repo`` would use: its own ``sandbox_image``;
+    else the deployment's ``CRB_SANDBOX__IMAGE`` ONLY when
+    ``CRB_SANDBOX__ALLOW_DEFAULT_IMAGE`` is on; else ``""`` — the worker refuses such a run
+    ``sandbox_image_missing`` (ADR-0061), so the API predicts no image for it either."""
     image = ""
     if repo is not None:
         image = str(dict(repo.config_json or {}).get("sandbox_image") or "")
-    return image or str(getattr(settings.sandbox, "image", "") or "")
+    if image:
+        return image
+    if not bool(getattr(settings.sandbox, "allow_default_image", False)):
+        return ""
+    return str(getattr(settings.sandbox, "image", "") or "")
+
+
+#: ADR-0061: the Posture panel's reason when a docker run of the repository would be refused
+#: for want of a sandbox image (``deployment_image`` names none).
+SANDBOX_IMAGE_MISSING_REASON = (
+    "a docker run of this repository is refused (sandbox_image_missing): it names no "
+    "sandbox_image and CRB_SANDBOX__ALLOW_DEFAULT_IMAGE is off — set the repository's "
+    "sandbox_image (ADR-0061)"
+)
 
 
 def deployment_posture_class(settings: Any, repo: Repo | None = None, executor: str = "") -> str:
@@ -110,6 +126,11 @@ def posture_summary(
         "delta": [],
         "stale_reason": "",
     }
+    if executor == "docker" and not image_ref:
+        # ADR-0061: no image would serve a docker run — never a posture of some other image
+        out["posture_id"] = ""
+        out["stale_reason"] = SANDBOX_IMAGE_MISSING_REASON
+        return out
     if not posture_id:
         out["stale_reason"] = (
             f"no task has been qualified under {executor}"
@@ -176,8 +197,14 @@ def refuse_unqualified(
     ``POSTURE_UNQUALIFIED`` on the worker, so it is refused before it is queued."""
     if kind not in GATED_KINDS:
         return
-    posture_id = sq.latest_posture_for(
-        s, repo.name, executor=executor, image_ref=image_ref if executor == "docker" else ""
+    # ADR-0061: a docker run with no image to run in has no posture that would grade it —
+    # never the latest posture of whatever image some other run used (refused below)
+    posture_id = (
+        ""
+        if executor == "docker" and not image_ref
+        else sq.latest_posture_for(
+            s, repo.name, executor=executor, image_ref=image_ref if executor == "docker" else ""
+        )
     )
     records = sq.latest_by_task(s, repo.name, posture_id, task_ids or None) if posture_id else {}
     qualified = sum(1 for q in records.values() if q.is_qualified)
@@ -186,6 +213,20 @@ def refuse_unqualified(
     wanted = task_ids or list(
         s.execute(select(Task.task_id).where(Task.repo == repo.name)).scalars()
     )
+    if executor == "docker" and not image_ref:
+        raise ApiError(
+            409,
+            "posture_unqualified",
+            f"no posture would grade a docker run of {repo.name!r}: "
+            + SANDBOX_IMAGE_MISSING_REASON,
+            detail={
+                "qualified": 0,
+                "unqualified": len(wanted),
+                "posture_id": "",
+                "reasons": {"sandbox_image_missing": len(wanted)},
+                "fix": SANDBOX_IMAGE_MISSING_REASON,
+            },
+        )
     reasons: Counter[str] = Counter(q.code for q in records.values() if q.code)
     unmeasured = len(set(wanted) - set(records))
     if unmeasured:
@@ -209,6 +250,7 @@ def refuse_unqualified(
 __all__ = [
     "GATED_KINDS",
     "QUALIFY_FIX",
+    "SANDBOX_IMAGE_MISSING_REASON",
     "deployment_executor",
     "deployment_image",
     "deployment_posture_class",

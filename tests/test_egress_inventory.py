@@ -129,6 +129,8 @@ NOT_EGRESS: dict[str, str] = {
     "CRB_OIDC__REDIRECT_URL": "the deployment's own callback; the browser returns to it",
     "CRB_GITHUB__WEB_URL": "a link the admin's browser follows to install the app; "
     "the product never calls it",
+    "CRB_SANDBOX__ALLOW_DEFAULT_IMAGE": "an on/off switch (ADR-0061); the image it lets "
+    "serve is CRB_SANDBOX__IMAGE, already in the image-registry flow",
 }
 
 #: The last word of a setting that holds an address or an image reference.

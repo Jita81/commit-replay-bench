@@ -59,7 +59,7 @@ How:          ``claim_next`` flips ``queued → running`` in one locked transact
               the run before they write its event, and nothing takes 7331 or 7332 while it
               holds a ``runs`` row (tests/test_p792_reserved_store.py walks the tree for it).
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
-ADRs:         none
+ADRs:         docs/adr/0061-builder-image-by-language.md
 Works with:   src/crb/store/models.py (the ``Run`` row and its liveness columns),
               src/crb/server/worker.py (the consumer: claim → execute → heartbeat → finish),
               src/crb/store/events.py (``append_event`` for the reclaim / cancel notes),
@@ -95,7 +95,7 @@ from crb.core.grade import MODE_BLIND, MODE_SIGHTED
 from crb.observability.events import StepStatus
 from crb.store.events import append_event
 from crb.store.ledger import AttemptSettled
-from crb.store.models import Run
+from crb.store.models import Repo, Run
 
 STATUS_QUEUED = "queued"
 STATUS_RUNNING = "running"
@@ -338,8 +338,14 @@ class JobQueue:
         *,
         kinds: Sequence[str] | None = None,
         repo: str | None = None,
+        languages: Sequence[str] | None = None,
     ) -> Run | None:
-        """Atomically take the oldest queued run (optionally by kind / repo).
+        """Atomically take the oldest queued run (optionally by kind / repo / language).
+
+        ``languages`` (ADR-0061) keeps the runs whose repository row's ``language`` is one
+        of them — a worker whose builder and sandbox images serve Go claims only Go runs.
+        Empty or ``None`` = every run, as before. A run whose language no worker serves
+        stays queued; it is never claimed by a worker that cannot build it.
 
         A queued run whose cancel was requested is finalised ``cancelled`` here
         (nobody else will) and the next one is tried.
@@ -354,6 +360,9 @@ class JobQueue:
                     q = q.where(Run.kind.in_(list(kinds)))
                 if repo:
                     q = q.where(Run.repo == repo)
+                if languages:
+                    served = select(Repo.name).where(Repo.language.in_(list(languages)))
+                    q = q.where(Run.repo.in_(served))
                 q = q.order_by(Run.created, Run.id).limit(1)
                 if s.get_bind().dialect.name == "postgresql":
                     # SKIP LOCKED: a second worker sees the next queued run, not a wait.

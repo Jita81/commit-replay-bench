@@ -133,6 +133,55 @@ class TestSettings:
             prod(builder={"executor": "docker"})
         assert prod(builder={"executor": "docker", "image": "crb-builder:1"}).posture()["sealed"]
 
+    def test_a_builder_image_that_serves_no_language_is_logged_at_start(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # ADR-0061: the API starts (a refusal would break the start above), but says that
+        # every sealed build would be refused builder_image_missing; a served one is silent
+        with caplog.at_level(logging.WARNING, logger="crb.server.settings"):
+            prod(builder={"executor": "docker", "image": "crb-builder:1"})
+        assert "no builder image serves any language" in caplog.text
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="crb.server.settings"):
+            prod(
+                builder={
+                    "executor": "docker",
+                    "image": "crb-builder:1",
+                    "image_languages": "python",
+                }
+            )
+        assert "builder images (ADR-0061)" not in caplog.text
+
+    def test_the_per_language_builder_images_cover_exactly_the_language_enum(self) -> None:
+        # ADR-0061 guard: a language added to Language without an image_<lang> setting (or
+        # a setting without a Language member) fails here, not as a silent unserved run
+        from crb.core.spec import Language
+        from crb.server.settings import BuilderSettings
+
+        enum_langs = {lang.value for lang in Language}
+        fields = {
+            name.removeprefix("image_")
+            for name in BuilderSettings.model_fields
+            if name.startswith("image_") and name != "image_languages"
+        }
+        assert fields == enum_langs
+        # the env the routing rule reads names every language, and only those
+        env = BuilderSettings()._image_env()
+        per_language = {
+            key.removeprefix("CRB_BUILDER__IMAGE_").lower()
+            for key in env
+            if key.startswith("CRB_BUILDER__IMAGE_") and key != "CRB_BUILDER__IMAGE_LANGUAGES"
+        }
+        assert per_language == enum_langs
+        # and each per-language image alone satisfies the explicit-docker start-up check
+        # and serves its language (and only it)
+        for lang in sorted(enum_langs):
+            b = BuilderSettings(executor="docker", **{f"image_{lang}": f"crb-builder-{lang}:1"})
+            assert b.images() == {lang: f"crb-builder-{lang}:1"}
+        # every language is accepted in CRB_BUILDER__IMAGE_LANGUAGES
+        listed = BuilderSettings(image="crb-builder:1", image_languages=",".join(enum_langs))
+        assert set(listed.images()) == enum_langs
+
     def test_the_override_admits_it_is_shown_and_is_logged(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:

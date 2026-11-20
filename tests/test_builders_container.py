@@ -86,16 +86,22 @@ from crb.builders.base import (
 )
 from crb.builders.claude_code import StreamStats
 from crb.builders.container import (
+    REFUSAL_BUILDER_IMAGE_MISSING,
     WORKDIR,
     BuilderContainerSettings,
+    BuilderImageMissing,
     ContainerSession,
     SealedCheckout,
     UnconfirmedKill,
+    builder_image_for,
+    builder_image_warnings,
+    builder_images,
     builder_run_args,
     client_env,
     container_env,
     is_secret_env_name,
     probe_builder_container,
+    unserved_languages,
 )
 from crb.core.execution import LocalExecutor, SandboxUnavailable
 from crb.core.ledger import JsonlLedger, verify_chain
@@ -1529,6 +1535,199 @@ def test_container_settings_from_env_is_the_worker_hook(monkeypatch: pytest.Monk
     monkeypatch.setenv("CRB_BUILDER__USER", NON_ROOT)
     s = adapter.container_settings_from_env()
     assert s is not None and s.image == "crb-builder:local"
+
+
+#: ADR-0061's resolution table: (environment, language) → (image, variable) or refused.
+_PY, _GO, _SHARED = "crb-builder:py", "crb-builder:go", "crb-builder:shared"
+_IMAGE_TABLE: list[tuple[dict[str, str], str, tuple[str, str] | None]] = [
+    # a per-language image serves its language
+    ({"CRB_BUILDER__IMAGE_GO": _GO}, "go", (_GO, "CRB_BUILDER__IMAGE_GO")),
+    # ... and wins over the shared image even when the shared one lists the language
+    (
+        {
+            "CRB_BUILDER__IMAGE_GO": _GO,
+            "CRB_BUILDER__IMAGE": _SHARED,
+            "CRB_BUILDER__IMAGE_LANGUAGES": "go",
+        },
+        "go",
+        (_GO, "CRB_BUILDER__IMAGE_GO"),
+    ),
+    # the shared image serves only what IMAGE_LANGUAGES lists (aliases read canonically)
+    (
+        {"CRB_BUILDER__IMAGE": _SHARED, "CRB_BUILDER__IMAGE_LANGUAGES": "py, js"},
+        "python",
+        (_SHARED, "CRB_BUILDER__IMAGE"),
+    ),
+    (
+        {"CRB_BUILDER__IMAGE": _SHARED, "CRB_BUILDER__IMAGE_LANGUAGES": "py, js"},
+        "typescript",
+        (_SHARED, "CRB_BUILDER__IMAGE"),
+    ),
+    ({"CRB_BUILDER__IMAGE": _SHARED, "CRB_BUILDER__IMAGE_LANGUAGES": "python"}, "go", None),
+    # the old single image alone serves NO language: no silent default
+    ({"CRB_BUILDER__IMAGE": _SHARED}, "python", None),
+    # another language's own image never serves this one
+    ({"CRB_BUILDER__IMAGE_PYTHON": _PY}, "go", None),
+    # listed but no shared image to serve it
+    ({"CRB_BUILDER__IMAGE_LANGUAGES": "go"}, "go", None),
+    ({}, "rust", None),
+]
+
+
+@pytest.mark.parametrize(("env", "language", "expected"), _IMAGE_TABLE)
+def test_the_builder_image_is_resolved_from_the_language(
+    env: dict[str, str], language: str, expected: tuple[str, str] | None
+) -> None:
+    """ADR-0061: CRB_BUILDER__IMAGE_<LANG>, else CRB_BUILDER__IMAGE for the languages
+    CRB_BUILDER__IMAGE_LANGUAGES lists, else refused — there is no third rule."""
+    if expected is not None:
+        assert builder_image_for(language, env) == expected
+        return
+    with pytest.raises(BuilderImageMissing) as refused:
+        builder_image_for(language, env)
+    assert refused.value.code == REFUSAL_BUILDER_IMAGE_MISSING
+    assert isinstance(refused.value, SandboxUnavailable)  # fails closed like every sandbox gap
+
+
+def test_the_refusal_names_the_language_and_the_variable_to_set() -> None:
+    with pytest.raises(BuilderImageMissing) as refused:
+        builder_image_for("golang", {"CRB_BUILDER__IMAGE": _SHARED})
+    e = refused.value
+    assert (e.language, e.variable) == ("go", "CRB_BUILDER__IMAGE_GO")
+    msg = str(e)
+    assert msg.startswith("builder_image_missing: no builder image serves language 'go'")
+    assert "set CRB_BUILDER__IMAGE_GO" in msg and "CRB_BUILDER__IMAGE_LANGUAGES" in msg
+    # the operator who set only the old single image is told why it did not count
+    assert "CRB_BUILDER__IMAGE is set but CRB_BUILDER__IMAGE_LANGUAGES does not list it" in msg
+    assert msg.endswith("nothing was built")
+    with pytest.raises(SandboxUnavailable, match="IMAGE_LANGUAGES: unknown language 'cobol'"):
+        builder_image_for("python", {"CRB_BUILDER__IMAGE_LANGUAGES": "python, cobol"})
+
+
+def test_from_env_resolves_the_image_per_run_language() -> None:
+    """The worker's hook takes the run's language; without one (the reaper, the doctor) it
+    reads the posture's image, and never builds a run with it."""
+    env = {
+        "CRB_BUILDER__EXECUTOR": "docker",
+        "CRB_BUILDER__USER": NON_ROOT,
+        "CRB_BUILDER__IMAGE_GO": _GO,
+        "CRB_BUILDER__IMAGE": _SHARED,
+        "CRB_BUILDER__IMAGE_LANGUAGES": "python",
+        "CRB_BUILDER__PROXY_IMAGE": "python:3.12-slim",
+    }
+    go = BuilderContainerSettings.from_env(env, language="go")
+    py = BuilderContainerSettings.from_env(env, language="python")
+    assert go is not None and go.image == _GO and go.proxy_image == "python:3.12-slim"
+    assert py is not None and py.image == _SHARED
+    with pytest.raises(BuilderImageMissing, match="CRB_BUILDER__IMAGE_JAVASCRIPT"):
+        BuilderContainerSettings.from_env(env, language="javascript")
+    posture = BuilderContainerSettings.from_env(env)
+    assert posture is not None and posture.image == _SHARED
+    only_go = {k: v for k, v in env.items() if k != "CRB_BUILDER__IMAGE"}
+    posture = BuilderContainerSettings.from_env(only_go)
+    assert posture is not None and posture.image == _GO
+    assert builder_images(env) == {"python": _SHARED, "go": _GO}
+    # host posture: no image is needed and nothing is refused
+    assert BuilderContainerSettings.from_env({}, language="rust") is None
+
+
+def test_a_configuration_that_serves_no_language_is_named() -> None:
+    """ADR-0061: images that resolve for no language, or a language list with no shared
+    image behind it, are said (the API and worker log it at start; the probe is degraded).
+    A served configuration — including the shared image as proxy beside per-language
+    images, with no list — says nothing."""
+    assert builder_image_warnings({"CRB_BUILDER__IMAGE_PYTHON": _PY}) == []
+    assert (
+        builder_image_warnings(
+            {"CRB_BUILDER__IMAGE": _SHARED, "CRB_BUILDER__IMAGE_LANGUAGES": "python"}
+        )
+        == []
+    )
+    assert (
+        builder_image_warnings({"CRB_BUILDER__IMAGE": _SHARED, "CRB_BUILDER__IMAGE_GO": _GO}) == []
+    )
+    (only_shared,) = builder_image_warnings({"CRB_BUILDER__IMAGE": _SHARED})
+    assert only_shared.startswith("no builder image serves any language")
+    assert "IMAGE_LANGUAGES lists no language" in only_shared
+    (nothing,) = builder_image_warnings({})
+    assert "no image is set" in nothing
+    listed = builder_image_warnings(
+        {"CRB_BUILDER__IMAGE_LANGUAGES": "python, go", "CRB_BUILDER__IMAGE_GO": _GO}
+    )
+    assert listed == [
+        "CRB_BUILDER__IMAGE_LANGUAGES lists python but CRB_BUILDER__IMAGE is empty: those "
+        "runs are refused builder_image_missing"
+    ]
+    (bad,) = builder_image_warnings({"CRB_BUILDER__IMAGE_LANGUAGES": "cobol"})
+    assert "unknown language 'cobol'" in bad
+
+
+def test_a_worker_language_no_image_serves_is_named() -> None:
+    env = {"CRB_BUILDER__IMAGE_PYTHON": _PY, "CRB_BUILDER__IMAGE": _SHARED}
+    assert unserved_languages(("python", "go", "rust"), env) == ["go", "rust"]
+    assert unserved_languages((), env) == []
+
+
+def test_the_proxy_defaults_to_the_default_image_never_a_per_language_one() -> None:
+    """The Go and Node builder images carry no python3: a Go run beside a Python default
+    image takes its egress sidecar from CRB_BUILDER__IMAGE, not from its own image. Only
+    with no default image does the run's own image (or PROXY_IMAGE) serve."""
+    env = {
+        "CRB_BUILDER__EXECUTOR": "docker",
+        "CRB_BUILDER__USER": NON_ROOT,
+        "CRB_BUILDER__IMAGE": _SHARED,
+        "CRB_BUILDER__IMAGE_LANGUAGES": "python",
+        "CRB_BUILDER__IMAGE_GO": _GO,
+    }
+    go = BuilderContainerSettings.from_env(env, language="go")
+    assert go is not None and go.image == _GO and go.proxy_image == _SHARED
+    no_default = {k: v for k, v in env.items() if k not in ("CRB_BUILDER__IMAGE",)}
+    no_default.pop("CRB_BUILDER__IMAGE_LANGUAGES")
+    go = BuilderContainerSettings.from_env(no_default, language="go")
+    assert go is not None and go.proxy_image == _GO
+    go = BuilderContainerSettings.from_env(
+        {**env, "CRB_BUILDER__PROXY_IMAGE": "python:3.12-slim"}, language="go"
+    )
+    assert go is not None and go.proxy_image == "python:3.12-slim"
+
+
+def test_the_probe_checks_each_languages_proxy_and_is_degraded_when_nothing_is_served(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from crb.builders import container as container_mod
+
+    required: list[str] = []
+
+    class FakeDocker:
+        def __init__(self, *_a: Any, **_kw: Any) -> None:
+            pass
+
+        def require_image(self, image: str) -> None:
+            required.append(image)
+
+    monkeypatch.setattr(container_mod, "DockerExecutor", FakeDocker)
+    for name in list(os.environ):
+        if name.startswith("CRB_BUILDER__"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
+    monkeypatch.setenv("CRB_BUILDER__USER", NON_ROOT)
+    monkeypatch.setenv("CRB_BUILDER__IMAGE_GO", _GO)
+    monkeypatch.setenv("CRB_BUILDER__PROXY_IMAGE", "")
+    # only a Go image: the Go run's proxy would be the Go image itself, and is checked
+    status, detail = probe_builder_container()
+    assert status == "up", detail
+    assert required.count(_GO) >= 1 and f"proxy {_GO}" in detail
+    # a shared default image becomes every run's proxy; it is checked too
+    required.clear()
+    monkeypatch.setenv("CRB_BUILDER__IMAGE", _SHARED)
+    status, detail = probe_builder_container()
+    assert status == "up", detail
+    assert _SHARED in required and _GO in required
+    # an image that serves no language: present, but every run is refused — degraded
+    monkeypatch.delenv("CRB_BUILDER__IMAGE_GO")
+    status, detail = probe_builder_container()
+    assert status == "degraded", detail
+    assert "no builder image serves any language" in detail
 
 
 # ---------------------------------------------------------------------------

@@ -2594,6 +2594,8 @@ def _w_rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Backend | Non
     )
     monkeypatch.setattr(w, "_executor", lambda ctx: _WExec(state, cancel=lambda: w._cancelled(ctx)))
     monkeypatch.setenv("CRB_BUILDER__IMAGE", "crb-builder:test")
+    # ADR-0061: the image serves the rig repository's language, never every language
+    monkeypatch.setenv("CRB_BUILDER__IMAGE_LANGUAGES", "python")
     # the container's user named, never the host's uid (a root CI container refuses it)
     monkeypatch.setenv("CRB_BUILDER__USER", "1000:1000")
     monkeypatch.delenv("CRB_BUILDER__EXECUTOR", raising=False)
@@ -3201,6 +3203,8 @@ def _f_rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Backend | Non
         w, "_executor", lambda ctx: _WExec({"exec": ""}, cancel=lambda: w._cancelled(ctx))
     )
     monkeypatch.setenv("CRB_BUILDER__IMAGE", "crb-builder:test")
+    # ADR-0061: the image serves the rig repository's language, never every language
+    monkeypatch.setenv("CRB_BUILDER__IMAGE_LANGUAGES", "python")
     # the container's user named, never the host's uid (a root CI container refuses it)
     monkeypatch.setenv("CRB_BUILDER__USER", "1000:1000")
     monkeypatch.delenv("CRB_BUILDER__EXECUTOR", raising=False)

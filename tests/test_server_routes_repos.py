@@ -1025,3 +1025,59 @@ def test_posture_view_counts_and_explains_refusals(env: Env) -> None:
     assert env.get("/repos/nope/posture").status_code == 404
     login(env.client, "viewer")
     assert env.get(f"/repos/{ALPHA}/posture").status_code == 200  # a viewer reads it
+
+
+def test_the_posture_preview_names_the_refusal_of_a_repository_with_no_sandbox_image(
+    tmp_path: Path,
+) -> None:
+    """ADR-0061: a docker run of a repository that names no sandbox_image is refused by the
+    worker (``sandbox_image_missing``) unless CRB_SANDBOX__ALLOW_DEFAULT_IMAGE is on, so the
+    preview names no image and no posture — never the posture of the deployment's default
+    image — and says what to set. With the opt-in on it reads the default image's posture."""
+    from crb.core.qualify import STATE_QUALIFIED, Qualification
+    from crb.server.posture_view import SANDBOX_IMAGE_MISSING_REASON
+    from crb.store import qualifications as sq
+    from fixtures.server_seed import task_id
+
+    pid = "pst_" + "8" * 24
+
+    def qualify_on_default(env: Env) -> None:
+        q = Qualification(
+            qualification_id="",
+            repo=ALPHA,
+            task_id=task_id(1),
+            posture_id=pid,
+            posture={"executor": "docker", "image_ref": "base:1", "posture_id": pid},
+            state=STATE_QUALIFIED,
+        )
+        with env.factory() as s:
+            sq.append(s, q)
+
+    sandbox = {"executor": "docker", "image": "base:1"}
+    with make_env(tmp_path / "off", sandbox=sandbox) as env:
+        qualify_on_default(env)
+        got = env.get(f"/repos/{ALPHA}/posture").json()
+        assert got["executor"] == "docker" and got["image_ref"] == ""
+        assert got["posture_id"] == "" and got["qualified"] == 0
+        assert got["stale_reason"] == SANDBOX_IMAGE_MISSING_REASON
+        assert "sandbox_image_missing" in got["stale_reason"]
+        # the run gate (qualify_first off) refuses with the same reason, not with the
+        # default image's qualified posture
+        from crb.server.deps import ApiError
+        from crb.server.posture_view import deployment_image, refuse_unqualified
+        from crb.store.models import Repo
+
+        with env.factory() as s:
+            repo = s.get(Repo, ALPHA)
+            assert repo is not None
+            assert deployment_image(env.settings, repo) == ""
+            with pytest.raises(ApiError) as refused:
+                refuse_unqualified(
+                    s, repo, kind="replay", task_ids=[], executor="docker", image_ref=""
+                )
+        assert refused.value.status_code == 409
+        assert "sandbox_image_missing" in refused.value.detail["reasons"]
+    with make_env(tmp_path / "on", sandbox={**sandbox, "allow_default_image": True}) as env:
+        got = env.get(f"/repos/{ALPHA}/posture").json()
+        assert got["image_ref"] == "base:1"
+        assert "sandbox_image_missing" not in got["stale_reason"]
