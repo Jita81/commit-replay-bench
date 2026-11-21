@@ -40,14 +40,17 @@ x-crb-common: &crb-common
     # worker (which runs the builds): one value, or /health could say "sealed" while builds ran
     # on the host (ADR-0023). Empty = the env's default: docker in prod — the sealed container
     # (ADR-0012), an exported checkout that cannot contain the gold commit and one
-    # allowlisting egress sidecar; without CRB_BUILDER__IMAGE a build fails CLOSED
-    # (`sandbox unavailable`), never on the host. An explicit `docker` needs the image (the api
-    # refuses to start without it). `host` in prod is refused unless
+    # allowlisting egress sidecar. The image is chosen per run from the repository's language
+    # (ADR-0061): CRB_BUILDER__IMAGE_<LANG>, else CRB_BUILDER__IMAGE for the languages
+    # CRB_BUILDER__IMAGE_LANGUAGES lists; a run whose language has none is refused before any
+    # model call, never built on the host. An explicit `docker` needs at least one image (the
+    # api refuses to start without it). `host` in prod is refused unless
     # CRB_ALLOW_UNSEALED_PROD=1 is set with CRB_ALLOW_UNSEALED_PROD_BY (an active admin's
     # username) and CRB_ALLOW_UNSEALED_PROD_REASON (why) — without both, neither the api nor
     # the worker starts (deploy/.env.example; docs/DEPLOYMENT.md §2.1).
     CRB_BUILDER__EXECUTOR: ${CRB_BUILDER__EXECUTOR:-}
     CRB_BUILDER__IMAGE: ${CRB_BUILDER__IMAGE:-}
+    CRB_BUILDER__IMAGE_LANGUAGES: ${CRB_BUILDER__IMAGE_LANGUAGES:-}
   user: "10001:10001"
   read_only: true
   tmpfs:
@@ -167,7 +170,12 @@ services:
       # recorded (OPERATOR.md §7).
       # `local` runs untrusted repository tests inside THIS container — development only.
       CRB_SANDBOX__EXECUTOR: ${CRB_SANDBOX__EXECUTOR:-docker}
+      # A repository that names no sandbox_image is refused unless this opt-in lets it use
+      # CRB_SANDBOX__IMAGE (ADR-0061; recorded on the run when used).
       CRB_SANDBOX__IMAGE: ${CRB_SANDBOX__IMAGE:-}
+      CRB_SANDBOX__ALLOW_DEFAULT_IMAGE: ${CRB_SANDBOX__ALLOW_DEFAULT_IMAGE:-0}
+      # The repository languages this worker claims (empty = all; one worker per toolchain).
+      CRB_WORKER_LANGUAGES: ${CRB_WORKER_LANGUAGES:-}
       # ADR-0019 §7: tests run in a throwaway copy of the read-only worktree (`readonly`: the
       # worktree itself, a different posture).
       CRB_SANDBOX__TREE: ${CRB_SANDBOX__TREE:-copy}

@@ -512,7 +512,11 @@ def _counts(session: Session, run: Run) -> RunCounts:
 def _queue_position(session: Session, run: Run) -> tuple[int | None, list[str]]:
     """J-TEL-3: the run's 1-based place in the FIFO queue and the kinds ahead of it —
     the claim order is ``(created, id)`` (``JobQueue.claim_next``), so this is the order a
-    worker will take them in. ``(None, [])`` unless the run is queued."""
+    worker will take them in. ``(None, [])`` unless the run is queued.
+
+    The position is GLOBAL across languages (ADR-0061): under language affinity
+    (``CRB_WORKER_LANGUAGES``) a run waits only behind runs a worker serving its language
+    would claim, so this is an upper bound on its place, not its exact one."""
     if run.status != STATUS_QUEUED:
         return None, []
     ahead = session.execute(

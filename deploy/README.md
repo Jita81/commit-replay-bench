@@ -164,12 +164,19 @@ Sandbox images: [`deploy/sandbox/`](sandbox/README.md) ships the reference set �
 digest-pinned, uid 65534, read-only-root compatible and proven from inside by CI on every
 pull request. Build them from the repository root
 (`docker build -f deploy/sandbox/Dockerfile.python -t crb-sandbox-python:local deploy/sandbox`,
-likewise `node` and `go`), name the deployment default in `CRB_SANDBOX__IMAGE` and a
-repository's own in its `sandbox_image` (the repository's wins), and extend one when a
+likewise `node` and `go`), name each repository's in its `sandbox_image`, and extend one when a
 repository's tests need more than the toolchain (its dependencies, `ruff` for belt 5 —
 README §4). They must be present in the host daemon's image store: `docker pull` /
 `docker load` them on the host; the worker never pulls from a registry (`docker run
 --pull=never` — an absent image stops the run as `sandbox unavailable`).
+
+A docker run whose repository names no `sandbox_image` (and whose request passes no `image`)
+is refused as `sandbox unavailable: sandbox_image_missing: …`: `CRB_SANDBOX__IMAGE` is one
+language's toolchain, so it is never used silently for another
+([ADR-0061](../docs/adr/0061-builder-image-by-language.md)). A single-language deployment that
+wants it as the default sets `CRB_SANDBOX__ALLOW_DEFAULT_IMAGE=1` (off by default); every run
+that then uses it records a `run.sandbox_default_image` event naming the image and the
+language, and `/settings` shows the switch under `sandbox`.
 
 ## 4. Backup and restore
 
@@ -326,7 +333,8 @@ group and no `deps_groups`) is handed `python -m pytest …` with nothing but th
 provide it.
 
 The Go and Node variants carry no `python3`, and the egress sidecar runs `python3` from
-`CRB_BUILDER__PROXY_IMAGE`, which defaults to the builder image. A Go or Node worker with an
+`CRB_BUILDER__PROXY_IMAGE`, which defaults to `CRB_BUILDER__IMAGE` and, when that is empty,
+to the run's own builder image. A Go or Node worker with no `CRB_BUILDER__IMAGE` and an
 egress allowlist (`CRB_BUILDER__ALLOW_HOSTS`) must therefore set
 `CRB_BUILDER__PROXY_IMAGE=crb-builder:local` (or another image with `python3`), or the
 sidecar does not start and the run stops `sandbox unavailable`.
@@ -347,16 +355,31 @@ smoke-tested there).
 
 ```
 CRB_BUILDER__EXECUTOR=docker
-CRB_BUILDER__IMAGE=crb-builder-python:local       # required; the variant of the worker's language
-CRB_BUILDER__PROXY_IMAGE=                          # sidecar image; default = IMAGE (needs python3 only)
+CRB_BUILDER__IMAGE_PYTHON=crb-builder-python:local # one variable per language served:
+CRB_BUILDER__IMAGE_GO=crb-builder-go:local         #   _PYTHON _GO _JAVASCRIPT _JVM _RUST
+CRB_BUILDER__IMAGE=                                # optional shared image ...
+CRB_BUILDER__IMAGE_LANGUAGES=                      # ... for the languages listed here (e.g. python)
+CRB_BUILDER__PROXY_IMAGE=crb-builder:local         # sidecar image; default = CRB_BUILDER__IMAGE, else the run's image (needs python3)
 CRB_BUILDER__ALLOW_HOSTS=api.anthropic.com         # host[:port], comma-separated; port defaults to 443
 CRB_BUILDER__EGRESS_NETWORK=bridge                 # the docker network the SIDECAR reaches the endpoint from
 CRB_BUILDER__MEMORY=4g  CRB_BUILDER__CPUS=2  CRB_BUILDER__PIDS_LIMIT=1024  CRB_BUILDER__TMP_SIZE=1g
 CRB_BUILDER__USER=                                 # uid:gid; default = the worker's own; root refused
 ```
 
-One image per worker: a worker serves one language, so a deployment that replays Python
-and Go repositories runs a worker per language, each with its own `CRB_BUILDER__IMAGE`.
+The builder image is chosen per run, from the language of the run's repository
+([ADR-0061](../docs/adr/0061-builder-image-by-language.md)): `CRB_BUILDER__IMAGE_<LANG>` when
+it is set, else `CRB_BUILDER__IMAGE` when `CRB_BUILDER__IMAGE_LANGUAGES` lists the language.
+There is no fallback. A run whose language has no image is refused before anything is built or
+any model is called (`run.refused`, code `builder_image_missing`), and the refusal names the
+language and the variable to set. A deployment that used `CRB_BUILDER__IMAGE` alone must now
+also set `CRB_BUILDER__IMAGE_LANGUAGES` (for example `python`), or set
+`CRB_BUILDER__IMAGE_PYTHON` instead. One worker can therefore serve several languages. To
+split them across workers, give each worker `CRB_WORKER_LANGUAGES` (or `crb worker
+--languages python`): it claims only the runs whose repository has one of those languages
+(empty = every language; a run whose repository is not registered is claimed only by a worker
+that serves every language). The Go and Node variants carry no `python3`, so a deployment that
+serves them sets `CRB_BUILDER__PROXY_IMAGE` (§9.1).
+
 Before any model call the adapter starts the handed test command's tool in that image —
 with the session's dependency mounts and environment, no network, under a short wall clock —
 and refuses the attempt with `runner tool missing: <tool>` (an instrument row, nothing
@@ -421,7 +444,8 @@ the sealed checkout are gone.
 | Symptom | Cause / fix |
 |---|---|
 | run stops with `sandbox unavailable: docker image 'crb-builder:local' is not present` | Build or `docker load` the image on the worker's daemon (§9.1). |
-| every attempt is refused with `runner tool missing: pytest — … does not start in the builder's own environment (docker)` | `CRB_BUILDER__IMAGE` lacks the test tool: build the variant of the worker's language (§9.1) and point the worker at it. |
+| run refused with `builder_image_missing: no builder image serves language 'go' — set CRB_BUILDER__IMAGE_GO …` | Build the Go variant (§9.1) and set `CRB_BUILDER__IMAGE_GO`, or list `go` in `CRB_BUILDER__IMAGE_LANGUAGES` if `CRB_BUILDER__IMAGE` already is a Go builder (§9.2). |
+| every attempt is refused with `runner tool missing: pytest — … does not start in the builder's own environment (docker)` | The image named for the run's language lacks the test tool: build the variant of that language (§9.1) and set its `CRB_BUILDER__IMAGE_<LANG>`. |
 | `sandbox unavailable: egress proxy unhealthy (no READY line)` | `PROXY_IMAGE` has no `python3`, or the sidecar cannot bind 3128 as the configured uid. `docker logs` of a `crb-proxy-*` container from a `retain` run shows why. |
 | the builder reports `model_error: … 403` / cannot reach the endpoint | The endpoint's host is not on `CRB_BUILDER__ALLOW_HOSTS` (the sidecar's log line says `deny host:port`), or the sidecar's `EGRESS_NETWORK` has no route to it (§6 host firewall). |
 | `refusing to run the builder container as root` | The worker runs as uid 0; set `CRB_BUILDER__USER` to a non-root `uid:gid` that can write `$CRB_HOME`. |

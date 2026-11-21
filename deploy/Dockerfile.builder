@@ -18,9 +18,12 @@
 #     docker build -f deploy/Dockerfile.builder -t crb-builder-node:local \
 #         --build-arg BASE_IMAGE=<your node sandbox image> .
 #
-# then point the worker at it:  CRB_BUILDER__EXECUTOR=docker  CRB_BUILDER__IMAGE=crb-builder-python:local
+# then name each variant for its language (ADR-0061):  CRB_BUILDER__EXECUTOR=docker
+#     CRB_BUILDER__IMAGE_PYTHON=crb-builder-python:local  CRB_BUILDER__IMAGE_GO=crb-builder-go:local
+# (or CRB_BUILDER__IMAGE plus CRB_BUILDER__IMAGE_LANGUAGES=python). A run whose repository
+# language has no image is refused before any model call, never built in another's image.
 #
-# One image per worker: a worker serves one language. Before any model call the adapter
+# One image per language. Before any model call the adapter
 # starts the handed test command's tool in this image (`python -m pytest --version`,
 # `go version`, `node --version`) and refuses the attempt (`runner tool missing: <tool>`, an
 # instrument row, nothing spent) when it does not start. The default BASE_IMAGE (python slim,
@@ -51,7 +54,8 @@
 # The sidecar runs `python3 /opt/crb/egress_proxy.py --allow api.anthropic.com` from
 # CRB_BUILDER__PROXY_IMAGE (default: this image — it only needs python3), the script
 # bind-mounted read-only from the worker's own copy so the policy code is always the
-# worker's version.
+# worker's version. The Go and Node variants carry no python3: a deployment that serves them
+# sets CRB_BUILDER__PROXY_IMAGE to an image that has it (crb-builder:local does).
 #
 # Security posture (docs/SECURITY.md §3.2):
 #   * The CLI is the npm package's NATIVE binary (a single executable linked against glibc

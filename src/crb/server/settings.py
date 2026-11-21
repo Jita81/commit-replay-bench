@@ -55,7 +55,8 @@ How:          ``pydantic-settings`` with ``CRB_`` prefix and ``__`` nesting; CSV
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
               docs/adr/0023-production-refuses-the-unsealed-posture.md,
-              docs/adr/0027-dev-autologin-on-loopback.md
+              docs/adr/0027-dev-autologin-on-loopback.md,
+              docs/adr/0061-builder-image-by-language.md
 Works with:   src/crb/server/worker_main.py (the worker applies ``unsealed_prod_refusal`` to
               its own reading of the same environment), src/crb/server/app.py (reads
               ``resolved_database_url``, cookie security, CORS; src/crb/server/auth.py reads
@@ -100,6 +101,8 @@ from pydantic import (
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from crb.builders.budget import parse_rung
+from crb.builders.container import builder_image_warnings, builder_images, image_languages
+from crb.core.execution import SandboxUnavailable
 from crb.core.stated import MAX_GAPS
 from crb.intake.gap_probe import GAP_PROBE_BUILDER
 from crb.provision.config import (
@@ -455,6 +458,9 @@ class SandboxSettings(BaseModel):
     tree: Literal["copy", "readonly"] = "copy"
     #: The size cap of the throwaway copy (a tmpfs, so it counts against the container's memory).
     work_size: str = "1g"
+    #: ADR-0061: off (the default), a docker run for a repository that names no
+    #: ``sandbox_image`` is refused; on, ``image`` serves it and the run records that it did.
+    allow_default_image: bool = False
 
 
 class ProvisionSettings(BaseModel):
@@ -591,7 +597,15 @@ class BuilderSettings(BaseModel):
     """
 
     executor: BuilderExecutor | None = None
+    #: ADR-0061: the image for the languages ``image_languages`` lists (a comma list); a
+    #: language it does not list is served only by its own ``image_<lang>``, else refused.
     image: str = ""
+    image_languages: str = ""
+    image_python: str = ""
+    image_go: str = ""
+    image_javascript: str = ""
+    image_jvm: str = ""
+    image_rust: str = ""
     proxy_image: str = ""
     #: Comma-separated or a JSON list in the environment (``NoDecode`` hands us the raw string).
     allow_hosts: Annotated[list[str], NoDecode] = Field(
@@ -629,10 +643,44 @@ class BuilderSettings(BaseModel):
             return [p.strip() for p in raw.split(",") if p.strip()]
         return v
 
+    def _image_env(self) -> dict[str, str]:
+        env = {
+            "CRB_BUILDER__IMAGE": self.image,
+            "CRB_BUILDER__IMAGE_LANGUAGES": self.image_languages,
+        }
+        for lang in ("python", "go", "javascript", "jvm", "rust"):
+            env[f"CRB_BUILDER__IMAGE_{lang.upper()}"] = str(getattr(self, f"image_{lang}"))
+        return env
+
+    def images(self) -> dict[str, str]:
+        """``{language: image}`` for every language a builder image serves — the rule the
+        worker applies per run (:func:`crb.builders.container.builder_image_for`)."""
+        return builder_images(self._image_env())
+
+    def image_warnings(self) -> list[str]:
+        """ADR-0061: what :func:`crb.builders.container.builder_image_warnings` says about
+        these images — a configuration under which sealed builds are refused although it
+        names an image. Logged at start-up when the builder runs in docker."""
+        return builder_image_warnings(self._image_env())
+
     @model_validator(mode="after")
     def _docker_needs_image(self) -> BuilderSettings:
-        if self.executor == "docker" and not self.image.strip():
-            raise ValueError("CRB_BUILDER__IMAGE is required when CRB_BUILDER__EXECUTOR=docker")
+        try:
+            image_languages(self._image_env())
+        except SandboxUnavailable as exc:
+            raise ValueError(str(exc)) from exc
+        per_language = (
+            self.image_python,
+            self.image_go,
+            self.image_javascript,
+            self.image_jvm,
+            self.image_rust,
+        )
+        if self.executor == "docker" and not any(i.strip() for i in (self.image, *per_language)):
+            raise ValueError(
+                "CRB_BUILDER__IMAGE or a CRB_BUILDER__IMAGE_<LANG> is required when "
+                "CRB_BUILDER__EXECUTOR=docker"
+            )
         return self
 
     def redacted(self) -> dict[str, Any]:
@@ -641,6 +689,7 @@ class BuilderSettings(BaseModel):
         return {
             "executor": self.executor,
             "image": self.image,
+            "images": self.images(),
             "claude_binary": self.claude_binary or "claude (PATH)",
             "proxy_image": self.proxy_image or self.image,
             "allow_hosts": list(self.allow_hosts),
@@ -1147,6 +1196,11 @@ class Settings(BaseSettings):
         refusal_p = self.provision_config.production_refusal()
         if refusal_p is not None:
             raise ValueError(f"{refusal_p.code}: {refusal_p.message}; {refusal_p.fix}")
+        if self.builder_executor == "docker":
+            # ADR-0061: an image that serves no language starts, then refuses every sealed
+            # build at run time — say so at start-up, not at the first run
+            for warning in self.builder.image_warnings():
+                log.warning("builder images (ADR-0061): %s", warning)
         if self.posture()["unsealed_prod_override"]:
             log.warning(
                 "%s=1: production runs UNSEALED (tests %s, builder %s) — every run's apparatus "
@@ -1284,6 +1338,7 @@ class Settings(BaseSettings):
                 "image": self.sandbox.image,
                 "tree": self.sandbox.tree,
                 "work_size": self.sandbox.work_size,
+                "allow_default_image": self.sandbox.allow_default_image,
             },
             "provision": self.provision_config.view(),
             "builder": self.builder.redacted(),

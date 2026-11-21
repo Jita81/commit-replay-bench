@@ -249,6 +249,27 @@ def test_worker_runs_total_and_sandbox_unavailable_after_harness_runs(
     assert FakeBuilder.briefs  # the first run built; the second never reached a builder
 
 
+def test_a_missing_sandbox_image_is_a_refusal_not_a_sandbox_outage(
+    registry: Any, h: Harness
+) -> None:
+    """ADR-0061: a repository with no sandbox_image under docker is refused
+    ``sandbox_image_missing`` — a configuration answer the operator fixes per repository,
+    not a failing sandbox — so it never feeds crb_sandbox_unavailable_total (and the
+    CrbSandboxFailingClosed alert over it). The run still counts as failed."""
+    from dataclasses import replace as dc_replace
+
+    from crb.core.execution import DockerSettings
+
+    h.worker.settings = dc_replace(
+        h.settings, executor="docker", docker=DockerSettings(image="base:1")
+    )
+    h.enqueue("replay")
+    done = h.run_one()
+    assert done.status == STATUS_FAILED and "sandbox_image_missing" in done.error
+    assert not sample(registry, "crb_sandbox_unavailable_total")
+    assert sample(registry, "crb_runs_total", kind="replay", status="failed") == 1
+
+
 def test_checkin_sets_the_queue_depth_gauge(registry: Any, h: Harness) -> None:
     h.enqueue("replay")
     h.enqueue("mine")

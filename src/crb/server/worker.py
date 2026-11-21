@@ -183,7 +183,8 @@ How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (g
               row with trial labels before it is chained → ``JobQueue.finish``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0005-fail-closed-docker-sandbox.md,
-              docs/adr/0012-builder-in-a-sealed-container.md, docs/adr/0050-context-set-arms.md
+              docs/adr/0012-builder-in-a-sealed-container.md, docs/adr/0050-context-set-arms.md,
+              docs/adr/0061-builder-image-by-language.md
 Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finish; the
               check-in row the health probe reads is ``WorkerRow`` in src/crb/store/models.py),
               src/crb/observability/metrics.py (the recorders, ``record_event`` on
@@ -284,7 +285,11 @@ from crb.builders.base import (
 from crb.builders.brief import ARM_S1, ContextEntry, S1Arm
 from crb.builders.budget import budget_for_rung, load_pricing, parse_rung
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
-from crb.builders.container import BuilderContainerSettings, UnconfirmedKill
+from crb.builders.container import (
+    BuilderContainerSettings,
+    BuilderImageMissing,
+    UnconfirmedKill,
+)
 from crb.builders.labeller import make_labeller
 from crb.core.campaign import REFUSAL_REQUIRED
 from crb.core.capability import PROJECTION_CLASS_SIZE, CapabilityMap
@@ -637,6 +642,26 @@ def _reaper_docker() -> str:
     return (settings.docker_binary if settings is not None else "") or "docker"
 
 
+#: ADR-0061: a docker run whose repository names no sandbox image is refused with this
+#: code unless the worker opts in to its default image with this variable.
+REFUSAL_SANDBOX_IMAGE_MISSING = "sandbox_image_missing"
+SANDBOX_ALLOW_DEFAULT_IMAGE_ENV = "CRB_SANDBOX__ALLOW_DEFAULT_IMAGE"
+
+
+class SandboxImageMissing(SandboxUnavailable):
+    """ADR-0061: no sandbox image for this repository (``sandbox_image_missing``). A
+    configuration refusal, not a sandbox that failed: the run fails closed as every
+    :class:`SandboxUnavailable` does, but is recorded as ``run.refused`` with its ``code``
+    and does not count toward ``crb_sandbox_unavailable_total`` (which pages through
+    ``CrbSandboxFailingClosed``) — as ``builder_image_missing`` does not."""
+
+    def __init__(self, repo: str, language: str, message: str) -> None:
+        self.code = REFUSAL_SANDBOX_IMAGE_MISSING
+        self.repo = repo
+        self.language = language
+        super().__init__(message)
+
+
 #: Row labels the worker stamps per rung (``_RunLedger``). Hashed like every label.
 LABEL_BUDGET_TIER = "budget_tier"
 LABEL_RUNG_INDEX = "rung_index"
@@ -922,9 +947,10 @@ class WorkerSettings:
     """Everything a worker needs, resolved once by the entrypoint.
 
     ``executor`` is the default kind (``local`` | ``docker``); a run may override
-    it in ``params.executor``. ``docker`` carries the sandbox image and caps; when
-    it is ``None`` and a docker run names no image (``params.image`` or the repo's
-    ``sandbox_image``), the run fails closed.
+    it in ``params.executor``. ``docker`` carries the sandbox caps and the worker's
+    default image; a docker run that names no image (``params.image`` or the repo's
+    ``sandbox_image``) fails closed unless ``sandbox_allow_default_image`` is on
+    (ADR-0061).
     """
 
     database_url: str = ""
@@ -936,11 +962,20 @@ class WorkerSettings:
     #: posture of every docker run, image or no image (ADR-0019 §7).
     sandbox_tree: str = TREE_COPY
     sandbox_work_size: str = "1g"
+    #: ADR-0061 (``CRB_SANDBOX__ALLOW_DEFAULT_IMAGE``, default off): a docker run for a
+    #: repository that names no ``sandbox_image`` (and no ``params.image``) may use the
+    #: worker's ``CRB_SANDBOX__IMAGE``. Off, such a run is refused, as the CLI refuses it;
+    #: on, the run records ``run.sandbox_default_image``.
+    sandbox_allow_default_image: bool = False
     worker_id: str = ""
     poll_s: float = 2.0
     heartbeat_s: float = 10.0
     stale_after_s: float = 120.0
     kinds: tuple[str, ...] = ()
+    #: The repository languages this worker serves (``CRB_WORKER_LANGUAGES``, canonical
+    #: values; empty = every language). A run whose repository's language no worker
+    #: serves stays queued (ADR-0061; ``JobQueue.claim_next``).
+    languages: tuple[str, ...] = ()
     keep_worktrees: bool = False
     #: Keep every graded attempt's patch, redacted and content-addressed, under
     #: ``<home>/evidence/patches`` (crb.core.patches) — ``CRB_RETENTION__PATCHES``.
@@ -1418,7 +1453,11 @@ class Worker:
         """Reclaim stale runs, claim one, execute it to a terminal status."""
         for r in self.queue.reclaim_stale(self.settings.stale_after_s):
             _LOG.warning("run %s reclaimed → %s", r.id[:8], r.status)
-        run = self.queue.claim_next(self.worker_id, kinds=self.settings.kinds or None)
+        run = self.queue.claim_next(
+            self.worker_id,
+            kinds=self.settings.kinds or None,
+            languages=self.settings.languages or None,
+        )
         if run is None:
             return None
         self.execute(run)
@@ -1950,6 +1989,25 @@ class Worker:
             _LOG.warning("run %s attempt settled: %s", run.id[:8], exc)
             emitter.emit("system", "run.finish_refused", status=StepStatus.ERROR, error=str(exc))
             return
+        except SandboxImageMissing as exc:
+            # ADR-0061: a configuration refusal — fails closed like any sandbox refusal, but
+            # is a run.refused with its code (as builder_image_missing is), not a sandbox
+            # that failed: it does not count toward crb_sandbox_unavailable_total or page
+            status = STATUS_FAILED
+            error = redact_and_cap(f"sandbox unavailable: {exc}", max_chars=1000)
+            counts = dict(ctx.counts) if ctx else {}
+            emitter.emit(
+                "system",
+                "run.refused",
+                status=StepStatus.ERROR,
+                error=error,
+                code=exc.code,
+                repo=exc.repo,
+                language=exc.language,
+                setting=SANDBOX_ALLOW_DEFAULT_IMAGE_ENV,
+            )
+            if run.kind == KIND_PROBE:
+                self._set_probe(run.repo, PROBE_FAILED, error)
         except SandboxUnavailable as exc:
             status = STATUS_FAILED
             error = redact_and_cap(f"sandbox unavailable: {exc}", max_chars=1000)
@@ -2911,6 +2969,7 @@ class Worker:
                 ctx.params,
                 tree=self.settings.sandbox_tree,
                 work_size=self.settings.sandbox_work_size,
+                allow_default_image=self.settings.sandbox_allow_default_image,
             )
         # The cancel token: a requested cancel kills the running test process (local) or
         # container (docker) instead of waiting for the wall-clock timeout. A docker kill
@@ -2921,6 +2980,17 @@ class Worker:
             cancel=lambda: self._cancelled(ctx),
             on_kill_unconfirmed=lambda kill: self._kill_unconfirmed(ctx, ctx.task_id, kill),
         )
+        if docker is not None and not (ctx.params.get("image") or ctx.config.sandbox_image):
+            # ADR-0061: the opt-in was used — the run says so, never quietly. After the
+            # executor is built, so the record names an image the run's sandbox runs in,
+            # never one whose executor failed to start
+            ctx.emit(
+                "system",
+                "run.sandbox_default_image",
+                image=docker.image,
+                language=ctx.config.language.value,
+                setting=SANDBOX_ALLOW_DEFAULT_IMAGE_ENV,
+            )
         ctx.emit("system", "run.executor", **ctx._executor.describe())
         return ctx._executor
 
@@ -3939,6 +4009,33 @@ class Worker:
             arm_set=ctxset.name if role == ROLE_CTX_ENTRIES else "",
         )
 
+    def _builder_env(self) -> Mapping[str, str] | None:
+        """The environment the builder posture is read from: the worker's own, with the
+        worker setting's executor over ``CRB_BUILDER__EXECUTOR`` when one is set."""
+        if not self.settings.builder_executor:
+            return None
+        return {**os.environ, f"{CONTAINER_ENV_PREFIX}EXECUTOR": self.settings.builder_executor}
+
+    def _builder_image_refused(self, ctx: RunContext) -> str:
+        """ADR-0061: the refusal sentence when the sealed builder has no image for this
+        run's language (``""`` when it has one, or builds on the host). Checked before any
+        task is qualified or any model is called; there is no fallback image."""
+        language = ctx.config.language.value
+        try:
+            container_settings_from_env(self._builder_env(), language=language)
+        except BuilderImageMissing as e:
+            ctx.emit(
+                "system",
+                "run.refused",
+                status=StepStatus.ERROR,
+                error=str(e),
+                code=e.code,
+                language=e.language,
+                variable=e.variable,
+            )
+            return str(e)
+        return ""
+
     def _run_replay(self, ctx: RunContext, *, mode: str) -> tuple[str, dict[str, Any], str]:
         run = ctx.run
         p = ctx.params
@@ -3959,6 +4056,10 @@ class Worker:
                     context_set=str(p.get("context_set")),
                 )
                 return STATUS_FAILED, dict(ctx.counts), why
+        # ADR-0061: refused before any task is qualified or any model is called
+        refused = self._builder_image_refused(ctx)
+        if refused:
+            return STATUS_FAILED, dict(ctx.counts), refused
         tasks = list(ctx_plan.tasks) if ctx_plan is not None else self._select_tasks(ctx)
         total = len(tasks)
         ctx.counts.update({"tasks": 0, "total": total, "rows": 0, "clean": 0})
@@ -4139,11 +4240,10 @@ class Worker:
         self.queue.set_apparatus(run.id, spec.apparatus().to_dict(), worker_id=self.worker_id)
         s1_author = self._s1_author(ctx, ladder, mode)
         # CRB_BUILDER__EXECUTOR=docker (ADR-0012), defaulted per env (ADR-0023): read once, so
-        # the builder runs in the container a reserved attempt's treatment names
+        # the builder runs in the container a reserved attempt's treatment names — the image
+        # the run's language names (ADR-0061; refused above when none does)
         container = container_settings_from_env(
-            {**os.environ, f"{CONTAINER_ENV_PREFIX}EXECUTOR": self.settings.builder_executor}
-            if self.settings.builder_executor
-            else None
+            self._builder_env(), language=ctx.config.language.value
         )
         if ctx_plan is not None and container is None:
             # ADR-0050 R10: a context-set run (control too) never builds on the host
@@ -5557,16 +5657,35 @@ def docker_settings_for(
     *,
     tree: str = TREE_COPY,
     work_size: str = "1g",
+    allow_default_image: bool = False,
 ) -> DockerSettings:
-    """The sandbox settings for one run: ``params.image`` > the repo's ``sandbox_image``
-    > the worker's configured image (``CRB_SANDBOX__IMAGE`` — the DEFAULT for a repository
-    that names none, as docs/DEPLOYMENT.md §2.1 says; until 2026-09-21 it silently overrode
-    every repository's own image, which is wrong the moment two toolchains share a worker);
-    caps come from the worker's settings. No image anywhere → :class:`SandboxUnavailable`
-    (raised by ``DockerSettings``). With no default image (``base`` is ``None``) the
-    worker's ``tree`` and ``work_size`` still apply — they are the deployment's posture,
-    not the image's."""
-    image = str(params.get("image") or "") or config.sandbox_image or (base.image if base else "")
+    """The sandbox settings for one run: ``params.image`` > the repo's ``sandbox_image``;
+    caps come from the worker's settings. A repository that names neither is refused
+    (:class:`SandboxUnavailable`, ``sandbox_image_missing``) as the CLI refuses it: the
+    worker's ``CRB_SANDBOX__IMAGE`` is one toolchain, and a Go repository graded in a
+    Python image fails for a reason that is not the builder's (ADR-0061). Only with
+    ``allow_default_image`` (``CRB_SANDBOX__ALLOW_DEFAULT_IMAGE``, off by default) does
+    the worker's image serve such a repository; the caller records that it did. With no
+    default image (``base`` is ``None``) the worker's ``tree`` and ``work_size`` still
+    apply — they are the deployment's posture, not the image's."""
+    image = str(params.get("image") or "") or config.sandbox_image
+    if not image:
+        if not allow_default_image or base is None:
+            raise SandboxImageMissing(
+                config.name,
+                config.language.value,
+                f"{REFUSAL_SANDBOX_IMAGE_MISSING}: repository {config.name!r} "
+                f"({config.language.value}) names no sandbox_image and the run passes no "
+                "image; set the repository's sandbox_image"
+                + (
+                    f", or start the worker with {SANDBOX_ALLOW_DEFAULT_IMAGE_ENV}=1 to use "
+                    "its CRB_SANDBOX__IMAGE"
+                    if base is not None
+                    else ""
+                )
+                + "; nothing was run",
+            )
+        image = base.image
     # ADR-0019 §7: the repository may choose how the tree is presented (a different posture)
     tree = config.sandbox_tree or (base.tree if base is not None else tree)
     if base is not None and image == base.image and tree == base.tree:

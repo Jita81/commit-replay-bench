@@ -171,6 +171,55 @@ def test_claim_filters_by_kind_and_repo(queue: JobQueue, factory: sessionmaker[S
     assert queue.claim_next("w", kinds=["mine"]) is not None
 
 
+def test_claim_filters_by_the_repository_language(
+    queue: JobQueue, factory: sessionmaker[Session]
+) -> None:
+    """ADR-0061: ``languages`` keeps the runs whose repository row's language is listed —
+    oldest first, still one atomic claim — and a run in a language nobody serves stays
+    queued. An empty or absent filter is every run, as before."""
+    with factory() as s:
+        s.add(Repo(name="g1", language="go", runner="go", clone_path="/g", config_json={}))
+        s.commit()
+    py = _enqueue(queue)
+    go = _enqueue(queue, repo="g1")
+    assert queue.claim_next("w", languages=["rust"]) is None
+    got = queue.claim_next("w-go", languages=["go"])
+    assert got is not None and got.id == go.id and got.worker_id == "w-go"
+    assert queue.claim_next("w-go", languages=["go"]) is None
+    assert queue.get(py.id).status == STATUS_QUEUED  # type: ignore[union-attr]
+    # back-compat: no filter (or an empty one) claims whatever is oldest
+    assert queue.claim_next("w", languages=[]) is not None
+    later = _enqueue(queue, repo="g1")
+    got = queue.claim_next("w", languages=None)
+    assert got is not None and got.id == later.id
+
+
+def test_the_language_filter_finalises_a_cancelled_run_it_serves_and_only_those(
+    queue: JobQueue, factory: sessionmaker[Session]
+) -> None:
+    """A queued run flagged for cancel is finalised ``cancelled`` by the claim that sees it,
+    and the claim moves on — under a language filter too. A flagged run in a language the
+    filter excludes is left for a worker that serves it."""
+    with factory() as s:
+        s.add(Repo(name="g1", language="go", runner="go", clone_path="/g", config_json={}))
+        s.commit()
+    flagged_py = _enqueue(queue)
+    flagged_go = _enqueue(queue, repo="g1")
+    live_py = _enqueue(queue)
+    with factory() as s:
+        for rid in (flagged_py.id, flagged_go.id):
+            row = s.get(Run, rid)
+            assert row is not None
+            row.cancel_requested = True
+        s.commit()
+    got = queue.claim_next("w-py", languages=["python"])
+    assert got is not None and got.id == live_py.id
+    assert queue.get(flagged_py.id).status == STATUS_CANCELLED  # type: ignore[union-attr]
+    assert queue.get(flagged_go.id).status == STATUS_QUEUED  # type: ignore[union-attr]
+    assert queue.claim_next("w-go", languages=["go"]) is None
+    assert queue.get(flagged_go.id).status == STATUS_CANCELLED  # type: ignore[union-attr]
+
+
 def test_claim_requires_worker_id(queue: JobQueue) -> None:
     with pytest.raises(ValueError):
         queue.claim_next("")

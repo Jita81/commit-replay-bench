@@ -188,7 +188,13 @@ class TestSettings:
         assert d["secret_key_configured"] is True
         assert d["oidc"]["client_secret_configured"] is True
         assert d["bootstrap_admin"] == {"username": "root", "password_configured": True}
-        assert d["sandbox"] == {"executor": "local", "image": "", "tree": "copy", "work_size": "1g"}
+        assert d["sandbox"] == {
+            "executor": "local",
+            "image": "",
+            "tree": "copy",
+            "work_size": "1g",
+            "allow_default_image": False,
+        }
         assert d["provision"]["enabled"] is False and "ca_bundle_configured" in d["provision"]
 
 

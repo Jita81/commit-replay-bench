@@ -3,6 +3,7 @@
     crb worker [--database-url URL] [--home DIR] [--executor local|docker]
                [--image IMAGE] [--worker-id ID] [--poll SECONDS] [--once]
                [--heartbeat SECONDS] [--stale-after SECONDS] [--kinds replay,blind]
+               [--languages python,go]
                [--metrics-host ADDR] [--metrics-port PORT]
                [--log-format json|text] [--log-level LEVEL]
 
@@ -15,9 +16,12 @@ Environment fallbacks: ``CRB_DATABASE_URL`` (see :func:`crb.store.db.database_ur
 deployment's keys — what compose and Helm set and the API's ``Settings.sandbox`` reads; the
 short forms ``CRB_EXECUTOR`` / ``CRB_SANDBOX_IMAGE`` are read when those are absent),
 ``CRB_WORKER_ID``, ``CRB_METRICS_HOST`` (default ``127.0.0.1``), ``CRB_METRICS_PORT``
-(default 9464; ``0`` = off) and ``CRB_METRICS_ENABLED``. Flags win over the environment.
-The image is the DEFAULT for a repository that names no ``sandbox_image`` of its own; a
-repository's image wins over it (``crb.server.worker.docker_settings_for``).
+(default 9464; ``0`` = off), ``CRB_METRICS_ENABLED`` and ``CRB_WORKER_LANGUAGES``. Flags win
+over the environment. A repository that names no ``sandbox_image`` of its own is refused under
+docker unless ``CRB_SANDBOX__ALLOW_DEFAULT_IMAGE=1`` lets the worker's image serve it
+(``crb.server.worker.docker_settings_for``; ADR-0061). ``--languages`` /
+``CRB_WORKER_LANGUAGES`` (a comma list; empty = every language) limits the runs this worker
+claims to repositories in those languages — one worker per toolchain.
 
 **Production refuses the unsealed posture** (ADR-0023). ``CRB_ENV`` (default ``prod``, as the
 API reads it) decides the defaults: in ``prod`` the test executor defaults to ``docker`` and the
@@ -63,7 +67,8 @@ How:          ``build_parser`` → ``settings_from_args`` (sets ``CRB_HOME`` for
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0023-production-refuses-the-unsealed-posture.md,
-              docs/adr/0029-the-audit-trail-is-hash-chained.md
+              docs/adr/0029-the-audit-trail-is-hash-chained.md,
+              docs/adr/0061-builder-image-by-language.md
 Works with:   src/crb/server/worker.py (``Worker`` / ``WorkerSettings`` — everything this
               file configures), src/crb/store/jobs.py (``RUN_KINDS`` for ``--kinds``),
               src/crb/server/unsealed_override.py (the override's start-up event),
@@ -96,12 +101,14 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
+from crb.builders.container import builder_image_warnings, unserved_languages
 from crb.core.execution import SANDBOX_TREES, TREE_COPY, DockerSettings, SandboxUnavailable
+from crb.core.spec import Language
 from crb.observability import metrics
 from crb.observability.logging import configure_logging
 from crb.observability.metrics import parse_metrics_port
@@ -119,7 +126,7 @@ from crb.server.settings import (
     unsealed_prod_refusal,
 )
 from crb.server.unsealed_override import OverrideRefused, record_unsealed_override
-from crb.server.worker import Worker, WorkerSettings
+from crb.server.worker import SANDBOX_ALLOW_DEFAULT_IMAGE_ENV, Worker, WorkerSettings
 from crb.server.worker_metrics import record_exposition
 from crb.store.events import events_head as events_head_of
 from crb.store.jobs import RUN_KINDS
@@ -143,6 +150,11 @@ SANDBOX_IMAGE_ENV = "CRB_SANDBOX__IMAGE"
 #: keeps the worktree itself read-only (a different posture). ``WORK_SIZE`` caps the copy.
 SANDBOX_TREE_ENV = "CRB_SANDBOX__TREE"
 SANDBOX_WORK_SIZE_ENV = "CRB_SANDBOX__WORK_SIZE"
+#: ADR-0061: off by default — a docker run for a repository with no ``sandbox_image`` is
+#: refused unless the worker's ``CRB_SANDBOX__IMAGE`` may serve it. The name is defined once
+#: in :mod:`crb.server.worker` (``SANDBOX_ALLOW_DEFAULT_IMAGE_ENV``) and imported above.
+#: ADR-0061: the repository languages this worker claims runs for (empty = all).
+WORKER_LANGUAGES_ENV = "CRB_WORKER_LANGUAGES"
 EXECUTOR_ENV = "CRB_EXECUTOR"
 IMAGE_ENV = "CRB_SANDBOX_IMAGE"
 WORKER_ID_ENV = "CRB_WORKER_ID"
@@ -180,8 +192,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--image",
         default="",
-        help="default sandbox image for --executor docker when a repository names none "
-        "(default: $CRB_SANDBOX__IMAGE, else $CRB_SANDBOX_IMAGE)",
+        help="sandbox image for --executor docker, used for a repository that names none "
+        f"only when ${SANDBOX_ALLOW_DEFAULT_IMAGE_ENV}=1 (default: $CRB_SANDBOX__IMAGE, else "
+        "$CRB_SANDBOX_IMAGE)",
     )
     p.add_argument("--worker-id", default="", help="stable worker identity (default: host-pid)")
     p.add_argument("--poll", type=float, default=2.0, help="seconds between polls when idle")
@@ -196,6 +209,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--kinds",
         default="",
         help=f"comma-separated run kinds to accept (default: all of {', '.join(RUN_KINDS)})",
+    )
+    p.add_argument(
+        "--languages",
+        default="",
+        help="comma-separated repository languages to claim runs for (default: "
+        f"${WORKER_LANGUAGES_ENV}, else every language: {', '.join(lang.value for lang in Language)})",
     )
     p.add_argument(
         "--metrics-host",
@@ -214,6 +233,40 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--log-format", choices=("json", "text"), default="json")
     p.add_argument("--log-level", default="INFO")
     return p
+
+
+def parse_languages(raw: str) -> tuple[str, ...]:
+    """``python,go`` → ``("python", "go")`` in canonical values (aliases such as ``golang``
+    accepted; repeats dropped). ``ValueError`` names an unknown language — a worker that
+    would claim nothing it can build must not start."""
+    out: list[str] = []
+    for item in raw.split(","):
+        if item.strip():
+            lang = Language.parse(item.strip()).value
+            if lang not in out:
+                out.append(lang)
+    return tuple(out)
+
+
+#: The API's own reading of an on/off setting (``Settings`` fields typed ``bool``): one
+#: parser for both processes, so the same environment cannot read on in one and off in
+#: the other (``t``/``y`` are on in both; ``yess`` fails both).
+_BOOL = TypeAdapter(bool)
+
+
+def parse_flag(name: str, raw: str) -> bool:
+    """An on/off variable read as the API's pydantic ``bool`` reads it (``1/true/t/yes/y/on``
+    or ``0/false/f/no/n/off``, any case); unset or empty = off. Anything else is a
+    ``ValueError`` naming the variable — a typo must not read as off."""
+    if not raw.strip():
+        return False
+    try:
+        return _BOOL.validate_python(raw.strip())
+    except ValidationError as exc:
+        raise ValueError(
+            f"{name} must be on or off as the API reads it (1/true/yes/on or "
+            f"0/false/no/off), got {raw!r}"
+        ) from exc
 
 
 def settings_from_args(
@@ -288,6 +341,26 @@ def settings_from_args(
     unknown = [k for k in kinds if k not in RUN_KINDS]
     if unknown:
         raise ValueError(f"unknown run kind(s) {unknown!r}; expected {RUN_KINDS}")
+    languages = parse_languages(
+        str(getattr(args, "languages", "") or "") or e.get(WORKER_LANGUAGES_ENV, "")
+    )
+    allow_default_image = parse_flag(
+        SANDBOX_ALLOW_DEFAULT_IMAGE_ENV, e.get(SANDBOX_ALLOW_DEFAULT_IMAGE_ENV, "")
+    )
+    if builder == SEALED_EXECUTOR:
+        # ADR-0061: a configuration that starts but refuses every sealed build it claims is
+        # said at start-up, not discovered one refused run at a time
+        for warning in builder_image_warnings(e):
+            log.warning("builder images (ADR-0061): %s", warning)
+        unserved = unserved_languages(languages, e)
+        if unserved:
+            log.warning(
+                "%s names %s, which no builder image serves: this worker claims those runs "
+                "and refuses each sealed build builder_image_missing — set %s",
+                WORKER_LANGUAGES_ENV,
+                ", ".join(unserved),
+                ", ".join(f"CRB_BUILDER__IMAGE_{lang.upper()}" for lang in unserved),
+            )
     port = parse_metrics_port(
         args.metrics_port if args.metrics_port is not None else shared.metrics_port
     )
@@ -301,11 +374,13 @@ def settings_from_args(
         docker=docker,
         sandbox_tree=tree,
         sandbox_work_size=work_size,
+        sandbox_allow_default_image=allow_default_image,
         worker_id=args.worker_id or e.get(WORKER_ID_ENV, ""),
         poll_s=float(args.poll),
         heartbeat_s=float(args.heartbeat),
         stale_after_s=float(args.stale_after),
         kinds=kinds,
+        languages=languages,
         keep_worktrees=bool(args.keep_worktrees),
         # the same CRB_GITHUB__* / CRB_FACTORY__* / CRB_INTAKE__* / CRB_METRICS_* the API reads
         # (pydantic-settings parses them)

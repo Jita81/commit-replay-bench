@@ -63,7 +63,8 @@ How:          ``SealedCheckout.create``: ``git archive <parent>`` → ``git init
               worker's reaper instead of losing them.
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
-              docs/adr/0005-fail-closed-docker-sandbox.md
+              docs/adr/0005-fail-closed-docker-sandbox.md,
+              docs/adr/0061-builder-image-by-language.md
 Works with:   src/crb/builders/sidecar.py (the internal network and the proxy container),
               src/crb/builders/egress_proxy.py (the sidecar's script, mounted read-only),
               src/crb/builders/adapter.py (the caller: ``sealed_build``),
@@ -75,7 +76,9 @@ Works with:   src/crb/builders/sidecar.py (the internal network and the proxy co
               ``overrides_for``), src/crb/core/deps.py (the builder binding it mounts)
 Tested by:    tests/test_builders_container.py, tests/test_builders_container_docker.py,
               tests/test_container_egress.py
-Touch when:   onboarding a repository whose tests need a toolchain cache — add it to
+Touch when:   onboarding a repository in a language no builder image serves — set
+              ``CRB_BUILDER__IMAGE_<LANG>`` (``builder_image_for``; ADR-0061), never a
+              fallback; onboarding a repository whose tests need a toolchain cache — add it to
               ``CRB_BUILDER__*`` ``extra_ro_mounts`` / the builder image, never a mount of
               ``docker.sock``, ``/`` or ``$HOME`` (refused here); a new host the model
               endpoint needs goes in ``CRB_BUILDER__ALLOW_HOSTS`` (docs/DEPLOYMENT.md); a
@@ -97,7 +100,7 @@ import subprocess
 import tarfile
 import tempfile
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -123,6 +126,7 @@ from crb.core.execution import (
     bundle_mount_args,
 )
 from crb.core.git import GitError, GitRepo
+from crb.core.spec import Language
 from crb.core.workspace import HARNESS_SYMLINK, Workspace
 
 #: Where the sealed checkout is mounted inside the builder container.
@@ -156,6 +160,136 @@ def is_secret_env_name(name: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Which builder image serves which language
+# ---------------------------------------------------------------------------
+
+#: The run-refusal code (``run.refused``) for a run whose repository language no builder
+#: image serves. Nothing is qualified or built; there is no fallback image.
+REFUSAL_BUILDER_IMAGE_MISSING = "builder_image_missing"
+
+
+class BuilderImageMissing(SandboxUnavailable):
+    """No builder image serves this run's language. Carries the language and the
+    variable the operator sets; the message names both. A run is refused, never built
+    in another language's image: a Go toolchain is not in the Python builder image."""
+
+    def __init__(self, language: str, variable: str, detail: str = "") -> None:
+        self.language = language
+        self.variable = variable
+        self.code = REFUSAL_BUILDER_IMAGE_MISSING
+        hint = f"; {detail}" if detail else ""
+        super().__init__(
+            f"{REFUSAL_BUILDER_IMAGE_MISSING}: no builder image serves language {language!r} "
+            f"— set {variable} (or list {language!r} in {ENV_PREFIX}IMAGE_LANGUAGES to use "
+            f"{ENV_PREFIX}IMAGE){hint}; nothing was built"
+        )
+
+
+def image_variable(language: str) -> str:
+    """The per-language variable: ``CRB_BUILDER__IMAGE_<LANG>`` (``GO``, ``PYTHON``…)."""
+    return f"{ENV_PREFIX}IMAGE_{language.strip().upper()}"
+
+
+def image_languages(env: Mapping[str, str]) -> frozenset[str]:
+    """The languages ``CRB_BUILDER__IMAGE`` serves (``CRB_BUILDER__IMAGE_LANGUAGES``, a
+    comma list; aliases such as ``py`` or ``golang`` are accepted). An unknown name is
+    a configuration error (:class:`SandboxUnavailable`), never silently dropped."""
+    raw = env.get(f"{ENV_PREFIX}IMAGE_LANGUAGES", "")
+    out: set[str] = set()
+    for item in raw.split(","):
+        if not item.strip():
+            continue
+        try:
+            out.add(Language.parse(item.strip()).value)
+        except ValueError as exc:
+            raise SandboxUnavailable(f"{ENV_PREFIX}IMAGE_LANGUAGES: {exc}") from exc
+    return frozenset(out)
+
+
+def builder_image_for(language: str, env: Mapping[str, str] | None = None) -> tuple[str, str]:
+    """``(image, variable)`` for a run in ``language``: ``CRB_BUILDER__IMAGE_<LANG>`` when
+    set; else ``CRB_BUILDER__IMAGE`` when ``CRB_BUILDER__IMAGE_LANGUAGES`` lists the
+    language; else :class:`BuilderImageMissing`. There is no third rule: an image that
+    does not name the language is never chosen for it."""
+    e = os.environ if env is None else env
+    lang = Language.parse(language).value
+    variable = image_variable(lang)
+    own = e.get(variable, "").strip()
+    if own:
+        return own, variable
+    shared = e.get(f"{ENV_PREFIX}IMAGE", "").strip()
+    if lang in image_languages(e):
+        if shared:
+            return shared, f"{ENV_PREFIX}IMAGE"
+        raise BuilderImageMissing(
+            lang, variable, f"{ENV_PREFIX}IMAGE_LANGUAGES lists it but {ENV_PREFIX}IMAGE is empty"
+        )
+    detail = (
+        f"{ENV_PREFIX}IMAGE is set but {ENV_PREFIX}IMAGE_LANGUAGES does not list it"
+        if shared
+        else ""
+    )
+    raise BuilderImageMissing(lang, variable, detail)
+
+
+def builder_images(env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Every language a builder image serves, ``{language: image}`` — what
+    ``crb doctor`` checks is present. Languages without an image are absent."""
+    e = os.environ if env is None else env
+    out: dict[str, str] = {}
+    for lang in Language:
+        try:
+            out[lang.value] = builder_image_for(lang.value, e)[0]
+        except BuilderImageMissing:
+            continue
+    return out
+
+
+def builder_image_warnings(env: Mapping[str, str] | None = None) -> list[str]:
+    """A configuration that starts but builds nothing it looks like it builds: images are
+    named but no language resolves to one (``CRB_BUILDER__IMAGE`` with no language listed
+    in ``CRB_BUILDER__IMAGE_LANGUAGES`` and no ``CRB_BUILDER__IMAGE_<LANG>``), or a language
+    list with no ``CRB_BUILDER__IMAGE`` behind it. Every run such a configuration would
+    serve is refused ``builder_image_missing``; the API and the worker log these at
+    start-up and ``crb doctor``'s builder probe reports ``degraded``. ``[]`` when there is
+    nothing to say. (``CRB_BUILDER__IMAGE`` beside per-language images and no list is not a
+    warning: it is then the proxy image and the doctor's view, not a builder image.)"""
+    e = os.environ if env is None else env
+    shared = e.get(f"{ENV_PREFIX}IMAGE", "").strip()
+    try:
+        listed = image_languages(e)
+    except SandboxUnavailable as exc:
+        return [str(exc)]
+    out: list[str] = []
+    orphaned = sorted(lang for lang in listed if not e.get(image_variable(lang), "").strip())
+    if orphaned and not shared:
+        out.append(
+            f"{ENV_PREFIX}IMAGE_LANGUAGES lists {', '.join(orphaned)} but "
+            f"{ENV_PREFIX}IMAGE is empty: those runs are refused builder_image_missing"
+        )
+    if not builder_images(e):
+        why = (
+            f"{ENV_PREFIX}IMAGE={shared!r} is set but {ENV_PREFIX}IMAGE_LANGUAGES lists no "
+            "language for it"
+            if shared
+            else "no image is set"
+        )
+        out.append(
+            f"no builder image serves any language ({why}): set {ENV_PREFIX}IMAGE_<LANG>, or "
+            f"list the languages {ENV_PREFIX}IMAGE serves in {ENV_PREFIX}IMAGE_LANGUAGES "
+            "(e.g. python); until then every sealed build is refused builder_image_missing"
+        )
+    return out
+
+
+def unserved_languages(languages: Iterable[str], env: Mapping[str, str] | None = None) -> list[str]:
+    """The ``languages`` (a worker's ``CRB_WORKER_LANGUAGES``) no builder image serves — a
+    worker that names one claims those runs only to refuse each sealed build."""
+    served = builder_images(env)
+    return [lang for lang in languages if lang not in served]
+
+
+# ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
 
@@ -164,8 +298,12 @@ def is_secret_env_name(name: str) -> bool:
 class BuilderContainerSettings:
     """The worker's builder-container posture (``CRB_BUILDER__*``).
 
-    ``image`` is the builder image (``deploy/Dockerfile.builder``); ``proxy_image``
-    is the sidecar's (defaults to ``image`` — it only needs ``python3``);
+    ``image`` is the builder image (``deploy/Dockerfile.builder``), resolved per run
+    from the repository's language (:func:`builder_image_for`); ``proxy_image`` is the
+    sidecar's — it only needs ``python3``. :meth:`from_env` reads ``PROXY_IMAGE``, else
+    ``CRB_BUILDER__IMAGE`` (the Python builder image in the shipped layout) whatever the
+    run's language, else the run's own image: the Go and Node builder images have no
+    ``python3``, so a deployment with only per-language images sets ``PROXY_IMAGE``;
     ``allow_hosts`` the egress allowlist (``host`` or ``host:port``; empty ⇒ the
     builder runs with **no** network at all and no sidecar); ``egress_network`` the
     docker network the sidecar uses to reach the endpoint (``bridge`` by default).
@@ -188,7 +326,10 @@ class BuilderContainerSettings:
 
     def __post_init__(self) -> None:
         if not self.image.strip():
-            raise SandboxUnavailable("builder executor 'docker' requires CRB_BUILDER__IMAGE")
+            raise SandboxUnavailable(
+                "builder executor 'docker' requires CRB_BUILDER__IMAGE or a "
+                "CRB_BUILDER__IMAGE_<LANG>"
+            )
         object.__setattr__(self, "image", self.image.strip())
         object.__setattr__(self, "proxy_image", (self.proxy_image or self.image).strip())
         hosts = tuple(h.strip() for h in self.allow_hosts if str(h).strip())
@@ -219,9 +360,19 @@ class BuilderContainerSettings:
         return bool(self.allow_hosts)
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str] | None = None) -> BuilderContainerSettings | None:
+    def from_env(
+        cls, env: Mapping[str, str] | None = None, *, language: str | None = None
+    ) -> BuilderContainerSettings | None:
         """``None`` unless ``CRB_BUILDER__EXECUTOR=docker``; otherwise the settings, or
-        :class:`SandboxUnavailable` when they are incomplete (fail closed, never host)."""
+        :class:`SandboxUnavailable` when they are incomplete (fail closed, never host).
+
+        With ``language`` (a run's repository language) the image is
+        :func:`builder_image_for` — :class:`BuilderImageMissing` when no image serves it.
+        Without it (the reaper's binary, the doctor's posture) the image is
+        ``CRB_BUILDER__IMAGE`` or else the first per-language image; that view never
+        builds a run. The proxy image is ``PROXY_IMAGE``, else ``CRB_BUILDER__IMAGE``, else
+        the run's image — so a Go run's sidecar is not the Go image (no ``python3``) when
+        a Python ``CRB_BUILDER__IMAGE`` is configured, and the doctor checks the same one."""
         e = os.environ if env is None else env
         kind = e.get(f"{ENV_PREFIX}EXECUTOR", "").strip().lower()
         if kind in {"", EXECUTOR_HOST, "local"}:
@@ -237,9 +388,13 @@ class BuilderContainerSettings:
         hosts_raw = get("ALLOW_HOSTS", ",".join(DEFAULT_ALLOW_HOSTS))
         hosts = tuple(h.strip() for h in hosts_raw.split(",") if h.strip())
         pids = get("PIDS_LIMIT")
+        if language is not None:
+            image = builder_image_for(language, e)[0]
+        else:
+            image = get("IMAGE") or next(iter(builder_images(e).values()), "")
         return cls(
-            image=get("IMAGE"),
-            proxy_image=get("PROXY_IMAGE"),
+            image=image,
+            proxy_image=get("PROXY_IMAGE") or get("IMAGE"),
             allow_hosts=hosts,
             egress_network=get("EGRESS_NETWORK", "bridge") or "bridge",
             memory=get("MEMORY", "4g") or "4g",
@@ -1089,11 +1244,24 @@ def builder_executor(
 def probe_builder_container(
     settings: BuilderContainerSettings | None = None,
 ) -> tuple[str, str]:
-    """``("up" | "down" | "off", detail)`` for ``crb doctor``: the daemon answers, the
-    builder image and the proxy image are present. ``off`` when the worker's posture
-    is host execution. Never raises."""
+    """``("up" | "degraded" | "down" | "off", detail)`` for ``crb doctor``: the daemon
+    answers, every per-language builder image (:func:`builder_images`) and the proxy image
+    each of those languages' runs would start (:meth:`BuilderContainerSettings.from_env`
+    with that language — the runtime's own rule) are present. ``degraded`` when they are
+    but the configuration serves no language it looks like it serves
+    (:func:`builder_image_warnings`): those runs are refused ``builder_image_missing``.
+    ``off`` when the worker's posture is host execution. Never raises."""
+    warnings: list[str] = []
     try:
         s = settings if settings is not None else BuilderContainerSettings.from_env()
+        served = builder_images() if settings is None else {}
+        proxies = [s.proxy_image] if s is not None else []
+        for lang in served:
+            per_run = BuilderContainerSettings.from_env(language=lang)
+            if per_run is not None:
+                proxies.append(per_run.proxy_image)
+        if settings is None:
+            warnings = builder_image_warnings()
     except SandboxUnavailable as exc:
         return "down", str(exc)
     if s is None:
@@ -1102,13 +1270,21 @@ def probe_builder_container(
         ex = DockerExecutor(
             DockerSettings(image=s.image, user=s.user, docker_binary=s.docker_binary)
         )
-        ex.require_image(s.image)
+        for image in dict.fromkeys([s.image, *served.values()]):
+            ex.require_image(image)
         if s.networked:
-            ex.require_image(s.proxy_image)
+            for proxy in dict.fromkeys(proxies):
+                ex.require_image(proxy)
     except SandboxUnavailable as exc:
         return "down", str(exc)
     hosts = ", ".join(s.allow_hosts) if s.networked else "no network"
-    return "up", f"image {s.image}; proxy {s.proxy_image}; egress → {hosts}"
+    langs = ", ".join(f"{k}={v}" for k, v in served.items())
+    images = f"images {langs}" if langs else f"image {s.image}"
+    proxy = ", ".join(dict.fromkeys(proxies))
+    detail = f"{images}; proxy {proxy}; egress → {hosts}"
+    if warnings:
+        return "degraded", f"{detail}; " + "; ".join(warnings)
+    return "up", detail
 
 
 __all__ = [
@@ -1120,9 +1296,11 @@ __all__ = [
     "PROXY_PORT",
     "PROXY_SCRIPT_INSIDE",
     "PROXY_START_TIMEOUT_S",
+    "REFUSAL_BUILDER_IMAGE_MISSING",
     "SEALABLE_BUILDERS",
     "WORKDIR",
     "BuilderContainerSettings",
+    "BuilderImageMissing",
     "Change",
     "ContainerSession",
     "CopyBack",
@@ -1131,10 +1309,16 @@ __all__ = [
     "UnconfirmedKill",
     "builder_deps_view",
     "builder_executor",
+    "builder_image_for",
+    "builder_image_warnings",
+    "builder_images",
     "builder_run_args",
     "client_env",
     "container_env",
     "harness_link_mounts",
+    "image_languages",
+    "image_variable",
     "is_secret_env_name",
     "probe_builder_container",
+    "unserved_languages",
 ]

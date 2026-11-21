@@ -24,3 +24,9 @@ data:
   # every build ran on the host. Empty = the env's default (docker in prod).
   CRB_BUILDER__EXECUTOR: {{ .Values.worker.builder.executor | toString | quote }}
   CRB_BUILDER__IMAGE: {{ .Values.worker.builder.image | toString | quote }}
+  # ADR-0061: the builder image is chosen per run from the repository's language —
+  # CRB_BUILDER__IMAGE_<LANG>, else CRB_BUILDER__IMAGE for the languages listed here.
+  CRB_BUILDER__IMAGE_LANGUAGES: {{ .Values.worker.builder.imageLanguages | toString | quote }}
+  {{- range $lang, $img := .Values.worker.builder.images }}
+  CRB_BUILDER__IMAGE_{{ $lang | upper }}: {{ $img | toString | quote }}
+  {{- end }}

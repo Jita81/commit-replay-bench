@@ -110,6 +110,9 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            # ADR-0061: the repository languages this worker claims runs for (empty = all).
+            - name: CRB_WORKER_LANGUAGES
+              value: {{ .Values.worker.languages | toString | quote }}
             # The worker's own /metrics: the build / grade / cost / delivery series live in
             # this process (the api's /metrics carries HTTP + ledger only). 0 = off. The
             # worker binds loopback by default; in a pod it must listen on every interface
