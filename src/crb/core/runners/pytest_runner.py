@@ -93,9 +93,11 @@ _PYTEST_STOP = re.compile(
 )
 #: The result line every finished session prints (``2 passed in 0.10s``, ``no tests ran in
 #: 0.01s``, ``1 failed, 1 error in 75.20s (0:01:15)``, an old pytest's ``in 0.12 seconds``),
-#: with or without the ``=`` rule.
+#: with or without the ``=`` rule. pytest 9 counts subtests in it with two words after the
+#: number (``2 passed, 3 subtests passed in 0.00s``), so a count may carry ``subtests`` before
+#: its outcome word (P-835).
 _PYTEST_RESULT = re.compile(
-    r"^=*\s*(?:no tests ran|\d+ [a-z]+(?:, \d+ [a-z]+)*)"
+    r"^=*\s*(?:no tests ran|\d+ (?:subtests )?[a-z]+(?:, \d+ (?:subtests )?[a-z]+)*)"
     r"(?: in \d+(?:\.\d+)? ?s(?:econds)?(?: \(\d+:\d\d:\d\d\))?)?\s*=*\s*$",
     re.MULTILINE,
 )
