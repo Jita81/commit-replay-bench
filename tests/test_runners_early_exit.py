@@ -23,7 +23,8 @@ What it is:   The suite for runs whose test process stopped before every test re
 What it does: Pins that the Go parser names a test that started and never finished and makes
               the run unattributed; that a Go package which passed without its binary's own
               ``PASS`` line is unattributed; that a pytest session that was interrupted, exited
-              early or printed no summary is unattributed; and, end to end on real toolchains,
+              early or printed no summary is unattributed; that a pytest result line which
+              counts subtests is a finished session's; and, end to end on real toolchains,
               that a patch doing any of these never grades clean.
 How:          Canned ``go test -json`` streams and pytest outputs for the parsers; ``gorepo``
               qualified by the real miner and graded by ``grade`` on a ``LocalExecutor``;
@@ -367,3 +368,72 @@ def test_a_pytest_exit_code_other_than_0_or_1_is_unattributed(rc: int, out: str)
     assert run.parse_error == (
         f"unattributed failure (pytest stopped early: exit code {rc}; later tests never ran)"
     )
+
+
+# ---------------------------------------------------------------------------
+# pytest: a result line that counts subtests (P-835)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "1148 passed, 181 skipped, 22 subtests passed in 3.12s",
+        "476 passed, 24 subtests passed in 0.37s",
+        "2 passed, 3 subtests passed in 0.00s",
+        "======== 2 passed, 3 subtests passed in 0.00s ========",
+    ],
+)
+def test_a_result_line_that_counts_subtests_is_a_finished_session(line: str) -> None:
+    """pytest 9 counts subtests in its result line with two words after the number. A session
+    that exits 0 with that line did finish: it is green and carries no parse error."""
+    runner = get_runner(RepoConfig(name="pyfix", language=Language.PYTHON, runner="pytest"))
+    run = runner.parse(ExecResult(0, f"....  [100%]\n{line}\n", ""), Path("."))
+    assert run.parse_error == ""
+    assert run.green
+
+
+@pytest.mark.parametrize(
+    "out",
+    [
+        # unittest ``subTest``: the parent is listed PASSED and the subtest only as SUBFAILED
+        (
+            "PASSED tests/test_s.py::T::test_sub\n"
+            "SUBFAILED(i=1) tests/test_s.py::T::test_sub - AssertionError: 1 == 1\n"
+            "1 failed, 3 passed, 1 skipped, 3 subtests passed in 0.01s\n"
+        ),
+        # the ``subtests`` fixture: the parent is listed FAILED as well
+        (
+            "SUBFAILED[m] (i=1) tests/test_s.py::test_fx_fail - assert 1 == 0\n"
+            "FAILED tests/test_s.py::test_fx_fail - contains 1 failed subtest\n"
+            "2 failed, 2 passed, 3 subtests passed in 0.01s\n"
+        ),
+    ],
+)
+def test_a_session_with_a_failing_subtest_is_never_green(out: str) -> None:
+    """A failed session's result line counts subtests too. Recognising the line changes nothing
+    about the verdict: exit code 1 is never green."""
+    runner = get_runner(RepoConfig(name="pyfix", language=Language.PYTHON, runner="pytest"))
+    run = runner.parse(ExecResult(1, out, ""), Path("."))
+    assert run.returncode == 1
+    assert run.green is False
+
+
+@pytest.mark.parametrize(
+    "out",
+    [
+        "....  [ 50%]\n",
+        "....  [100%]\nsubtests passed\n",
+        "....  [100%]\npassed in 0.10s\n",
+    ],
+)
+def test_exit_zero_without_a_result_line_is_still_unattributed(out: str) -> None:
+    """The words of a result line are not a result line: with no count and no ``no tests ran``,
+    exit code 0 still reads as a session that never finished."""
+    runner = get_runner(RepoConfig(name="pyfix", language=Language.PYTHON, runner="pytest"))
+    run = runner.parse(ExecResult(0, out, ""), Path("."))
+    assert run.parse_error == (
+        "unattributed failure (pytest exited 0 without reporting a result: the session "
+        "never finished)"
+    )
+    assert run.green is False
